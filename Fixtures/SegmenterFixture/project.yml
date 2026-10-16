@@ -1,0 +1,47 @@
+# SegmenterFixture — a subject app for SimWalk's segmenter and the form rules that read its sections.
+#
+# A sailing log on fixed data, one screen per thing the segmenter has to get right: `Log` (an untitled lead,
+# three headed sections, a row with a subtitle), `Passages` (three headed sections and an empty-state one
+# below the fold) and a passage's detail (a navigation bar, a real line chart over a time-of-day axis, a chart
+# card whose plot collapses, a comparison running below the fold), and under `Boat` three detail screens whose
+# charts carry the other axis styles. Launched with `-SegmenterFixtureLaterWeek` the app shows another week:
+# the same sections over other figures, dates and list lengths. Nothing reads the clock or a random source,
+# so a capture of one state is the same tree every time.
+#
+# `segmenter.walkbook.json` beside this file walks every screen the segmenter tests read; README.md says
+# which capture became which test fixture.
+#
+# A project of its own, not a target in `Runner/project.yml`, for the reason PermissionFixture's is. The
+# committed `.xcodeproj` builds without XcodeGen; this file documents how it was made. Build and walk:
+#     xcodegen generate
+#     xcodebuild -project SegmenterFixture.xcodeproj -scheme SegmenterFixture \
+#       -destination 'id=<udid>' -derivedDataPath ../../.build/segmenter-dd build
+#     xcrun simctl install <udid> ../../.build/segmenter-dd/Build/Products/Debug-iphonesimulator/SegmenterFixture.app
+#     simwalk walk segmenter.walkbook.json --output <output>.simwalk --device <udid>
+name: SegmenterFixture
+
+options:
+  bundleIdPrefix: dev.simwalk
+  deploymentTarget:
+    iOS: "18.0"
+
+targets:
+  SegmenterFixture:
+    type: application
+    platform: iOS
+    sources:
+      - path: SegmenterFixture
+    info:
+      path: SegmenterFixture/Info.plist
+      properties:
+        CFBundleDisplayName: Logbook
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.simwalk.segmenter-fixture
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""

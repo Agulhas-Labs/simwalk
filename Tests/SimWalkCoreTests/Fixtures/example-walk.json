@@ -1,0 +1,155 @@
+{
+  "name": "example-validation",
+  "appBundleID": "dev.simwalk.route-fixture",
+  "screens": [
+    {
+      "id": "hub",
+      "expect": "hub-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        },
+        {
+          "theme": "dark",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        },
+        {
+          "theme": "dark",
+          "dynamicTypeSize": "UICTContentSizeCategoryAccessibilityXL",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ],
+      "notes": "The Hub tab's root, top of scroll."
+    },
+    {
+      "id": "hub-form",
+      "expect": "form-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open form"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        },
+        {
+          "theme": "dark",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ],
+      "notes": "The Open form link pushes the Form screen."
+    },
+    {
+      "id": "rows",
+      "expect": "rows-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Rows"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        },
+        {
+          "theme": "dark",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ],
+      "notes": "The Rows tab's root."
+    },
+    {
+      "id": "rows-partly-covered",
+      "expect": "rows-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Rows"
+          }
+        },
+        {
+          "scrollTo": {
+            "label": "Partly covered row"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        },
+        {
+          "theme": "dark",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ],
+      "notes": "A row partly under the tab bar, reached by scrolling."
+    },
+    {
+      "id": "hub-form-return",
+      "expect": "hub-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open form"
+          }
+        },
+        {
+          "back": {}
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ],
+      "notes": "Proves the pop restores the Hub rather than a re-entered copy of it."
+    }
+  ]
+}

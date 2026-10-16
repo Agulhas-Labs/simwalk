@@ -1,0 +1,174 @@
+[
+  {
+    "testIdentifier": "WalkRunner/testMeasure()",
+    "testIdentifierURL": "test://com.apple.xcode/WalkRunner/WalkRunner/WalkRunnerTests/testMeasure",
+    "testRuns": [
+      {
+        "device": {
+          "deviceId": "00008000-0000000000000000",
+          "deviceName": "iPad"
+        },
+        "metrics": [
+          {
+            "displayName": "Duration (ApplicationFirstFramePresentationResponsive)",
+            "identifier": "com.apple.dt.XCTMetric_ApplicationLaunch-ApplicationFirstFramePresentationResponsive.duration",
+            "measurements": [
+              0.307,
+              0.298,
+              0.41
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "s"
+          },
+          {
+            "displayName": "CPU Time (Preferences)",
+            "identifier": "com.apple.dt.XCTMetric_CPU-com.apple.Preferences.time",
+            "measurements": [
+              1.349,
+              1.347,
+              1.32
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "s"
+          },
+          {
+            "displayName": "CPU Cycles (Preferences)",
+            "identifier": "com.apple.dt.XCTMetric_CPU-com.apple.Preferences.cycles",
+            "measurements": [
+              4546377.773,
+              4513022.933,
+              4449385.33
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "kC"
+          },
+          {
+            "displayName": "CPU Instructions Retired (Preferences)",
+            "identifier": "com.apple.dt.XCTMetric_CPU-com.apple.Preferences.instructions_retired",
+            "measurements": [
+              12055709.006,
+              12072113.678,
+              12001996.22
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "kI"
+          },
+          {
+            "displayName": "Memory Peak Physical (Preferences)",
+            "identifier": "com.apple.dt.XCTMetric_Memory-com.apple.Preferences.physical_peak",
+            "measurements": [
+              65372.808,
+              63963.784,
+              63619.696
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "kB"
+          },
+          {
+            "displayName": "Memory Physical (Preferences)",
+            "identifier": "com.apple.dt.XCTMetric_Memory-com.apple.Preferences.physical",
+            "measurements": [
+              61932.168,
+              59998.856,
+              59982.448
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "kB"
+          },
+          {
+            "displayName": "Absolute Memory Physical (Preferences)",
+            "identifier": "com.apple.dt.XCTMetric_Memory-com.apple.Preferences.physical_absolute",
+            "measurements": [
+              61932.168,
+              59998.856,
+              59982.448
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "kB"
+          },
+          {
+            "displayName": "Clock Monotonic Time",
+            "identifier": "com.apple.dt.XCTMetric_Clock.time.monotonic",
+            "measurements": [
+              5.711,
+              5.7,
+              5.679
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "s"
+          },
+          {
+            "displayName": "Duration (NavigationTransition)",
+            "identifier": "com.apple.dt.XCTMetric_OSSignpost-NavigationTransition.duration",
+            "measurements": [
+              0.581,
+              0.58,
+              0.577
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "s"
+          },
+          {
+            "displayName": "Frame Rate (NavigationTransition)",
+            "identifier": "com.apple.dt.XCTMetric_OSSignpost-NavigationTransition.animation.frame.rate",
+            "measurements": [
+              106.774,
+              103.506,
+              103.939
+            ],
+            "polarity": "prefers larger",
+            "unitOfMeasurement": "fps"
+          },
+          {
+            "displayName": "Number of Hitches (NavigationTransition)",
+            "identifier": "com.apple.dt.XCTMetric_OSSignpost-NavigationTransition.animation.hitch.number",
+            "measurements": [
+              0,
+              0,
+              0
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "hitches"
+          },
+          {
+            "displayName": "Hitch Time Ratio (NavigationTransition)",
+            "identifier": "com.apple.dt.XCTMetric_OSSignpost-NavigationTransition.animation.hitch.time.ratio",
+            "measurements": [
+              0,
+              0,
+              0
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "ms per s"
+          },
+          {
+            "displayName": "Hitches Total Duration (NavigationTransition)",
+            "identifier": "com.apple.dt.XCTMetric_OSSignpost-NavigationTransition.animation.hitches.total.duration",
+            "measurements": [
+              0,
+              0,
+              0
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "ms"
+          },
+          {
+            "displayName": "Frame Count (NavigationTransition)",
+            "identifier": "com.apple.dt.XCTMetric_OSSignpost-NavigationTransition.animation.frame.count",
+            "measurements": [
+              0,
+              0,
+              0
+            ],
+            "polarity": "prefers larger",
+            "unitOfMeasurement": "frames"
+          }
+        ],
+        "testPlanConfiguration": {
+          "configurationId": "1",
+          "configurationName": "Test Scheme Action"
+        }
+      }
+    ]
+  }
+]

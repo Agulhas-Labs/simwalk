@@ -1,0 +1,29 @@
+{
+  "name": "permission-fixture-own-allow",
+  "appBundleID": "dev.simwalk.permission-fixture",
+  "screens": [
+    {
+      "id": "own-allow-page",
+      "notes": "SimWalk#39 scenario A: the page the tap pushes is the app's own, so the systemTap has no sheet to answer and must be refused.",
+      "route": [
+        { "tap": { "label": "Show own page" } },
+        { "systemTap": { "label": "Allow" } }
+      ],
+      "states": [{ "theme": "light", "arguments": ["-ownAllowPage"] }]
+    },
+    {
+      "id": "sheets-over-own-page",
+      "notes": "The same app-own page under HealthKit's sheet and the notifications alert, every systemTap of which must land.",
+      "route": [
+        { "tap": { "label": "Show own page" } },
+        { "tap": { "label": "Ask for permissions" } },
+        { "systemTap": { "label": "UIA.Health.AuthSheet.AllCategoryButton" } },
+        { "systemTap": { "label": "UIA.Health.Allow.Button" } },
+        { "systemTap": { "label": "Past 30 Days and Future Data" } },
+        { "systemTap": { "label": "Allow" } },
+        { "systemTap": { "label": "Allow" } }
+      ],
+      "states": [{ "theme": "light", "arguments": ["-ownAllowPage"] }]
+    }
+  ]
+}

@@ -1,0 +1,410 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		9F198979D1940DBD53F9E6F3 /* FailureSpecimenUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CEEDA4A490E0CFEB2CCA00E /* FailureSpecimenUITests.swift */; };
+		D1AC34FB8062BF5262AD20E4 /* TabsRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130C776615CA0502700FFDDC /* TabsRoot.swift */; };
+		E49F77C264CE4121EE227051 /* RouteFixtureApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C381B9938D4797764C976755 /* RouteFixtureApp.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		02AA3893B7210F6C6BC665F0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 989C3D7B190EC719AA935068 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3E18EFC4D5EDDEE1B81B19B2;
+			remoteInfo = RouteFixture;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		130C776615CA0502700FFDDC /* TabsRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabsRoot.swift; sourceTree = "<group>"; };
+		1CEEDA4A490E0CFEB2CCA00E /* FailureSpecimenUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailureSpecimenUITests.swift; sourceTree = "<group>"; };
+		274E18F05B62645FE58448F1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		2D6EB6B98A8C214A20E71ED5 /* RouteFixtureFailureSpecimen.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = RouteFixtureFailureSpecimen.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AAA785A543D1E4EF9C7F133F /* RouteFixture.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RouteFixture.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C381B9938D4797764C976755 /* RouteFixtureApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteFixtureApp.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1665357FB6ADA2C17230A106 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AAA785A543D1E4EF9C7F133F /* RouteFixture.app */,
+				2D6EB6B98A8C214A20E71ED5 /* RouteFixtureFailureSpecimen.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		52F8F3D514B29DC496B9D82F /* RouteFixture */ = {
+			isa = PBXGroup;
+			children = (
+				274E18F05B62645FE58448F1 /* Info.plist */,
+				C381B9938D4797764C976755 /* RouteFixtureApp.swift */,
+				130C776615CA0502700FFDDC /* TabsRoot.swift */,
+			);
+			path = RouteFixture;
+			sourceTree = "<group>";
+		};
+		6B0A7CF770988367CBD89169 /* RouteFixtureFailureSpecimen */ = {
+			isa = PBXGroup;
+			children = (
+				1CEEDA4A490E0CFEB2CCA00E /* FailureSpecimenUITests.swift */,
+			);
+			path = RouteFixtureFailureSpecimen;
+			sourceTree = "<group>";
+		};
+		E3735B55D23EFA66DF7D6364 = {
+			isa = PBXGroup;
+			children = (
+				52F8F3D514B29DC496B9D82F /* RouteFixture */,
+				6B0A7CF770988367CBD89169 /* RouteFixtureFailureSpecimen */,
+				1665357FB6ADA2C17230A106 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		3E18EFC4D5EDDEE1B81B19B2 /* RouteFixture */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 663EEA6A1ED574D9394D9B4F /* Build configuration list for PBXNativeTarget "RouteFixture" */;
+			buildPhases = (
+				BE440F07A2693AD182A7B1C3 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RouteFixture;
+			packageProductDependencies = (
+			);
+			productName = RouteFixture;
+			productReference = AAA785A543D1E4EF9C7F133F /* RouteFixture.app */;
+			productType = "com.apple.product-type.application";
+		};
+		7F6961AFC0BB9B20C1E64578 /* RouteFixtureFailureSpecimen */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BE555FD15D651F3703D70370 /* Build configuration list for PBXNativeTarget "RouteFixtureFailureSpecimen" */;
+			buildPhases = (
+				DA0E0A3E5AB463061963F95C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AAF50AD0EED67550BB6F7097 /* PBXTargetDependency */,
+			);
+			name = RouteFixtureFailureSpecimen;
+			packageProductDependencies = (
+			);
+			productName = RouteFixtureFailureSpecimen;
+			productReference = 2D6EB6B98A8C214A20E71ED5 /* RouteFixtureFailureSpecimen.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		989C3D7B190EC719AA935068 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					3E18EFC4D5EDDEE1B81B19B2 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+					7F6961AFC0BB9B20C1E64578 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+						TestTargetID = 3E18EFC4D5EDDEE1B81B19B2;
+					};
+				};
+			};
+			buildConfigurationList = 173100C903B32DA7033378D0 /* Build configuration list for PBXProject "RouteFixture" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = E3735B55D23EFA66DF7D6364;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1665357FB6ADA2C17230A106 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				3E18EFC4D5EDDEE1B81B19B2 /* RouteFixture */,
+				7F6961AFC0BB9B20C1E64578 /* RouteFixtureFailureSpecimen */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		BE440F07A2693AD182A7B1C3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E49F77C264CE4121EE227051 /* RouteFixtureApp.swift in Sources */,
+				D1AC34FB8062BF5262AD20E4 /* TabsRoot.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DA0E0A3E5AB463061963F95C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9F198979D1940DBD53F9E6F3 /* FailureSpecimenUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AAF50AD0EED67550BB6F7097 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3E18EFC4D5EDDEE1B81B19B2 /* RouteFixture */;
+			targetProxy = 02AA3893B7210F6C6BC665F0 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		123502B27A307EF781DFA323 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.simwalk.route-fixture.failure-specimen";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = RouteFixture;
+			};
+			name = Debug;
+		};
+		2B887349697C718238AB643F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.simwalk.route-fixture.failure-specimen";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = RouteFixture;
+			};
+			name = Release;
+		};
+		4098DB70FFA1A3B48D7EEE6D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		56E6499D30C8C018840FC4A1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = RouteFixture/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.simwalk.route-fixture";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B7C90B7BE8CE266B5EB46C15 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = RouteFixture/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.simwalk.route-fixture";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C89B2B9667A42F41FC31C125 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		173100C903B32DA7033378D0 /* Build configuration list for PBXProject "RouteFixture" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C89B2B9667A42F41FC31C125 /* Debug */,
+				4098DB70FFA1A3B48D7EEE6D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		663EEA6A1ED574D9394D9B4F /* Build configuration list for PBXNativeTarget "RouteFixture" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B7C90B7BE8CE266B5EB46C15 /* Debug */,
+				56E6499D30C8C018840FC4A1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BE555FD15D651F3703D70370 /* Build configuration list for PBXNativeTarget "RouteFixtureFailureSpecimen" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				123502B27A307EF781DFA323 /* Debug */,
+				2B887349697C718238AB643F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 989C3D7B190EC719AA935068 /* Project object */;
+}

@@ -1,0 +1,353 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		906267AA733B54A5242B86F2 /* AXTreeCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B734CB4CB59FE1621E8B1153 /* AXTreeCapture.swift */; };
+		5A7E3C1D2B9F4E6A8C0D1F23 /* StepPerformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B8F4D2E3CA05F7B9D1E2A34 /* StepPerformer.swift */; };
+		A1B2C3D4E5F600010A1B2C3D /* BarClearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5A600020B1C2D3E /* BarClearance.swift */; };
+		A1B2C3D4E5F600080A1B2C3D /* TargetResolution.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5A600090B1C2D3E /* TargetResolution.swift */; };
+		A1B2C3D4E5F6000F0A1B2C3D /* TabLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5A600100B1C2D3E /* TabLocator.swift */; };
+		7C1E5A9B3D2F4E6A8B0C1D2E /* LiveSessionServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D2F6B0C4E3A5F7B9C1D2E3F /* LiveSessionServer.swift */; };
+		9D9F48514DCCE9AA9CD5BA94 /* WalkRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 840E901248A27B0F0C6C24C1 /* WalkRunner.swift */; };
+		D0CE9ADE85593858A4B0C1CF /* SimWalkCore in Frameworks */ = {isa = PBXBuildFile; productRef = 70C4B41E02D706F6D874C5AA /* SimWalkCore */; };
+		DBA0F1E855C6A2A5412D72A5 /* HostReachabilityProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26C81E5006661E4467B5CBED /* HostReachabilityProbe.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		26C81E5006661E4467B5CBED /* HostReachabilityProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostReachabilityProbe.swift; sourceTree = "<group>"; };
+		6B8F4D2E3CA05F7B9D1E2A34 /* StepPerformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepPerformer.swift; sourceTree = "<group>"; };
+		B1C2D3E4F5A600020B1C2D3E /* BarClearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarClearance.swift; sourceTree = "<group>"; };
+		B1C2D3E4F5A600090B1C2D3E /* TargetResolution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TargetResolution.swift; sourceTree = "<group>"; };
+		B1C2D3E4F5A600100B1C2D3E /* TabLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabLocator.swift; sourceTree = "<group>"; };
+		8D2F6B0C4E3A5F7B9C1D2E3F /* LiveSessionServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionServer.swift; sourceTree = "<group>"; };
+		840E901248A27B0F0C6C24C1 /* WalkRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkRunner.swift; sourceTree = "<group>"; };
+		990C48604C2A951E6774FBB7 /* SimWalk */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SimWalk; path = ..; sourceTree = SOURCE_ROOT; };
+		AE513C3A365B0A5060941C9A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		B734CB4CB59FE1621E8B1153 /* AXTreeCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AXTreeCapture.swift; sourceTree = "<group>"; };
+		E0BBE2846C494233267DAD0B /* SimWalkRunner.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = SimWalkRunner.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		08EB9DB9FDABE0855EC72EC9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D0CE9ADE85593858A4B0C1CF /* SimWalkCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		148DF9B4611EC7A93B3470DD /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				990C48604C2A951E6774FBB7 /* SimWalk */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		74E670ED0DFD3837E7C3B588 /* SimWalkRunner */ = {
+			isa = PBXGroup;
+			children = (
+				B734CB4CB59FE1621E8B1153 /* AXTreeCapture.swift */,
+				26C81E5006661E4467B5CBED /* HostReachabilityProbe.swift */,
+				AE513C3A365B0A5060941C9A /* Info.plist */,
+				6B8F4D2E3CA05F7B9D1E2A34 /* StepPerformer.swift */,
+				B1C2D3E4F5A600020B1C2D3E /* BarClearance.swift */,
+				B1C2D3E4F5A600090B1C2D3E /* TargetResolution.swift */,
+				B1C2D3E4F5A600100B1C2D3E /* TabLocator.swift */,
+				8D2F6B0C4E3A5F7B9C1D2E3F /* LiveSessionServer.swift */,
+				840E901248A27B0F0C6C24C1 /* WalkRunner.swift */,
+			);
+			path = SimWalkRunner;
+			sourceTree = "<group>";
+		};
+		84774C6391DB12890A8FF2B8 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				E0BBE2846C494233267DAD0B /* SimWalkRunner.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C0F05A1D396E9415CDB27A1B = {
+			isa = PBXGroup;
+			children = (
+				148DF9B4611EC7A93B3470DD /* Packages */,
+				74E670ED0DFD3837E7C3B588 /* SimWalkRunner */,
+				84774C6391DB12890A8FF2B8 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A16F1CE9EDA0D389F34D2C9F /* SimWalkRunner */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D6B7206060471E8A96F56DF2 /* Build configuration list for PBXNativeTarget "SimWalkRunner" */;
+			buildPhases = (
+				18BE3EF47692BC8CCDED565D /* Sources */,
+				08EB9DB9FDABE0855EC72EC9 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SimWalkRunner;
+			packageProductDependencies = (
+				70C4B41E02D706F6D874C5AA /* SimWalkCore */,
+			);
+			productName = SimWalkRunner;
+			productReference = E0BBE2846C494233267DAD0B /* SimWalkRunner.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		284EB444FBB2D7D9CCF2201A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = B0006FC323B3E8D2BD3605E4 /* Build configuration list for PBXProject "SimWalkRunner" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = C0F05A1D396E9415CDB27A1B;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				E695F7F9A3DB6E6E449E8A87 /* XCLocalSwiftPackageReference "..//" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 84774C6391DB12890A8FF2B8 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A16F1CE9EDA0D389F34D2C9F /* SimWalkRunner */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		18BE3EF47692BC8CCDED565D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				906267AA733B54A5242B86F2 /* AXTreeCapture.swift in Sources */,
+				DBA0F1E855C6A2A5412D72A5 /* HostReachabilityProbe.swift in Sources */,
+				5A7E3C1D2B9F4E6A8C0D1F23 /* StepPerformer.swift in Sources */,
+				A1B2C3D4E5F600010A1B2C3D /* BarClearance.swift in Sources */,
+				A1B2C3D4E5F600080A1B2C3D /* TargetResolution.swift in Sources */,
+				A1B2C3D4E5F6000F0A1B2C3D /* TabLocator.swift in Sources */,
+				7C1E5A9B3D2F4E6A8B0C1D2E /* LiveSessionServer.swift in Sources */,
+				9D9F48514DCCE9AA9CD5BA94 /* WalkRunner.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		075C4C35C6A508BF6C6806A2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				INFOPLIST_FILE = SimWalkRunner/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.agulhaslabs.simwalk.runner;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		42150B6AFFF99B6CD2D0834F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		9503C0742A97452C42A62293 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		F66496CE0885CD4BBBADD769 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				INFOPLIST_FILE = SimWalkRunner/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.agulhaslabs.simwalk.runner;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B0006FC323B3E8D2BD3605E4 /* Build configuration list for PBXProject "SimWalkRunner" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9503C0742A97452C42A62293 /* Debug */,
+				42150B6AFFF99B6CD2D0834F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D6B7206060471E8A96F56DF2 /* Build configuration list for PBXNativeTarget "SimWalkRunner" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F66496CE0885CD4BBBADD769 /* Debug */,
+				075C4C35C6A508BF6C6806A2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		E695F7F9A3DB6E6E449E8A87 /* XCLocalSwiftPackageReference "..//" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "..//";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		70C4B41E02D706F6D874C5AA /* SimWalkCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SimWalkCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 284EB444FBB2D7D9CCF2201A /* Project object */;
+}

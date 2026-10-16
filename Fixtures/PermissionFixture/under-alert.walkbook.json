@@ -1,0 +1,16 @@
+{
+  "name": "permission-fixture-under-alert",
+  "appBundleID": "dev.simwalk.permission-fixture",
+  "screens": [
+    {
+      "id": "under-notifications-alert",
+      "route": [
+        { "systemTap": { "label": "UIA.Health.AuthSheet.AllCategoryButton" } },
+        { "systemTap": { "label": "UIA.Health.Allow.Button" } },
+        { "systemTap": { "label": "Past 30 Days and Future Data" } },
+        { "systemTap": { "label": "Allow" } }
+      ],
+      "states": [{ "theme": "light" }]
+    }
+  ]
+}

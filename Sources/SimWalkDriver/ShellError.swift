@@ -1,0 +1,31 @@
+//
+// Copyright © Agulhas Labs
+//
+
+import Foundation
+import SimWalkCore
+
+/// Why a command could not be run at all — distinct from a command that ran and failed, which is a `Result`.
+public enum ShellError: Error, Equatable, CustomStringConvertible {
+    case couldNotRun(executable: String, reason: String)
+    /// The command was still running when the bound its caller set ran out, and was stopped — a wedged child ends as an answer rather than a hang.
+    case timedOut(command: String, seconds: TimeInterval)
+
+    public var description: String {
+        switch self {
+        case let .couldNotRun(executable, reason):
+            "cannot run \(executable): \(reason)"
+        case let .timedOut(command, seconds):
+            "`\(command)` did not finish within \(Int(seconds.rounded()))s and was stopped"
+        }
+    }
+}
+
+extension ShellError: UsageFailureClassifiable {
+    /// Most callers of `Shell.run` in this package are spawning something a walk needs to run at all — `simctl`, `xcodebuild`, `git` while snapshotting the runner — so a process this tool could not even launch is that machinery failing, not an argument a caller of `walk` gave it.
+    ///
+    /// `runner-failed` is the default for that reason, even though it is not the only caller: `SimWalkCLI`'s `ClaudeCommandLine` also runs `claude` through it during `install-hook`, and a launch failure there means Claude Code's own CLI is missing or broken, not the walk runner — that one site catches its own `ShellError` and rewraps it as `HookInstallError` (`.setupFailed`) before it can reach a usage log under this default.
+    public var usageFailureKind: UsageFailureKind {
+        .runnerFailed
+    }
+}

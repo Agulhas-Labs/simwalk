@@ -1,0 +1,21 @@
+--indent 4
+--ifdef no-indent
+--allman false
+--commas always
+--semicolons never
+--trimwhitespace always
+--modifierorder nonisolated,open,public,internal,fileprivate,private,private(set),fileprivate(set),internal(set),public(set),open(set),override,final,required,convenience,weak,unowned,lazy,dynamic,mutating,nonmutating,class,static
+--wraparguments before-first
+--wrapcollections before-first
+--swiftversion 6
+--header ignore
+
+# Disabled: these contradict the project's own style rules, which are the
+# authoritative style gate.
+# - enumNamespaces: rewrites static-only `struct` namespaces (e.g. `struct Key`) into `enum`,
+#   but the namespace rule requires `struct` for caseless namespaces. Leaving it on
+#   would have SwiftFormat and the style rules fight each other.
+# - wrapSingleLineComments: would reflow doc comments, but the doc-comment rule owns
+#   doc-comment formatting (one paragraph per line). Pre-emptive — inert today since no
+#   --maxwidth is set, but disabled so it can never silently start wrapping them.
+--disable enumNamespaces,wrapSingleLineComments

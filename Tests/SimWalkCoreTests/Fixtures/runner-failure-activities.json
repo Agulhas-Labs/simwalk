@@ -1,0 +1,718 @@
+{
+ "testIdentifier": "FailureSpecimenUITests/testHubDrawsNoRows()",
+ "testIdentifierURL": "test://com.apple.xcode/RouteFixture/RouteFixtureFailureSpecimen/FailureSpecimenUITests/testHubDrawsNoRows",
+ "testName": "testHubDrawsNoRows()",
+ "testRuns": [
+  {
+   "activities": [
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "attachments": [
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "Screen Recording 2026-10-16 at 02.26.19 pm.mp4",
+       "payloadId": "0~mN5A7oe--hHQrwEWzfyftGFnypdTWEKtidQsVIRZZ8LinEhEYKg-2ph-2pBn7zM5QxtV7O1qAVC-L5dkT9PL7A==",
+       "timestamp": 1792157179.039,
+       "uuid": "11111111-2222-3333-4444-000000000021"
+      }
+     ],
+     "childActivities": [
+      {
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157179.039,
+       "title": "kXCTAttachmentScreenRecording"
+      }
+     ],
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157178.937,
+     "title": "Start Test at 2026-10-16 14:26:18.937"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157179.041,
+     "title": "Set Up"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "childActivities": [
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "childActivities": [
+        {
+         "activityType": "com.apple.dt.xctest.activity-type.internal",
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157179.712,
+         "title": "Setting up automation session"
+        },
+        {
+         "activityType": "com.apple.dt.xctest.activity-type.internal",
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157181.679,
+         "title": "Wait for dev.simwalk.route-fixture to idle"
+        }
+       ],
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157179.045,
+       "title": "Launch dev.simwalk.route-fixture"
+      }
+     ],
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157179.044,
+     "title": "Open dev.simwalk.route-fixture"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "attachments": [
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "Synthesized Event 2026-10-16 at 02.26.23 pm",
+       "payloadId": "0~pquShgFoXGq9zjYBWRybX1cM6okkuoy-JmHpPqpRN8TEfa9Nrg21D4imzmFfdqkB-q0dtRdICGxqMN8sMIiqQg==",
+       "timestamp": 1792157183.602,
+       "uuid": "11111111-2222-3333-4444-000000000022"
+      }
+     ],
+     "childActivities": [
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157183.058,
+       "title": "Wait for dev.simwalk.route-fixture to idle"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157183.061,
+       "title": "Find the \"Rows\" Button"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157183.157,
+       "title": "Check for interrupting elements affecting \"Rows\" Button"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "attachments": [
+        {
+         "lifetime": "deleteOnSuccess",
+         "name": "Synthesized Event 2026-10-16 at 02.26.23 pm",
+         "payloadId": "0~pquShgFoXGq9zjYBWRybX1cM6okkuoy-JmHpPqpRN8TEfa9Nrg21D4imzmFfdqkB-q0dtRdICGxqMN8sMIiqQg==",
+         "timestamp": 1792157183.602,
+         "uuid": "11111111-2222-3333-4444-000000000022"
+        }
+       ],
+       "childActivities": [
+        {
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157183.602,
+         "title": "kXCTAttachmentLegacySynthesizedEvent"
+        }
+       ],
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157183.188,
+       "title": "Synthesize event"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157183.602,
+       "title": "Wait for dev.simwalk.route-fixture to idle"
+      }
+     ],
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157183.058,
+     "title": "Tap \"Rows\" Button"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "attachments": [
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "Synthesized Event 2026-10-16 at 02.26.25 pm",
+       "payloadId": "0~V1dnQHuSVX9sG_1YnoNBJwksCP9TIJ6Enb29h3x-zThzNSA1Fop4K-K_5x8TQ8AOwQ7MPZHZ4mVWD3CFhz8awg==",
+       "timestamp": 1792157185.647,
+       "uuid": "11111111-2222-3333-4444-000000000023"
+      }
+     ],
+     "childActivities": [
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157185.311,
+       "title": "Wait for dev.simwalk.route-fixture to idle"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157185.314,
+       "title": "Find the \"Menus\" Button"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157185.34,
+       "title": "Check for interrupting elements affecting \"filemenu.and.selection\" Button"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "attachments": [
+        {
+         "lifetime": "deleteOnSuccess",
+         "name": "Synthesized Event 2026-10-16 at 02.26.25 pm",
+         "payloadId": "0~V1dnQHuSVX9sG_1YnoNBJwksCP9TIJ6Enb29h3x-zThzNSA1Fop4K-K_5x8TQ8AOwQ7MPZHZ4mVWD3CFhz8awg==",
+         "timestamp": 1792157185.647,
+         "uuid": "11111111-2222-3333-4444-000000000023"
+        }
+       ],
+       "childActivities": [
+        {
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157185.647,
+         "title": "kXCTAttachmentLegacySynthesizedEvent"
+        }
+       ],
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157185.361,
+       "title": "Synthesize event"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157185.648,
+       "title": "Wait for dev.simwalk.route-fixture to idle"
+      }
+     ],
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157185.311,
+     "title": "Tap \"Menus\" Button"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "attachments": [
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "Synthesized Event 2026-10-16 at 02.26.27 pm",
+       "payloadId": "0~cpVwNofnc4aScnmulrRAUJkFx4FyQkfjR6M7H0Xz8KFwMLql0PbCt0x_AViXo-BXZ_QgjzwkVunaJh9kLyfbEA==",
+       "timestamp": 1792157187.67,
+       "uuid": "11111111-2222-3333-4444-000000000024"
+      }
+     ],
+     "childActivities": [
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157187.344,
+       "title": "Wait for dev.simwalk.route-fixture to idle"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157187.347,
+       "title": "Find the \"Nested\" Button"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157187.366,
+       "title": "Check for interrupting elements affecting \"square.stack\" Button"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "attachments": [
+        {
+         "lifetime": "deleteOnSuccess",
+         "name": "Synthesized Event 2026-10-16 at 02.26.27 pm",
+         "payloadId": "0~cpVwNofnc4aScnmulrRAUJkFx4FyQkfjR6M7H0Xz8KFwMLql0PbCt0x_AViXo-BXZ_QgjzwkVunaJh9kLyfbEA==",
+         "timestamp": 1792157187.67,
+         "uuid": "11111111-2222-3333-4444-000000000024"
+        }
+       ],
+       "childActivities": [
+        {
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157187.67,
+         "title": "kXCTAttachmentLegacySynthesizedEvent"
+        }
+       ],
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157187.381,
+       "title": "Synthesize event"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157187.671,
+       "title": "Wait for dev.simwalk.route-fixture to idle"
+      }
+     ],
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157187.344,
+     "title": "Tap \"Nested\" Button"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "attachments": [
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "Synthesized Event 2026-10-16 at 02.26.29 pm",
+       "payloadId": "0~HUapH1oUNbMsLp2siDTI3Vz24A5Fvma7wxLBUWfkSBpkMMqXq81Dy_KNPa3hpugYwZ84ddXFXheDl8nMBdpWxQ==",
+       "timestamp": 1792157189.684,
+       "uuid": "11111111-2222-3333-4444-000000000025"
+      }
+     ],
+     "childActivities": [
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157189.361,
+       "title": "Wait for dev.simwalk.route-fixture to idle"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157189.364,
+       "title": "Find the \"Hub\" Button"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157189.38,
+       "title": "Check for interrupting elements affecting \"house\" Button"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "attachments": [
+        {
+         "lifetime": "deleteOnSuccess",
+         "name": "Synthesized Event 2026-10-16 at 02.26.29 pm",
+         "payloadId": "0~HUapH1oUNbMsLp2siDTI3Vz24A5Fvma7wxLBUWfkSBpkMMqXq81Dy_KNPa3hpugYwZ84ddXFXheDl8nMBdpWxQ==",
+         "timestamp": 1792157189.684,
+         "uuid": "11111111-2222-3333-4444-000000000025"
+        }
+       ],
+       "childActivities": [
+        {
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157189.684,
+         "title": "kXCTAttachmentLegacySynthesizedEvent"
+        }
+       ],
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157189.396,
+       "title": "Synthesize event"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157189.684,
+       "title": "Wait for dev.simwalk.route-fixture to idle"
+      }
+     ],
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157189.361,
+     "title": "Tap \"Hub\" Button"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "attachments": [
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "Debug description for `\"Hub row 0\" StaticText`_0_11111111-2222-3333-4444-000000000026.txt",
+       "payloadId": "0~mKZSO3sOAPvaTFqKIu6oVK7eLlZYfuBQNY0OgiUfpChSvXt0TC5PsbqWcnSXKKFRHSbSniDQb-mYLtDVz2I8Jg==",
+       "timestamp": 1792157192.422,
+       "uuid": "11111111-2222-3333-4444-000000000027"
+      }
+     ],
+     "childActivities": [
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "attachments": [
+        {
+         "lifetime": "deleteOnSuccess",
+         "name": "Debug description for `\"Hub row 0\" StaticText`_0_11111111-2222-3333-4444-000000000026.txt",
+         "payloadId": "0~mKZSO3sOAPvaTFqKIu6oVK7eLlZYfuBQNY0OgiUfpChSvXt0TC5PsbqWcnSXKKFRHSbSniDQb-mYLtDVz2I8Jg==",
+         "timestamp": 1792157192.422,
+         "uuid": "11111111-2222-3333-4444-000000000027"
+        }
+       ],
+       "childActivities": [
+        {
+         "activityType": "com.apple.dt.xctest.activity-type.internal",
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157192.385,
+         "title": "Checking existence of `\"Hub row 0\" StaticText`"
+        },
+        {
+         "activityType": "com.apple.dt.xctest.activity-type.internal",
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157192.421,
+         "title": "Capturing element debug description"
+        },
+        {
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157192.422,
+         "title": "Debug description for `\"Hub row 0\" StaticText`"
+        }
+       ],
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157192.384,
+       "title": "Checking `Expect predicate `existsNoRetry == 1` for object \"Hub row 0\" StaticText`"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157192.422,
+       "title": "Checking existence of `\"Hub row 0\" StaticText`"
+      }
+     ],
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157191.38,
+     "title": "Waiting 1.0s for \"Hub row 0\" StaticText to exist"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "attachments": [
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "App UI hierarchy for dev.simwalk_0_11111111-2222-3333-4444-000000000028.route-fixture",
+       "payloadId": "0~L2Pd_iR0uCRaUHoxdTUKcBuNWs9Sh8dD6AgOwO_I9M0QxQl2aFfDcLd5WAhxNmxSF7ZAPAMkRw22SA1QZdJ-4g==",
+       "timestamp": 1792157192.494,
+       "uuid": "11111111-2222-3333-4444-000000000029"
+      },
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "UI Snapshot 2026-10-16 at 02.26.32 pm",
+       "payloadId": "0~bvlxNY6qqz7Abpsg-cBJ18oXeBQJ6ZhxguOqoobzt-IL14CEvcKfR9ix0i0OnJd06NInQVR7i6OU0gzn1E-HCg==",
+       "timestamp": 1792157192.494,
+       "uuid": "11111111-2222-3333-4444-000000000030"
+      }
+     ],
+     "childActivities": [
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157192.449,
+       "title": "Requesting snapshot of accessibility hierarchy for app with pid 50573"
+      },
+      {
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157192.494,
+       "title": "App UI hierarchy for dev.simwalk.route-fixture"
+      },
+      {
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157192.494,
+       "title": "kXCTAttachmentLegacySnapshot"
+      }
+     ],
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157192.449,
+     "title": "Collecting debug information to assist test failure triage"
+    },
+    {
+     "childActivities": [
+      {
+       "isAssociatedWithFailure": false,
+       "title": ""
+      }
+     ],
+     "isAssociatedWithFailure": true,
+     "startTime": 1792157192.502,
+     "title": "XCTAssertTrue failed - Hub has no row zero"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "attachments": [
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "UI Snapshot 2026-10-16 at 02.26.32 pm",
+       "payloadId": "0~bvlxNY6qqz7Abpsg-cBJ18oXeBQJ6ZhxguOqoobzt-IL14CEvcKfR9ix0i0OnJd06NInQVR7i6OU0gzn1E-HCg==",
+       "timestamp": 1792157192.746,
+       "uuid": "11111111-2222-3333-4444-000000000031"
+      },
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "Synthesized Event 2026-10-16 at 02.26.33 pm",
+       "payloadId": "0~V1dnQHuSVX9sG_1YnoNBJwksCP9TIJ6Enb29h3x-zThzNSA1Fop4K-K_5x8TQ8AOwQ7MPZHZ4mVWD3CFhz8awg==",
+       "timestamp": 1792157193.039,
+       "uuid": "11111111-2222-3333-4444-000000000032"
+      }
+     ],
+     "childActivities": [
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157192.678,
+       "title": "Wait for dev.simwalk.route-fixture to idle"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157192.681,
+       "title": "Find the \"Menus\" Button"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157192.709,
+       "title": "Check for interrupting elements affecting \"filemenu.and.selection\" Button"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "attachments": [
+        {
+         "lifetime": "deleteOnSuccess",
+         "name": "UI Snapshot 2026-10-16 at 02.26.32 pm",
+         "payloadId": "0~bvlxNY6qqz7Abpsg-cBJ18oXeBQJ6ZhxguOqoobzt-IL14CEvcKfR9ix0i0OnJd06NInQVR7i6OU0gzn1E-HCg==",
+         "timestamp": 1792157192.746,
+         "uuid": "11111111-2222-3333-4444-000000000031"
+        },
+        {
+         "lifetime": "deleteOnSuccess",
+         "name": "Synthesized Event 2026-10-16 at 02.26.33 pm",
+         "payloadId": "0~V1dnQHuSVX9sG_1YnoNBJwksCP9TIJ6Enb29h3x-zThzNSA1Fop4K-K_5x8TQ8AOwQ7MPZHZ4mVWD3CFhz8awg==",
+         "timestamp": 1792157193.039,
+         "uuid": "11111111-2222-3333-4444-000000000032"
+        }
+       ],
+       "childActivities": [
+        {
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157192.746,
+         "title": "kXCTAttachmentLegacySnapshot"
+        },
+        {
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157193.039,
+         "title": "kXCTAttachmentLegacySynthesizedEvent"
+        }
+       ],
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157192.744,
+       "title": "Synthesize event"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157193.039,
+       "title": "Wait for dev.simwalk.route-fixture to idle"
+      }
+     ],
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157192.678,
+     "title": "Tap \"Menus\" Button"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "attachments": [
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "UI Snapshot 2026-10-16 at 02.26.34 pm",
+       "payloadId": "0~bvlxNY6qqz7Abpsg-cBJ18oXeBQJ6ZhxguOqoobzt-IL14CEvcKfR9ix0i0OnJd06NInQVR7i6OU0gzn1E-HCg==",
+       "timestamp": 1792157194.765,
+       "uuid": "11111111-2222-3333-4444-000000000033"
+      },
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "Synthesized Event 2026-10-16 at 02.26.35 pm",
+       "payloadId": "0~HUapH1oUNbMsLp2siDTI3Vz24A5Fvma7wxLBUWfkSBpkMMqXq81Dy_KNPa3hpugYwZ84ddXFXheDl8nMBdpWxQ==",
+       "timestamp": 1792157195.06,
+       "uuid": "11111111-2222-3333-4444-000000000034"
+      }
+     ],
+     "childActivities": [
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157194.731,
+       "title": "Wait for dev.simwalk.route-fixture to idle"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157194.735,
+       "title": "Find the \"Hub\" Button"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157194.749,
+       "title": "Check for interrupting elements affecting \"house\" Button"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "attachments": [
+        {
+         "lifetime": "deleteOnSuccess",
+         "name": "UI Snapshot 2026-10-16 at 02.26.34 pm",
+         "payloadId": "0~bvlxNY6qqz7Abpsg-cBJ18oXeBQJ6ZhxguOqoobzt-IL14CEvcKfR9ix0i0OnJd06NInQVR7i6OU0gzn1E-HCg==",
+         "timestamp": 1792157194.765,
+         "uuid": "11111111-2222-3333-4444-000000000033"
+        },
+        {
+         "lifetime": "deleteOnSuccess",
+         "name": "Synthesized Event 2026-10-16 at 02.26.35 pm",
+         "payloadId": "0~HUapH1oUNbMsLp2siDTI3Vz24A5Fvma7wxLBUWfkSBpkMMqXq81Dy_KNPa3hpugYwZ84ddXFXheDl8nMBdpWxQ==",
+         "timestamp": 1792157195.06,
+         "uuid": "11111111-2222-3333-4444-000000000034"
+        }
+       ],
+       "childActivities": [
+        {
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157194.765,
+         "title": "kXCTAttachmentLegacySnapshot"
+        },
+        {
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157195.06,
+         "title": "kXCTAttachmentLegacySynthesizedEvent"
+        }
+       ],
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157194.764,
+       "title": "Synthesize event"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157195.06,
+       "title": "Wait for dev.simwalk.route-fixture to idle"
+      }
+     ],
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157194.73,
+     "title": "Tap \"Hub\" Button"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "attachments": [
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "Debug description for `\"Hub row 99\" StaticText`_0_11111111-2222-3333-4444-000000000035.txt",
+       "payloadId": "0~WwGiTUC7cnA0DAD9d7tLYM1xcEFKPP1x4EnzopATdJZ80GbX7batab5IliI19LcNOjPer_mUCdPjb00ZVeyWVQ==",
+       "timestamp": 1792157197.803,
+       "uuid": "11111111-2222-3333-4444-000000000036"
+      }
+     ],
+     "childActivities": [
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "attachments": [
+        {
+         "lifetime": "deleteOnSuccess",
+         "name": "Debug description for `\"Hub row 99\" StaticText`_0_11111111-2222-3333-4444-000000000035.txt",
+         "payloadId": "0~WwGiTUC7cnA0DAD9d7tLYM1xcEFKPP1x4EnzopATdJZ80GbX7batab5IliI19LcNOjPer_mUCdPjb00ZVeyWVQ==",
+         "timestamp": 1792157197.803,
+         "uuid": "11111111-2222-3333-4444-000000000036"
+        }
+       ],
+       "childActivities": [
+        {
+         "activityType": "com.apple.dt.xctest.activity-type.internal",
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157197.751,
+         "title": "Checking existence of `\"Hub row 99\" StaticText`"
+        },
+        {
+         "activityType": "com.apple.dt.xctest.activity-type.internal",
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157197.802,
+         "title": "Capturing element debug description"
+        },
+        {
+         "isAssociatedWithFailure": false,
+         "startTime": 1792157197.803,
+         "title": "Debug description for `\"Hub row 99\" StaticText`"
+        }
+       ],
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157197.75,
+       "title": "Checking `Expect predicate `existsNoRetry == 1` for object \"Hub row 99\" StaticText`"
+      },
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157197.803,
+       "title": "Checking existence of `\"Hub row 99\" StaticText`"
+      }
+     ],
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157196.744,
+     "title": "Waiting 1.0s for \"Hub row 99\" StaticText to exist"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "attachments": [
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "App UI hierarchy for dev.simwalk_0_11111111-2222-3333-4444-000000000037.route-fixture",
+       "payloadId": "0~LIl4jIpA0jdNn7TX_g8hT5RzbDzuK6HZFBJ3L2LKlpJ8L2N2FDfbQAVS0B8Abq20PMK8xOV9b-AC4Mr-bTw-hg==",
+       "timestamp": 1792157197.872,
+       "uuid": "11111111-2222-3333-4444-000000000038"
+      },
+      {
+       "lifetime": "deleteOnSuccess",
+       "name": "UI Snapshot 2026-10-16 at 02.26.37 pm",
+       "payloadId": "0~fAkYHPdJeU8icltf_fGWrcgwqAwUs05Oj9hgO-SzRsjYRPSvCtedH03Vl-FNP0Zi8b6Hf6CONPZS9y9bTo9wIw==",
+       "timestamp": 1792157197.872,
+       "uuid": "11111111-2222-3333-4444-000000000039"
+      }
+     ],
+     "childActivities": [
+      {
+       "activityType": "com.apple.dt.xctest.activity-type.internal",
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157197.834,
+       "title": "Requesting snapshot of accessibility hierarchy for app with pid 50573"
+      },
+      {
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157197.872,
+       "title": "App UI hierarchy for dev.simwalk.route-fixture"
+      },
+      {
+       "isAssociatedWithFailure": false,
+       "startTime": 1792157197.872,
+       "title": "kXCTAttachmentLegacySnapshot"
+      }
+     ],
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157197.834,
+     "title": "Collecting debug information to assist test failure triage"
+    },
+    {
+     "childActivities": [
+      {
+       "isAssociatedWithFailure": false,
+       "title": ""
+      }
+     ],
+     "isAssociatedWithFailure": true,
+     "startTime": 1792157197.879,
+     "title": "XCTAssertTrue failed - Hub drew no rows at all"
+    },
+    {
+     "activityType": "com.apple.dt.xctest.activity-type.internal",
+     "isAssociatedWithFailure": false,
+     "startTime": 1792157197.88,
+     "title": "Tear Down"
+    }
+   ],
+   "device": {
+    "architecture": "arm64",
+    "deviceId": "11111111-2222-3333-4444-000000000040",
+    "deviceName": "iPhone Air",
+    "modelName": "iPhone Air",
+    "osBuildNumber": "24A434",
+    "osVersion": "27.0",
+    "platform": "iOS Simulator"
+   },
+   "testPlanConfiguration": {
+    "configurationId": "1",
+    "configurationName": "Test Scheme Action"
+   }
+  }
+ ]
+}

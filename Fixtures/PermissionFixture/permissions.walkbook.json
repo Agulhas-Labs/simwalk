@@ -1,0 +1,18 @@
+{
+  "name": "permission-fixture",
+  "appBundleID": "dev.simwalk.permission-fixture",
+  "screens": [
+    {
+      "id": "permissions-answered",
+      "expect": "permissions-answered",
+      "route": [
+        { "systemTap": { "label": "UIA.Health.AuthSheet.AllCategoryButton" } },
+        { "systemTap": { "label": "UIA.Health.Allow.Button" } },
+        { "systemTap": { "label": "Past 30 Days and Future Data" } },
+        { "systemTap": { "label": "Allow" } },
+        { "systemTap": { "label": "Allow" } }
+      ],
+      "states": [{ "theme": "light" }]
+    }
+  ]
+}

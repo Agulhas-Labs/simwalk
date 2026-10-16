@@ -1,0 +1,46 @@
+# PermissionFixture — a subject app for SimWalk's system-sheet walk (SimWalk#28).
+#
+# On launch it asks for HealthKit authorization for one type, then for notification authorization, and
+# only once both have been answered shows the screen identified `permissions-answered`. On a simulator
+# that has never authorised it, that is the HealthKit sheet and then the notifications alert — the two
+# system sheets `systemTap` exists to answer. `permissions.walkbook.json` beside this file walks it.
+#
+# A project of its own, not a target in `Runner/project.yml`: the runner's project is what every walk
+# builds, and a fixture there would ride along into every runner snapshot for nothing. Build and walk:
+#     xcodegen generate
+#     xcodebuild -project PermissionFixture.xcodeproj -scheme PermissionFixture \
+#       -destination 'generic/platform=iOS Simulator' -derivedDataPath ../../.build/permission-fixture build
+#     simwalk walk permissions.walkbook.json --output <output>.simwalk --device <udid> \
+#       --app-path ../../.build/permission-fixture/Build/Products/Debug-iphonesimulator/PermissionFixture.app
+name: PermissionFixture
+
+options:
+  bundleIdPrefix: dev.simwalk
+  deploymentTarget:
+    iOS: "17.0"
+
+targets:
+  PermissionFixture:
+    type: application
+    platform: iOS
+    sources:
+      - path: PermissionFixture
+    entitlements:
+      path: PermissionFixture/PermissionFixture.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+    info:
+      path: PermissionFixture/Info.plist
+      properties:
+        CFBundleDisplayName: PermissionFixture
+        UILaunchScreen: {}
+        NSHealthShareUsageDescription: SimWalk's permission fixture reads step count to raise the HealthKit sheet.
+        NSHealthUpdateUsageDescription: SimWalk's permission fixture writes step count to raise the HealthKit sheet.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.simwalk.permission-fixture
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""

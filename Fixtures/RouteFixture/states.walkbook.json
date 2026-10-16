@@ -1,0 +1,30 @@
+{
+  "name": "route-fixture-states",
+  "appBundleID": "dev.simwalk.route-fixture",
+  "screens": [
+    {
+      "id": "home",
+      "expect": "route-home",
+      "route": [{ "scrollTo": { "label": "Third" } }],
+      "states": [
+        { "theme": "light", "layoutDirection": "ltr" },
+        { "theme": "light", "layoutDirection": "rtl" }
+      ]
+    },
+    {
+      "id": "location",
+      "expect": "location-value",
+      "route": [
+        { "openURL": { "url": "simwalk-fixture://location" } },
+        { "systemTap": { "label": "Allow While Using App" } }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "location": { "latitude": 51.5, "longitude": -0.12 },
+          "resetPermissions": ["location"]
+        }
+      ]
+    }
+  ]
+}

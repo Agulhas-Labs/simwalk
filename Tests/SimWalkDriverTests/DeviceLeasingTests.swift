@@ -1,0 +1,264 @@
+//
+// Copyright © Agulhas Labs
+//
+
+import Foundation
+@testable import SimWalkDriver
+import SimWalkTestSupport
+import Testing
+
+/// What a lease asks of `simctl`: which device it takes, the clone it makes, and — the one destructive call — the device it deletes on release, which must be the lease's own clone and nothing else.
+struct DeviceLeasingTests {
+    /// G4: releasing a lease that cloned its device runs exactly `simctl shutdown <udid>` then `simctl delete <udid>`, of that UDID alone.
+    @Test
+    func releasingACreatedDeviceShutsDownAndDeletesThatUDIDOnly() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let lease = try store.acquire(udid: "CLONE-1", ttl: 60, holderPID: 41, now: Self.start, createdDevice: true, clonedFrom: "SOURCE-1")
+        let script = Script()
+
+        try DeviceLeasing(store: store, shell: Shell(script: script.run)).release(token: lease.token)
+
+        #expect(script.vectors == [["simctl", "shutdown", "CLONE-1"], ["simctl", "delete", "CLONE-1"]])
+        #expect(store.all().isEmpty)
+    }
+
+    /// G4: releasing a lease on a device it did not create runs nothing at all.
+    @Test
+    func releasingALeaseOnAnExistingDeviceDeletesNothing() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let lease = try store.acquire(udid: "UDID-1", ttl: 60, holderPID: 41, now: Self.start)
+        let script = Script()
+
+        try DeviceLeasing(store: store, shell: Shell(script: script.run)).release(token: lease.token)
+
+        #expect(script.vectors.isEmpty)
+        #expect(store.all().isEmpty)
+    }
+
+    /// A clone that could not be deleted keeps its lease, so the release can be run again rather than the device being forgotten.
+    @Test
+    func acloneThatCouldNotBeDeletedKeepsItsLease() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let lease = try store.acquire(udid: "CLONE-1", ttl: 60, holderPID: 41, now: Self.start, createdDevice: true, clonedFrom: "SOURCE-1")
+        let script = Script(failing: "delete")
+
+        #expect(throws: LeaseError.self) {
+            try DeviceLeasing(store: store, shell: Shell(script: script.run)).release(token: lease.token)
+        }
+        #expect(store.entry(token: lease.token) != nil)
+    }
+
+    /// A clone is made only of a device that is shut down; a booted source is refused before `simctl clone` runs.
+    @Test
+    func abootedCloneSourceIsRefusedNamingTheShutdown() throws {
+        let directory = try TemporaryDirectory()
+        let script = Script()
+
+        #expect(throws: LeaseError.cloneSourceBooted(udid: "BOOTED-1")) {
+            try DeviceLeasing(store: LeaseStore(directory: directory.url), shell: Shell(script: script.run)).acquire(device: nil, cloneFrom: "BOOTED-1", ttl: 60, holderPID: 41, now: Self.start)
+        }
+        #expect(!script.vectors.contains { $0.starts(with: ["simctl", "clone"]) })
+    }
+
+    /// A clone of a shut-down source is leased as a device the lease created, so its release deletes it.
+    @Test
+    func acloneIsLeasedAsCreated() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let script = Script()
+
+        let grant = try DeviceLeasing(store: store, shell: Shell(script: script.run)).acquire(device: nil, cloneFrom: "SHUT-1", ttl: 60, holderPID: 41, now: Self.start)
+
+        #expect(grant.simulator.udid == "CLONE-NEW")
+        #expect(grant.lease.createdDevice)
+        #expect(grant.lease.clonedFrom == "SHUT-1")
+        #expect(script.vectors.last == ["simctl", "clone", "SHUT-1", "iPhone 17 (SimWalk lease)"])
+    }
+
+    /// With nothing named, a lease falls only on an unleased shut-down device — never a booted one, which may be somebody's who takes no leases — and is refused, naming the commands that get a device, once none is free.
+    @Test
+    func anunnamedAcquisitionTakesOnlyAShutDownUnleasedDevice() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let leasing = DeviceLeasing(store: store, shell: Shell(script: Script().run))
+
+        let first = try leasing.acquire(device: nil, cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+        let second = try leasing.acquire(device: nil, cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+
+        #expect(first.simulator.udid == "SHUT-1")
+        #expect(second.simulator.udid == "SHUT-2")
+        #expect(throws: LeaseError.noShutDownDevice(among: "iOS 26.5")) {
+            try leasing.acquire(device: nil, cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+        }
+        #expect(store.all().map(\.udid) == ["SHUT-1", "SHUT-2"])
+        #expect(LeaseError.noShutDownDevice(among: "iOS 26.5").description.contains("simwalk lease acquire --device <udid>"))
+    }
+
+    /// A booted device is leased only when it is named by UDID: named by its name it is refused, with nothing leased, since a lease grants the reboot and the setup; a name that also has a shut-down device falls on that one.
+    @Test
+    func abootedDeviceIsLeasedWhenNamedByUDIDAndNeverByName() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let leasing = DeviceLeasing(store: store, shell: Shell(script: Script().run))
+
+        #expect(throws: LeaseError.noShutDownDevice(among: "iPhone 17 Pro")) {
+            try leasing.acquire(device: "iPhone 17 Pro", cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+        }
+        #expect(store.all().isEmpty)
+        let byName = try leasing.acquire(device: "iPhone 17", cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+        let byUDID = try leasing.acquire(device: "BOOTED-1", cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+
+        #expect(byName.simulator.udid == "SHUT-1")
+        #expect(byUDID.simulator.udid == "BOOTED-1")
+    }
+
+    /// A prune releases the expired leases only, deleting only the device an expired lease created.
+    @Test
+    func releasingExpiredLeasesDeletesOnlyTheirClones() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        _ = try store.acquire(udid: "CLONE-OLD", ttl: 60, holderPID: 41, now: Self.start, createdDevice: true, clonedFrom: "SHUT-1")
+        _ = try store.acquire(udid: "UDID-OLD", ttl: 60, holderPID: 41, now: Self.start)
+        let live = try store.acquire(udid: "CLONE-LIVE", ttl: 3600, holderPID: 41, now: Self.start, createdDevice: true, clonedFrom: "SHUT-1")
+        let script = Script()
+
+        let released = DeviceLeasing(store: store, shell: Shell(script: script.run)).releaseExpired(now: Self.start.addingTimeInterval(120), dryRun: false)
+
+        #expect(released.map(\.entry.udid) == ["CLONE-OLD", "UDID-OLD"])
+        #expect(script.vectors == [["simctl", "shutdown", "CLONE-OLD"], ["simctl", "delete", "CLONE-OLD"]])
+        #expect(store.all().map(\.lease) == [live])
+    }
+
+    /// A lease that cloned its device and whose holder has died is never taken over by an acquisition — which would forget the clone was made — and a prune releases it, deleting the clone by its UDID, before it expires.
+    @Test
+    func adeadHoldersCloneIsNotReacquiredAndPruneDeletesIt() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { $0 != 41 })
+        _ = try store.acquire(udid: "SHUT-1", ttl: 3600, holderPID: 41, now: Self.start, createdDevice: true, clonedFrom: "SOURCE-1")
+        let script = Script()
+        let leasing = DeviceLeasing(store: store, shell: Shell(script: script.run))
+
+        let grant = try leasing.acquire(device: nil, cloneFrom: nil, ttl: 60, holderPID: 42, now: Self.start)
+        let released = leasing.releaseExpired(now: Self.start, dryRun: false)
+
+        #expect(grant.simulator.udid == "SHUT-2")
+        #expect(released.map(\.entry.udid) == ["SHUT-1"])
+        #expect(released.map(\.failure) == [nil])
+        #expect(script.vectors == [["simctl", "shutdown", "SHUT-1"], ["simctl", "delete", "SHUT-1"]])
+        #expect(store.all().map(\.udid) == ["SHUT-2"])
+    }
+
+    /// A prune's release takes its lease out of the store before any `simctl` call, so a session that judges the lapsed lease stale mid-release and replaces it — removing it by the token it read, then acquiring — is refused, and the device is never deleted while another lease is on it.
+    @Test
+    func areleaseNeverDeletesADeviceAnotherLeaseTookMidRelease() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let lapsed = try store.acquire(udid: "CLONE-1", ttl: 60, holderPID: 41, now: Self.start, createdDevice: true, clonedFrom: "SHUT-1")
+        let now = Self.start.addingTimeInterval(120)
+        var rival: Result<DeviceLease, Error>?
+        var leaseAtDelete: DeviceLease?
+        let script = Script { arguments in
+            if arguments == ["simctl", "shutdown", "CLONE-1"] {
+                rival = Result {
+                    try store.remove(udid: "CLONE-1", token: lapsed.token)
+                    return try store.acquire(udid: "CLONE-1", ttl: 3600, holderPID: 42, now: now)
+                }
+            }
+            if arguments == ["simctl", "delete", "CLONE-1"] {
+                leaseAtDelete = try? store.lease(onDevice: "CLONE-1")
+            }
+        }
+
+        let released = DeviceLeasing(store: store, shell: Shell(script: script.run)).releaseExpired(now: now, dryRun: false)
+
+        #expect(leaseAtDelete == nil)
+        #expect(throws: LeaseError.awaitingDeletion(udid: "CLONE-1")) { try rival?.get() }
+        #expect(released.map(\.failure) == [nil])
+        #expect(store.all().isEmpty)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.url.path).filter { !$0.hasPrefix(".") }.isEmpty)
+    }
+
+    /// A prune's dry run names the lapsed leases and deletes nothing: no `simctl` call, and every lease still in the store.
+    @Test
+    func aDryRunReleaseRunsNothingAndKeepsEveryLease() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        _ = try store.acquire(udid: "CLONE-OLD", ttl: 60, holderPID: 41, now: Self.start, createdDevice: true, clonedFrom: "SHUT-1")
+        _ = try store.acquire(udid: "UDID-OLD", ttl: 60, holderPID: 41, now: Self.start)
+        let script = Script()
+
+        let released = DeviceLeasing(store: store, shell: Shell(script: script.run)).releaseExpired(now: Self.start.addingTimeInterval(120), dryRun: true)
+
+        #expect(released.map(\.entry.udid) == ["CLONE-OLD", "UDID-OLD"])
+        #expect(script.vectors.isEmpty)
+        #expect(store.all().map(\.udid) == ["CLONE-OLD", "UDID-OLD"])
+    }
+
+    /// Only a temporary file a minute old is swept, and a dry run counts without removing.
+    @Test
+    func sweepingTemporariesRemovesOnlyOldOnesAndNeverALease() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        _ = try store.acquire(udid: "UDID-1", ttl: 3600, holderPID: 41, now: Self.start)
+        let old = directory.url.appendingPathComponent(".UDID-1.json.AAAA.tmp")
+        let fresh = directory.url.appendingPathComponent(".UDID-1.json.BBBB.tmp")
+        for file in [old, fresh] {
+            try Data("x".utf8).write(to: file)
+        }
+        try FileManager.default.setAttributes([.modificationDate: Self.start.addingTimeInterval(-600)], ofItemAtPath: old.path)
+        try FileManager.default.setAttributes([.modificationDate: Self.start.addingTimeInterval(-10)], ofItemAtPath: fresh.path)
+
+        let planned = store.sweepTemporaries(now: Self.start, dryRun: true)
+        let existedAfterDryRun = FileManager.default.fileExists(atPath: old.path)
+        let swept = store.sweepTemporaries(now: Self.start, dryRun: false)
+
+        #expect(planned == 1)
+        #expect(existedAfterDryRun)
+        #expect(swept == 1)
+        #expect(!FileManager.default.fileExists(atPath: old.path))
+        #expect(FileManager.default.fileExists(atPath: fresh.path))
+        #expect(store.all().map(\.udid) == ["UDID-1"])
+    }
+
+    private static let start = Date(timeIntervalSince1970: 1_000_000)
+}
+
+extension DeviceLeasingTests {
+    /// `simctl` as a lease sees it: a booted device and two shut-down ones on one runtime, a clone that answers with its new UDID, optionally one subcommand that fails, and optionally what another session does while a call runs.
+    final class Script {
+        private(set) var vectors: [[String]] = []
+        private let failing: String?
+        private let meanwhile: ([String]) -> Void
+
+        init(failing: String? = nil, meanwhile: @escaping ([String]) -> Void = { _ in }) {
+            self.failing = failing
+            self.meanwhile = meanwhile
+        }
+
+        var run: (String, [String], [String: String]) throws -> Shell.Result {
+            { [self] _, arguments, _ in
+                vectors.append(arguments)
+                meanwhile(arguments)
+                if arguments.count > 1, arguments[1] == failing {
+                    return Shell.Result(status: 1, standardOutput: "", standardError: "An error was encountered processing the command (code=164)\n")
+                }
+                switch arguments {
+                case _ where arguments.starts(with: ["simctl", "list"]):
+                    vectors.removeLast()
+                    return Shell.Result(status: 0, standardOutput: Self.devices, standardError: "")
+                case _ where arguments.starts(with: ["simctl", "clone"]):
+                    return Shell.Result(status: 0, standardOutput: "CLONE-NEW\n", standardError: "")
+                default:
+                    return Shell.Result(status: 0, standardOutput: "", standardError: "")
+                }
+            }
+        }
+
+        static var devices: String {
+            #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"udid":"BOOTED-1","name":"iPhone 17 Pro","state":"Booted"},{"udid":"SHUT-1","name":"iPhone 17","state":"Shutdown"},{"udid":"SHUT-2","name":"iPhone 17","state":"Shutdown"}]}}"#
+        }
+    }
+}

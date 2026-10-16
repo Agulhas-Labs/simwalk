@@ -1,0 +1,193 @@
+{
+  "name": "route-fixture-tabs",
+  "appBundleID": "dev.simwalk.route-fixture",
+  "screens": [
+    {
+      "id": "launch",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hub/form-sheet",
+      "expect": "form-sheet",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "scrollTo": {
+            "label": "Open form"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open form"
+          }
+        },
+        {
+          "tap": {
+            "label": "form-add"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hub/form-direct",
+      "expect": "form-sheet",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open form"
+          }
+        },
+        {
+          "tap": {
+            "label": "form-add"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hub/pushed",
+      "expect": "form-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs",
+            "-RouteFixturePushForm"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rows/partly-covered",
+      "expect": "rows-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Rows"
+          }
+        },
+        {
+          "scrollTo": {
+            "label": "Partly covered row"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "menus/root",
+      "expect": "menus-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Menus"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "menus/open",
+      "expectMenu": ["Endurance", "Walking", "Strength"],
+      "route": [
+        {
+          "tab": {
+            "label": "Menus"
+          }
+        },
+        {
+          "tap": {
+            "label": "Kind"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "nested/inner",
+      "expect": "nested-inner",
+      "route": [
+        {
+          "tab": {
+            "label": "Nested"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    }
+  ]
+}

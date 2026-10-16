@@ -1,0 +1,90 @@
+# RouteFixture — a subject app for SimWalk's route steps.
+#
+# A home screen (`route-home`) and the screens a URL can reach from it: `simwalk-fixture://detail` opens
+# `route-detail`, and any other URL leaves the app on home. Later route steps add their screens here.
+# `deeplink.walkbook.json` beside this file walks the `openURL` step against it.
+#
+# `tabs.walkbook.json` walks the tabs mode: launched with `-RouteFixtureTabs` the app shows `TabsRoot` (a
+# sidebar-adaptable TabView: Hub, Rows, Menus, Nested) instead of the stack above, one screen per walk-behaviour
+# bug it reproduces; `-RouteFixturePushForm` as well makes Hub push its form on first appearance.
+#
+# `RouteFixtureFailureSpecimen` is a UI-test target that FAILS ON PURPOSE, with a scheme of its own (it is not in the
+# `RouteFixture` scheme, so building or testing RouteFixture is unchanged). It exists to make the result bundle
+# `Tests/SimWalkCoreTests/Fixtures/runner-failure-activities.json` is exported from; its test file says how.
+#
+# A project of its own, not a target in `Runner/project.yml`, for the reason PermissionFixture's is. The
+# committed `.xcodeproj` builds without XcodeGen; this file documents how it was made. Build and walk:
+#     xcodegen generate
+#     xcodebuild -project RouteFixture.xcodeproj -scheme RouteFixture \
+#       -destination 'generic/platform=iOS Simulator' -derivedDataPath ../../.build/route-fixture build
+#     simwalk walk deeplink.walkbook.json --output <output>.simwalk --device <udid> \
+#       --app-path ../../.build/route-fixture/Build/Products/Debug-iphonesimulator/RouteFixture.app
+name: RouteFixture
+
+options:
+  bundleIdPrefix: dev.simwalk
+  deploymentTarget:
+    iOS: "18.0"
+
+targets:
+  RouteFixture:
+    type: application
+    platform: iOS
+    sources:
+      - path: RouteFixture
+    info:
+      path: RouteFixture/Info.plist
+      properties:
+        CFBundleDisplayName: RouteFixture
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UILaunchScreen: {}
+        NSLocationWhenInUseUsageDescription: RouteFixture shows the simulated location a walk sets.
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.simwalk.route-fixture
+            CFBundleURLSchemes: [simwalk-fixture]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.simwalk.route-fixture
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+
+  RouteFixtureFailureSpecimen:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: RouteFixtureFailureSpecimen
+    dependencies:
+      - target: RouteFixture
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.simwalk.route-fixture.failure-specimen
+        SWIFT_VERSION: "6.0"
+        TEST_TARGET_NAME: RouteFixture
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+
+schemes:
+  RouteFixture:
+    build:
+      targets:
+        RouteFixture: all
+    run:
+      config: Debug
+  RouteFixtureFailureSpecimen:
+    build:
+      targets:
+        RouteFixture: all
+        RouteFixtureFailureSpecimen: [test]
+    test:
+      targets:
+        - RouteFixtureFailureSpecimen

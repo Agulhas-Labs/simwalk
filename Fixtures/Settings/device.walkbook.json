@@ -1,0 +1,91 @@
+{
+  "name": "apple-settings-device",
+  "appBundleID": "com.apple.Preferences",
+  "screens": [
+    {
+      "id": "root",
+      "expect": "com.apple.settings.sidebar.collectionView",
+      "route": [
+        {
+          "scrollTo": {
+            "label": "General"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light"
+        },
+        {
+          "theme": "dark"
+        },
+        {
+          "theme": "light",
+          "dynamicTypeSize": "UICTContentSizeCategoryAccessibilityXL"
+        }
+      ]
+    },
+    {
+      "id": "general",
+      "route": [
+        {
+          "tap": {
+            "label": "General"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light"
+        },
+        {
+          "theme": "dark"
+        }
+      ]
+    },
+    {
+      "id": "accessibility",
+      "expect": "AccessibilitySettingsControllerView",
+      "route": [
+        {
+          "tap": {
+            "label": "Accessibility"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light"
+        }
+      ]
+    },
+    {
+      "id": "display-text-size-lower",
+      "route": [
+        {
+          "tap": {
+            "label": "Accessibility"
+          }
+        },
+        {
+          "tap": {
+            "label": "Display & Text Size"
+          }
+        },
+        {
+          "scrollTo": {
+            "label": "Smart Invert"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light"
+        },
+        {
+          "theme": "dark"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "segmenter-fixture",
+  "appBundleID": "dev.simwalk.segmenter-fixture",
+  "screens": [
+    {
+      "id": "summary",
+      "expect": "summary-screen",
+      "route": [{ "tab": { "label": "Log" } }],
+      "states": [
+        { "theme": "light" },
+        { "theme": "dark", "dynamicTypeSize": "UICTContentSizeCategoryAccessibilityL" }
+      ]
+    },
+    {
+      "id": "passages",
+      "expect": "passages-screen",
+      "route": [{ "tab": { "label": "Passages" } }],
+      "states": [
+        { "theme": "light" },
+        { "theme": "light", "arguments": ["-SegmenterFixtureLaterWeek"] }
+      ]
+    },
+    {
+      "id": "passage-detail",
+      "expect": "passage-detail",
+      "route": [{ "tab": { "label": "Passages" } }, { "tap": { "label": "Coastal passage" } }],
+      "states": [{ "theme": "light" }]
+    },
+    {
+      "id": "wind",
+      "expect": "wind-screen",
+      "route": [{ "tab": { "label": "Boat" } }, { "tap": { "label": "Wind" } }],
+      "states": [{ "theme": "light" }]
+    },
+    {
+      "id": "hours-afloat",
+      "expect": "hours-screen",
+      "route": [{ "tab": { "label": "Boat" } }, { "tap": { "label": "Hours afloat" } }],
+      "states": [{ "theme": "light" }]
+    },
+    {
+      "id": "anchor-watch",
+      "expect": "watch-screen",
+      "route": [{ "tab": { "label": "Boat" } }, { "tap": { "label": "Anchor watch" } }],
+      "states": [{ "theme": "light" }]
+    }
+  ]
+}

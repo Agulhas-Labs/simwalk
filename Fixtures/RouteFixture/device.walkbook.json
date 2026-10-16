@@ -1,0 +1,15 @@
+{
+  "name": "route-fixture-device",
+  "appBundleID": "dev.simwalk.route-fixture",
+  "screens": [
+    {
+      "id": "home",
+      "expect": "route-home",
+      "route": [{ "scrollTo": { "label": "Third" } }],
+      "states": [
+        { "theme": "light" },
+        { "theme": "dark" }
+      ]
+    }
+  ]
+}

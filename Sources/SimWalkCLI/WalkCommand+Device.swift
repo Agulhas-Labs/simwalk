@@ -1,0 +1,64 @@
+//
+// Copyright © Agulhas Labs
+//
+
+import Foundation
+import SimWalkCore
+import SimWalkDriver
+
+extension WalkCommand {
+    /// Where a walk runs: a simulator, which is ``performWalk(shell:pause:now:nonce:runner:logFileURL:builds:leases:telemetry:note:)``, or a physical iPhone or iPad, which is ``DeviceWalk`` (SimWalk#116).
+    enum Target {
+        case simulator
+        case device(DeviceWalk)
+    }
+
+    /// Decides which, **before the simulator path touches anything**, and refuses what the target cannot take.
+    ///
+    /// What counts as a physical device is ``PhysicalDeviceRoute``'s, which `session start` reads too.
+    ///
+    /// `--team` and `--runner-bundle-id` are the device path's and are refused on a simulator walk; `--dry-run` and `--verbose` are the simulator path's and are refused on a device.
+    func target(shell: Shell, leases: LeaseStore) throws -> Target {
+        let device = try physicalWalk(shell: shell, leases: leases)
+        guard let device else {
+            for (flag, value) in [("--team", team), ("--runner-bundle-id", runnerBundleId)] where value != nil {
+                throw DeviceWalkRefusal.deviceOnly(flag: flag)
+            }
+            return .simulator
+        }
+        guard !dryRun else {
+            throw DeviceWalkRefusal.dryRunOnDevice
+        }
+        guard !verbose else {
+            throw DeviceWalkRefusal.verboseOnDevice
+        }
+        return .device(device)
+    }
+
+    private func physicalWalk(shell: Shell, leases: LeaseStore) throws -> DeviceWalk? {
+        try PhysicalDeviceRoute.resolve(device: device, lease: lease, shell: shell, leases: leases).map { deviceWalk(udid: $0.udid) }
+    }
+
+    private func deviceWalk(udid: String?) -> DeviceWalk {
+        DeviceWalk(walkbook: walkbook, requestedUDID: udid, lease: lease, team: team, runnerBundleID: runnerBundleId, app: appPath, output: output, screens: screens, settle: settle, motion: motion)
+    }
+
+    /// A walk of whichever target `--device` or `--lease` names, answered as `walk` answers: the simulator's served answer, or the device walk's.
+    ///
+    /// The device path takes none of the simulator path's telemetry, pause or nonce: it has no progress file and its waits are the runner's own.
+    func walked(
+        shell: Shell = Shell(),
+        runner resolveRunner: (() throws -> RunnerSource)? = nil,
+        builds: RunnerBuilds,
+        leases: LeaseStore,
+        now: @escaping () -> Date = { Date() },
+        telemetry: WalkTelemetry? = nil,
+        note: (String) -> Void = { _ in }
+    ) throws -> Answer {
+        let target = try target(shell: shell, leases: leases)
+        guard case let .device(walk) = target else {
+            return try performWalk(shell: shell, now: now, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, note: note).servedAnswer()
+        }
+        return try walk.answer(shell: shell, builds: builds, resolveRunner: resolveRunner, leases: leases, holderPID: ProcessInfo.processInfo.processIdentifier, now: now())
+    }
+}

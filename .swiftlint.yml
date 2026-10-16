@@ -1,0 +1,152 @@
+# SimWalk SwiftLint config: the whole rule set, standalone.
+#
+# Intentionally disabled and why:
+# - line length, brace/comma style -> owned by SwiftFormat.
+# - indentation_width -> owned by SwiftFormat; the rule false-positives on SwiftFormat-aligned wrapped
+#   case labels and on indentation inside multi-line string literals.
+# - file_name -> conflicts with deliberate naming conventions.
+# - file_length / type_body_length -> SwiftLint cannot tell a test suite from production code. A suite
+#   is a flat list of independent cases with no coupling to reduce, so splitting one on size just
+#   yields FooTests2, whereas a long production type usually is holding more than one responsibility.
+#   Path exclusion, SwiftLint's only lever, is wrong in both directions: it exempts the fixtures and
+#   stubs living beside the suites, and fails to exempt a suite kept anywhere else.
+disabled_rules:
+  - duplicate_conditions
+  - trailing_comma
+  - opening_brace
+  - line_length
+  - file_length
+  - function_body_length
+  - nesting
+  - file_name
+  - indentation_width
+  - type_contents_order
+  - redundant_discardable_let
+  # redundant_string_enum_value would flag explicit String enum raw values that equal the case name,
+  # but raw values backing persisted data must stay explicit so a case rename can't silently change
+  # the stored string. Mirrors --disable redundantRawValues in the SwiftFormat config.
+  - redundant_string_enum_value
+  - type_body_length
+  # optional_data_string_conversion argues for a bug, so it is off rather than merely unheeded. It
+  # asks for the failable String(data:encoding:) at every String(decoding:as:) site, and that
+  # initialiser returns nil for the WHOLE buffer on a single undecodable byte, precisely the defect
+  # the lossy form exists to avoid: one path that could not be spelled as UTF-8 collapsed an entire
+  # changed-file list to empty, and the tool reported "0 in changed files", a measurement it had
+  # never made. Every `String(decoding:` site outside .build is a deliberate lossy decode.
+  - optional_data_string_conversion
+
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - implicit_return
+  - multiline_parameters_brackets
+  - redundant_nil_coalescing
+  - implicit_optional_initialization
+  - unneeded_parentheses_in_closure_argument
+  - vertical_parameter_alignment_on_call
+  - modifier_order
+  - vertical_whitespace_closing_braces
+  - vertical_whitespace_opening_braces
+  - redundant_type_annotation
+  - force_unwrapping
+
+custom_rules:
+  no_dot_init:
+    name: "No .init() shorthand"
+    regex: '(?<![A-Za-z])\.init\('
+    message: "Use the explicit type name instead of .init(). Prefer MyType(param:) over .init(param:) for clarity and faster compile times."
+    severity: error
+
+  no_swiftlint_disable:
+    name: "No SwiftLint Disable"
+    regex: '(?i)//\s*swiftlint:(disable|next|this)'
+    message: "Never use inline swiftlint:disable. Refactor code to pass lint, or adjust the project configuration."
+    severity: warning
+
+  no_print:
+    name: "No print()"
+    regex: '(?<![A-Za-z0-9_.])print\('
+    message: "Do not use print(). Use os.Logger for logging."
+    severity: error
+
+function_parameter_count: 6
+cyclomatic_complexity:
+  warning: 40
+  error: 200
+type_name:
+  min_length: 3
+  max_length: 40
+  allowed_symbols:
+    - _
+
+# Bans single-letter/abbreviated names (e.g. `c` for color). Error-level: names shorter than
+# 3 chars fail the commit hook unless listed in `excluded` (conventional math/loop/coordinate
+# idioms). Use descriptive names everywhere else.
+identifier_name:
+  min_length:
+    warning: 3
+    error: 3
+  max_length: 50
+  excluded:
+    - id
+    - URL
+    # coordinate / geometry
+    - x
+    - y
+    - dx
+    - dy
+    - W
+    - H
+    - w
+    - h
+    - r
+    - xs
+    # loop / math locals
+    - i
+    - j
+    - n
+    - m
+    - s
+    - t
+    - d
+    - b
+    - a
+    - q
+    - v
+    - c
+    - mn
+    - mx
+    - lo
+    - hi
+    - d1
+    - d2
+    - d3
+    - t0
+    # unit / domain abbreviations (time, distance)
+    - km
+    - ms
+    - hr
+    - bt
+    - db
+    - ex
+    - fx
+    - up
+    - to
+    - ai
+    - "no"
+
+vertical_whitespace:
+  max_empty_lines: 1
+
+# `Runner` is listed so a bare `swiftlint` covers the XCUITest executor too. The pre-commit hook passes
+# paths explicitly, which overrides this list, so without it here the two ways of running the linter
+# would disagree about what is checked, and the write side of the bundle contract is the last place that
+# should be quietly uncovered.
+included:
+  - Sources
+  - Tests
+  - Runner
+
+excluded:
+  - .build
+  - DerivedData

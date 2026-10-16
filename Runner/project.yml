@@ -1,0 +1,58 @@
+# SimWalkRunner — the generic XCUITest executor.
+#
+# **This file is documentation, not a build step.** `SimWalkRunner.xcodeproj` beside it is committed and
+# is what `xcodebuild` consumes, so nothing here needs XcodeGen installed — which matters because
+# XcodeGen is a Homebrew package and an Agulhas convention, and `SimWalkCore`'s founding rule is that
+# this tool runs at work on plain git with neither. XcodeGen authored the project once; if the two ever
+# disagree, the `.xcodeproj` wins, because it is the one that builds.
+#
+# Regenerating is optional and only needed if the runner's own structure changes:
+#     cd Runner && xcodegen generate
+#
+# The target deliberately has **no Target Application** (no `TEST_TARGET_NAME`). That is the whole
+# design: the runner has no compile-time knowledge of the app it walks, and drives whatever
+# `Walkbook.appBundleID` names via `XCUIApplication(bundleIdentifier:)`. One runner, every app, no
+# generated code inside anybody's repo.
+#
+# `Fixtures/` (the permission-sheet fixture app, SimWalk#28) is not part of this project. `install-hook`
+# snapshots the whole checkout, so its files are copied into every runner snapshot, but no runner build
+# compiles them: a fixture is built by hand, under `.build/`, only for a live check.
+name: SimWalkRunner
+
+options:
+  bundleIdPrefix: com.agulhaslabs.simwalk
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  SimWalk:
+    path: ../
+
+targets:
+  SimWalkRunner:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: SimWalkRunner
+    dependencies:
+      - package: SimWalk
+        product: SimWalkCore
+    info:
+      path: SimWalkRunner/Info.plist
+      properties:
+        CFBundleName: SimWalkRunner
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.agulhaslabs.simwalk.runner
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+schemes:
+  SimWalkRunner:
+    build:
+      targets:
+        SimWalkRunner: [test]
+    test:
+      targets:
+        - SimWalkRunner

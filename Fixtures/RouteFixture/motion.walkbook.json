@@ -1,0 +1,14 @@
+{
+  "name": "route-fixture-motion",
+  "appBundleID": "dev.simwalk.route-fixture",
+  "screens": [
+    {
+      "id": "banner",
+      "expect": "route-banner",
+      "route": [{ "openURL": { "url": "simwalk-fixture://banner" } }],
+      "states": [{ "theme": "light" }],
+      "settle": 4000,
+      "motion": true
+    }
+  ]
+}

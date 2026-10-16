@@ -1,0 +1,21 @@
+{
+    "name": "route-fixture-setup",
+    "appBundleID": "dev.simwalk.route-fixture",
+    "setup": {
+        "privacy": { "grant": ["location"] },
+        "statusBar": "clean",
+        "increaseContrast": true
+    },
+    "screens": [
+        {
+            "id": "location",
+            "expect": "location-value",
+            "route": [
+                { "openURL": { "url": "simwalk-fixture://location" } }
+            ],
+            "states": [
+                { "theme": "light", "location": { "latitude": 51.5, "longitude": -0.12 } }
+            ]
+        }
+    ]
+}

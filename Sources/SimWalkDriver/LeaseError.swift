@@ -1,0 +1,75 @@
+//
+// Copyright © Agulhas Labs
+//
+
+import Foundation
+import SimWalkCore
+
+/// Why a lease could not be taken, used or released.
+public enum LeaseError: Error, Equatable, CustomStringConvertible {
+    /// The device carries a live lease the caller did not present.
+    case held(udid: String, holderPID: Int32, expiresAt: Date)
+    /// A lease file that does not decode — never reclaimed, since what cannot be read cannot be judged free.
+    case unreadable(path: String)
+    case noSuchLease
+    case expired(udid: String, expiresAt: Date)
+    /// A lease whose holder has exited: reclaimable by anyone, so renewing it would keep nobody off the device.
+    case holderExited(udid: String, holderPID: Int32)
+    /// Every device a choice could fall on is leased.
+    case noUnleasedDevice(runtime: String)
+    /// No shut-down device among those a lease could fall on is free — a name, or a runtime when nothing was named — and a booted one is leased only when named by UDID.
+    case noShutDownDevice(among: String)
+    case cloneSourceBooted(udid: String)
+    /// A device a lease cloned whose lease has lapsed: it is released — the clone deleted — and never leased again.
+    case awaitingDeletion(udid: String)
+    /// A created device that could not be shut down or deleted; the lease is kept so a release can be run again.
+    case deviceNotDeleted(udid: String, command: String, reason: String)
+    case storeFailed(path: String, reason: String)
+    /// A token presented to a physical-device walk whose lease is on a simulator.
+    case notPhysicalLease(udid: String)
+
+    public var description: String {
+        switch self {
+        case let .held(udid, pid, expiresAt):
+            "\(udid) is leased by pid \(pid) until \(Self.time(expiresAt)) — take a device of your own (`simwalk lease acquire`), or pass that lease's token with --lease; nothing on the device was touched"
+        case let .unreadable(path):
+            "the lease at \(path) cannot be read, so the device is treated as held — remove the file if no walk holds it"
+        case .noSuchLease:
+            "no lease carries that token — it was released, or reclaimed after it expired; `simwalk lease list` shows what is held"
+        case let .expired(udid, expiresAt):
+            "the lease on \(udid) expired at \(Self.time(expiresAt)) — release it and acquire again"
+        case let .holderExited(udid, pid):
+            "the lease on \(udid) lived as long as pid \(pid), which has exited, so any session may reclaim it and renewing it would keep nobody off the device — release it and acquire again"
+        case let .noUnleasedDevice(runtime):
+            "every available \(runtime) simulator is leased — release one (`simwalk lease list`), or clone one (`simwalk lease acquire --clone-from <udid>`)"
+        case let .noShutDownDevice(among):
+            "no shut-down \(among) simulator is free to lease, and a booted one may be in use by a session that takes no leases, so it is leased only when named by UDID — `simwalk lease acquire --device <udid>` for a booted device that is yours, `simwalk lease acquire --clone-from <udid>` to clone a shut-down one, or `simwalk lease list` to see what is held"
+        case let .cloneSourceBooted(udid):
+            "\(udid) is booted and simctl clones only a device that is shut down — shut it down first (xcrun simctl shutdown \(udid)) if it is yours to stop"
+        case let .awaitingDeletion(udid):
+            "\(udid) is a clone a lease made, and that lease has lapsed or is being released, so the device is deleted rather than leased again — `simwalk prune` deletes it; take another device (`simwalk lease acquire`); nothing on the device was touched"
+        case let .deviceNotDeleted(udid, command, reason):
+            "\(command) failed: \(reason) — the lease on \(udid) is kept; release it again, or run xcrun simctl shutdown \(udid) && xcrun simctl delete \(udid)"
+        case let .storeFailed(path, reason):
+            "the lease store at \(path) could not be written: \(reason)"
+        case let .notPhysicalLease(udid):
+            "that lease is on \(udid), which is not a physical device — `device walk` walks a phone leased with `simwalk lease acquire --physical <udid>`; a simulator lease is walked with `simwalk walk --lease`; nothing was touched"
+        }
+    }
+
+    /// A lease's expiry as its refusal prints it: the subject of the line, not its provenance.
+    public static func time(_ date: Date) -> String {
+        date.formatted(.iso8601)
+    }
+}
+
+extension LeaseError: UsageFailureClassifiable {
+    /// A lease somebody else holds, a token that holds nothing and a booted clone source are all the caller's argument meeting the machine as it is; a store or a device that would not do what was asked is the machine.
+    public var usageFailureKind: UsageFailureKind {
+        switch self {
+        case .held, .unreadable, .noSuchLease, .expired, .holderExited, .noUnleasedDevice, .noShutDownDevice, .cloneSourceBooted, .awaitingDeletion, .notPhysicalLease: .inputRefused
+        case .deviceNotDeleted: .deviceLeftBad
+        case .storeFailed: .toolError
+        }
+    }
+}
