@@ -57,10 +57,10 @@ struct PruneCommand: ParsableCommand {
     /// **A released clone's device-setup record goes with it** (`journal`; SimWalk#75): the record on a clone the release deleted has nothing left to hand back, so it is removed — unless the walk that wrote it still runs, or it does not read. **Orphans are swept too** (SimWalk#92): any other record whose walk is not running, whose device holds no lease, live or a clone's, and which no longer exists as a simulator is removed (a dead walk's record on a live device is what the next walk there hands back, so it stays; a simulator list that cannot be read removes nothing); a pid that cannot be judged counts as running, an unreadable record is kept. `nil` leaves the journal alone.
     ///
     /// **Lapsed leases are released too** (`leases`; Brief §2.4): each lease past its expiry, and each whose clone's holder is gone, is removed, and a device it cloned is shut down and deleted — no device a lease did not create. `nil` leaves the lease store alone.
-    static func answer(prune: RunnerPrune, binary: (url: URL?, hash: String), checkout: URL, installedHash: String?, dryRun: Bool, now: Date, leases: DeviceLeasing? = nil, journal: DeviceSetupJournal? = nil) -> Answer {
+    static func answer(prune: RunnerPrune, binary: (url: URL?, hash: String), checkout: URL?, installedHash: String?, dryRun: Bool, now: Date, leases: DeviceLeasing? = nil, journal: DeviceSetupJournal? = nil) -> Answer {
         let binaryHash = binary.hash
         let header = "binary: sha256 \(ShortHash.of(binaryHash)) · \(prune.store.directory.path.tildedPath), \(prune.builds.directory.path.tildedPath)"
-        let isDevelopmentBuild = binary.url.map { RunnerProject.isDevelopmentBuild($0, of: checkout) } ?? false
+        let isDevelopmentBuild = binary.url.flatMap { url in checkout.map { RunnerProject.isDevelopmentBuild(url, of: $0) } } ?? false
         if !dryRun, isDevelopmentBuild, let url = binary.url {
             return Answer(
                 header: header,

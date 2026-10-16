@@ -1117,6 +1117,16 @@ named on the answer's last residue line, `result: <path>`; an answer with no res
 simwalk install-hook     # from the repo root
 ```
 
+A binary installed by Homebrew, npm or a release tarball has no checkout, and `install-hook` then takes the runner
+from the tree shipped beside it: `<prefix>/share/simwalk/` for `<prefix>/bin/simwalk`, found with symlinks in
+the binary's path resolved (Homebrew links `bin/simwalk` into its Cellar). The tree is used only when its
+`BINARY_SHA256` stamp equals this binary's SHA-256, and its `RUNNER_COMMIT` names the snapshot. A tree
+stamped for another binary, or with a missing or malformed stamp, is refused, and the `runner: not installed`
+line names every place it looked and why each was unusable. The shipped tree is tried first, the checkout the
+binary was compiled from second. **A walk installs the shipped tree by itself**: the first walk after
+`brew upgrade` or `npm update` finds a new binary with no pairing, installs the tree shipped with it and walks
+that, without re-running `install-hook`. A walk never snapshots a checkout.
+
 It always installs **the walk runner**, copied out of the checkout this binary was compiled from into
 `~/.simwalk/runner/snapshots/<commit>` and paired with the binary's SHA-256 **once**. A re-run
 from a checkout that has moved since (another branch, uncommitted edits) keeps the runner the binary
@@ -1141,7 +1151,7 @@ With Claude Code (`claude` on your PATH) it also makes four registrations:
 - **the `PreToolUse` hook**, written into `~/.claude/settings.json`. It runs `simwalk hook pre-tool-use` before each shell call an agent makes. It tags a command-line `simwalk` call with its session, so the status line counts it. In a repo with walkbooks it also refuses some of an agent's own simulator driving, namely `xcrun simctl io … screenshot`, `simctl ui … appearance` and `axe tap`, and points at the SimWalk tool instead. The refusal comes once per 30 minutes, and the same command run again goes through (see Hand-driving the simulator in [Notes for writing walkbooks](#notes-for-writing-walkbooks)). Other tools' hooks in the same list stay as they were.
 - **the agent guide**, `SimWalk.md`, copied to `~/.claude/rules/simwalk.md`, where its `paths:`
   frontmatter keeps it out of sessions that never touch a walkbook, a capture bundle or a UI-test
-  target. It is looked for beside the binary and then in the working directory, which is why the install is run from the repo root — a
+  target. It is looked for beside the binary, then in the `share/simwalk` tree a packaged release ships beside it, then in the working directory, which is why a checkout install is run from the repo root — a
   named `--guide` that cannot be read is reported rather than quietly replaced by another candidate.
   The copy is **stamped** with a marker line: that path is also the obvious name for somebody's own
   notes about this tool, and an uninstall that deleted whatever sat there would take their writing

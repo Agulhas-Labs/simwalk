@@ -210,25 +210,31 @@ verbs are `read`, `tap`, `swipe`, `scroll`, `menu` and `burst`. It never types.
 
 ## Install
 
-SimWalk is tested on macOS 27.0.1 with Xcode 27.0 and iOS 27.0 simulators. Building it needs a Swift 6.2
-toolchain. The package itself declares macOS 13 and iOS 17 as its floor. `mirror` needs a Mac with iPhone
-Mirroring.
+SimWalk runs on Apple Silicon Macs only, and needs Xcode. The walk runner is an XCUITest bundle. The
+binary builds it from source with `xcodebuild` the first time a walk needs it, and pairs it with that
+binary. That includes after an upgrade, with no step to re-run. SimWalk is tested on macOS 27.0.1 with
+Xcode 27.1 and iOS 27.0 simulators. `mirror` needs a Mac with iPhone Mirroring.
+
+Homebrew:
 
 ```sh
-git clone https://github.com/Agulhas-Labs/simwalk.git && cd simwalk
-swift build -c release
-mkdir -p ~/.local/bin
-rm -f ~/.local/bin/simwalk && cp .build/release/simwalk ~/.local/bin/simwalk
-simwalk install-hook      # run from the repo root
+brew install agulhas-labs/tap/simwalk
 ```
 
-Remove the old binary before copying the new one. Copying over it in place gets the new one killed on
-launch with no message.
+npm:
 
-`install-hook` always pairs the binary with a snapshot of the walk runner from this checkout. A binary
-without one refuses to walk.
+```sh
+npm install -g @agulhas-labs/simwalk
+```
 
-With Claude Code installed (`claude` on your PATH), `install-hook` also adds four things.
+Tarball: download `simwalk-<version>-<commit>-arm64.tar.gz` from the
+[releases page](https://github.com/Agulhas-Labs/simwalk/releases) and unpack it where it will live. Put
+`simwalk-<version>/bin` on your PATH, or symlink the binary from there. Keep the directory: the binary
+builds its runner from the `share/simwalk` source beside it.
+
+To use SimWalk from Claude Code, run `simwalk install-hook` once. A package manager never writes
+`~/.claude`, so this step is yours. It is needed for agent use, not for the command line. It adds four
+things.
 
 - The MCP server, at user scope.
 - A segment in the status line.
@@ -242,6 +248,9 @@ With Claude Code installed (`claude` on your PATH), `install-hook` also adds fou
 
 Without Claude Code, `install-hook` installs the runner, skips those four, and exits 2 to say so. For
 another MCP client, such as Cursor, run `simwalk mcp` as a stdio server.
+
+To build from source instead, see [Building from source](#building-from-source). That route needs a
+Swift 6.2 toolchain; the package itself declares macOS 13 and iOS 17 as its floor.
 
 ## Exit codes
 
@@ -273,6 +282,20 @@ swift test
 ```
 
 `setup.sh` installs Homebrew if it is missing, then SwiftFormat and SwiftLint, and sets up the git hooks.
+
+To install a build from source:
+
+```sh
+git clone https://github.com/Agulhas-Labs/simwalk.git && cd simwalk
+swift build -c release
+mkdir -p ~/.local/bin
+rm -f ~/.local/bin/simwalk && cp .build/release/simwalk ~/.local/bin/simwalk
+simwalk install-hook      # run from the repo root
+```
+
+Remove the old binary before copying the new one. Copying over it in place gets the new one killed on
+launch with no message. `install-hook` pairs the binary with a snapshot of the walk runner from this
+checkout, and a binary without one refuses to walk.
 
 ## License
 

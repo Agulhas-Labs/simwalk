@@ -554,14 +554,141 @@ struct HookInstallTests {
         #expect(answer.text.contains("mcp: registered at user scope"))
     }
 
-    /// A registration has to name the binary that is running, not the one that was expected to be — so an invocation carrying a path is standardised and one that came through PATH falls back to where the installer puts it.
+    /// A packaged binary installs the runner shipped beside it, with no checkout and no git.
     @Test
-    func theRegisteredPathIsTheBinaryThatIsActuallyRunning() {
-        let home = URL(fileURLWithPath: "/Users/x")
+    func apackagedBinaryInstallsTheRunnerShippedBesideIt() throws {
+        let scratch = try Scratch()
+        let fixture = try ShippedTreeFixture(in: scratch.directory, commit: String(repeating: "c0", count: 20), stampedFor: Self.binaryHash)
 
-        #expect(ExecutablePath.resolve(arguments: ["/opt/tools/../tools/simwalk"], home: home) == "/opt/tools/simwalk")
-        #expect(ExecutablePath.resolve(arguments: ["simwalk"], home: home) == "/Users/x/.local/bin/simwalk")
-        #expect(ExecutablePath.resolve(arguments: [], home: home) == "/Users/x/.local/bin/simwalk")
+        let answer = try Self.install(scratch, runnerSource: Self.packaged(executable: fixture.binary))
+
+        #expect(answer.text.contains("runner: c0c0c0c0 snapshotted at"))
+        #expect(scratch.runner.binding(forBinary: Self.binaryHash)?.commit == String(repeating: "c0", count: 20))
+    }
+
+    /// A packaged binary whose shipped tree was stamped for another binary refuses, naming the path and both hashes and that there is no checkout.
+    @Test
+    func apackagedBinaryWithATreeForAnotherBinaryRefusesNamingBothHashes() throws {
+        let scratch = try Scratch()
+        let other = String(repeating: "5e", count: 32)
+        let fixture = try ShippedTreeFixture(in: scratch.directory, commit: String(repeating: "c0", count: 20), stampedFor: other)
+
+        let answer = try Self.install(scratch, runnerSource: Self.packaged(executable: fixture.binary))
+
+        #expect(answer.verdict.isQualified)
+        #expect(answer.text.contains("runner: not installed"))
+        #expect(answer.text.contains(ShippedRunner.directory(besideExecutable: fixture.binary).path))
+        #expect(answer.text.contains("shipped with binary \(ShortHash.of(other)), this binary is \(ShortHash.of(Self.binaryHash))"))
+        #expect(answer.text.contains("no checkout (packaged)"))
+        #expect(scratch.runner.binding(forBinary: Self.binaryHash) == nil)
+    }
+
+    /// With neither a tree nor a checkout the refusal names both places.
+    @Test
+    func apackagedBinaryWithNoTreeNamesBothPlacesItLooked() throws {
+        let scratch = try Scratch()
+        let binary = scratch.installedBinary
+
+        let answer = try Self.install(scratch, runnerSource: Self.packaged(executable: binary))
+
+        #expect(answer.text.contains("runner: not installed — no \(ShippedRunner.directory(besideExecutable: binary).path) beside the binary; this build has no checkout (packaged)"))
+    }
+
+    /// The guide is found in the tree a release ships beside the binary, after the directory of the binary itself.
+    @Test
+    func theGuideIsFoundInTheShippedTree() throws {
+        let scratch = try Scratch()
+        let fixture = try ShippedTreeFixture(in: scratch.directory, commit: String(repeating: "c0", count: 20), stampedFor: Self.binaryHash)
+
+        let located = InstallHookCommand.locateGuide(explicit: nil, beside: fixture.binary.path)
+
+        guard case let .found(url) = located else {
+            Issue.record("no guide found: \(located)")
+            return
+        }
+
+        #expect(url.standardizedFileURL.path == fixture.tree.appendingPathComponent("SimWalk.md").standardizedFileURL.path)
+    }
+
+    private static func packaged(executable: URL) -> RunnerSnapshotSource {
+        var source = RunnerSnapshotSource(checkout: nil, binaryHash: binaryHash, run: { _, _ in
+            Shell.Result(status: 128, standardOutput: "", standardError: "no git here")
+        })
+        source.executable = executable
+        return source
+    }
+
+    /// A registration has to name the binary that is running, not the one that was expected to be — so an invocation carrying a path is standardised, and one that came through PATH is found there.
+    @Test
+    func theRegisteredPathIsTheBinaryThatIsActuallyRunning() throws {
+        let scratch = try TemporaryDirectory()
+        let binary = try Self.executableFile(at: scratch.url.appendingPathComponent("prefix/bin/simwalk"))
+
+        #expect(ExecutablePath.resolve(arguments: ["/opt/tools/../tools/simwalk"], environment: [:]) == "/opt/tools/simwalk")
+        #expect(ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": "/usr/bin:\(binary.deletingLastPathComponent().path)"]) == binary.standardizedFileURL.path)
+    }
+
+    /// The first executable `simwalk` on PATH wins, and empty, relative and non-executable entries are not candidates.
+    @Test
+    func theFirstMatchOnPathWinsAndUnusableEntriesAreSkipped() throws {
+        let scratch = try TemporaryDirectory()
+        let first = try Self.executableFile(at: scratch.url.appendingPathComponent("first/simwalk"))
+        let second = try Self.executableFile(at: scratch.url.appendingPathComponent("second/simwalk"))
+        let plain = scratch.url.appendingPathComponent("plain/simwalk")
+        try FileManager.default.createDirectory(at: plain.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("not executable".utf8).write(to: plain)
+
+        let both = [plain.deletingLastPathComponent().path, first.deletingLastPathComponent().path, second.deletingLastPathComponent().path]
+        #expect(ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": both.joined(separator: ":")]) == first.standardizedFileURL.path)
+        let unusable = ["", "first", "."] + [second.deletingLastPathComponent().path]
+        #expect(ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": unusable.joined(separator: ":")]) == second.standardizedFileURL.path)
+    }
+
+    /// A package manager's bin directory holds a link into its versioned tree; the registration names the link, which survives an upgrade, not the tree it points at.
+    @Test
+    func aSymlinkOnPathIsRegisteredAsItselfNotItsTarget() throws {
+        let scratch = try TemporaryDirectory()
+        let fixture = try ShippedTreeFixture(in: scratch, commit: String(repeating: "c0", count: 20), stampedFor: Self.binaryHash)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fixture.binary.path)
+        let link = try fixture.link(in: scratch)
+
+        let resolved = ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": link.deletingLastPathComponent().path])
+
+        #expect(resolved == link.standardizedFileURL.path)
+        #expect(resolved != fixture.binary.standardizedFileURL.path)
+    }
+
+    /// With nothing on PATH the answer is the running process's own executable — never a guess at `~/.local/bin`, which a packaged install does not use.
+    @Test
+    func noMatchOnPathFallsBackToTheProcessExecutableNotTheHomeDirectory() {
+        let own = URL(fileURLWithPath: "/somewhere/else/simwalk")
+
+        #expect(ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": "/nonexistent-dir"], processExecutable: own) == "/somewhere/else/simwalk")
+        #expect(ExecutablePath.resolve(arguments: [], environment: [:], processExecutable: own) == "/somewhere/else/simwalk")
+    }
+
+    /// The guide is found from the link a package manager put on PATH, through to the tree its target ships beside it.
+    @Test
+    func theGuideIsFoundFromASymlinkedBinary() throws {
+        let scratch = try TemporaryDirectory()
+        let fixture = try ShippedTreeFixture(in: scratch, commit: String(repeating: "c0", count: 20), stampedFor: Self.binaryHash)
+        let link = try fixture.link(in: scratch)
+
+        let located = InstallHookCommand.locateGuide(explicit: nil, beside: link.path)
+
+        guard case let .found(url) = located else {
+            Issue.record("no guide found: \(located)")
+            return
+        }
+
+        #expect(url.resolvingSymlinksInPath().path == fixture.tree.appendingPathComponent("SimWalk.md").resolvingSymlinksInPath().path)
+    }
+
+    private static func executableFile(at url: URL) throws -> URL {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("binary".utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url
     }
 
     /// The registration is last precisely so a failure there leaves only files — but a refusal that did not name them would leave somebody with a status line and a user rule pointing at tools nothing registered, and no sign on screen that either exists.

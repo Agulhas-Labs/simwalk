@@ -58,7 +58,16 @@ struct RunnerProjectTests {
             try Self.resolve(checkout: checkout, store: store, binaryHash: Self.copiedIn)
         })
 
-        #expect(thrown == .notInstalled(binaryHash: Self.copiedIn, latest: installed.binding, variable: RunnerProject.overrideVariable))
+        // The refusal also names the shipped place it looked (`/Users/x/.local/share/simwalk`), which the packaged-runner tests hold.
+        guard case let .notInstalled(hash, latest, variable, shipped, _) = thrown else {
+            Issue.record("expected notInstalled, got \(thrown)")
+            return
+        }
+
+        #expect(hash == Self.copiedIn)
+        #expect(latest == installed.binding)
+        #expect(variable == RunnerProject.overrideVariable)
+        #expect(shipped?.contains("/Users/x/.local/share/simwalk") == true)
         #expect(thrown.description.contains("sha256 \(String(Self.copiedIn.prefix(8)))"))
         #expect(thrown.description.contains("runner \(String(installed.binding.commit.prefix(8)))"))
         #expect(thrown.description.contains("simwalk install-hook"))

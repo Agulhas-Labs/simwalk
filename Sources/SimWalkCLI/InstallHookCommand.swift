@@ -28,7 +28,7 @@ struct InstallHookCommand: ParsableCommand {
     @Option(name: .customLong("settings"), help: "Settings file to edit (defaults to ~/.claude/settings.json). Takes the PreToolUse hook always, and the status line only where sift is not installed to own that slot.")
     var settings: String?
 
-    @Option(name: .customLong("guide"), help: "The agent guide to install (defaults to SimWalk.md beside this binary, then in the working directory).")
+    @Option(name: .customLong("guide"), help: "The agent guide to install (defaults to SimWalk.md beside this binary, then in the share/simwalk tree a packaged release ships beside it, then in the working directory).")
     var guide: String?
 
     @Option(name: .customLong("rule"), help: "Where to install it (defaults to ~/.claude/rules/simwalk.md).")
@@ -126,10 +126,11 @@ struct InstallHookCommand: ParsableCommand {
         }
         let candidates = [
             URL(fileURLWithPath: executable).deletingLastPathComponent().appendingPathComponent(guideName),
+            ShippedRunner.directory(besideExecutable: URL(fileURLWithPath: executable)).appendingPathComponent(guideName),
             URL(fileURLWithPath: manager.currentDirectoryPath).appendingPathComponent(guideName),
         ]
         guard let found = candidates.first(where: { manager.isReadableFile(atPath: $0.path) }) else {
-            return .missing(reason: "no \(guideName) beside the binary or in the working directory")
+            return .missing(reason: "no readable \(guideName) at \(candidates.map(\.path.tildedPath).joined(separator: ", "))")
         }
         return .found(found)
     }
@@ -166,7 +167,7 @@ struct InstallHookCommand: ParsableCommand {
 }
 
 private extension InstallHookCommand {
-    /// The walk runner, snapshotted from the checkout this binary was compiled from and paired with the binary.
+    /// The walk runner, snapshotted and paired with the binary — from the tree a packaged release ships beside it when that tree is stamped for this binary, else from the checkout this binary was compiled from, else nothing, and the line says where it looked and why each place was unusable.
     ///
     /// Not fatal when it cannot be taken, like the guide: the rest of the install still stands, and a walk from this binary then refuses naming the fix rather than building some other commit's runner. Said on the verdict, because that refusal is the next thing the person will meet.
     static func installRunner(_ store: RunnerStore, from source: RunnerSnapshotSource, qualifications: inout [String]) -> String {
@@ -175,7 +176,19 @@ private extension InstallHookCommand {
             return "runner: not installed — this binary could not be read to pair a runner with it; walks from it refuse until it is"
         }
         do {
-            let installed = try store.install(checkout: source.checkout, binaryHash: binaryHash, repoint: source.repoint, run: source.run)
+            var looked: [String] = []
+            let installed: RunnerStore.Installation
+            var fromShippedTree = false
+            if let shipped = Self.shippedTree(for: source, binaryHash: binaryHash, looked: &looked) {
+                fromShippedTree = true
+                installed = try store.install(shipped: shipped, binaryHash: binaryHash, repoint: source.repoint)
+            } else if let checkout = source.checkout {
+                installed = try store.install(checkout: checkout, binaryHash: binaryHash, repoint: source.repoint, run: source.run)
+            } else {
+                looked.append("this build has no checkout (packaged)")
+                qualifications.append("the walk runner was not installed")
+                return "runner: not installed — \(looked.joined(separator: "; ")); walks from this binary refuse until it is"
+            }
             let commit = describe(installed.binding.commit)
             let binary = "this binary (sha256 \(ShortHash.of(binaryHash)))"
             switch installed.outcome {
@@ -189,13 +202,27 @@ private extension InstallHookCommand {
                 // Kept, and said on the verdict: the checkout has moved since this binary was built from it, and
                 // pairing the two would put a runner from one commit beside a CLI from another (SimWalk#16).
                 qualifications.append("the runner this binary was installed with was kept, not repointed")
-                return "runner: kept — \(binary) is already paired with runner \(commit), and the checkout now holds \(describe(checkoutCommit)); a binary keeps the runner it was installed with. Rebuild and install to pair a new binary, or pass --repoint-runner to replace this one's"
+                return "runner: kept — \(binary) is already paired with runner \(commit), and \(fromShippedTree ? "the shipped runner beside it is" : "the checkout now holds") \(describe(checkoutCommit)); a binary keeps the runner it was installed with. Rebuild and install to pair a new binary, or pass --repoint-runner to replace this one's"
             case let .repointed(previous):
                 return "runner: repointed — \(binary) now goes with \(commit), snapshotted at \(installed.binding.snapshot.tildedPath) (was \(describe(previous.commit))), as --repoint-runner asked"
             }
         } catch {
             qualifications.append("the walk runner was not installed")
             return "runner: not installed — \(error); walks from this binary refuse until it is"
+        }
+    }
+
+    /// The tree shipped beside the binary, when it is stamped for this binary; otherwise `nil`, with why appended to `looked`.
+    static func shippedTree(for source: RunnerSnapshotSource, binaryHash: String, looked: inout [String]) -> ShippedRunner? {
+        guard let executable = source.executable else {
+            looked.append("the binary's own path is unknown, so no shipped runner tree could be looked for")
+            return nil
+        }
+        do {
+            return try ShippedRunner.find(besideExecutable: executable, binaryHash: binaryHash)
+        } catch {
+            looked.append("\(error)")
+            return nil
         }
     }
 
@@ -207,7 +234,7 @@ private extension InstallHookCommand {
             qualifications.append("old walk runners were not pruned")
             return ["runners: not pruned — this binary has no runner paired with it to keep"]
         }
-        if let executable = source.executable, RunnerProject.isDevelopmentBuild(executable, of: source.checkout) {
+        if let executable = source.executable, let checkout = source.checkout, RunnerProject.isDevelopmentBuild(executable, of: checkout) {
             qualifications.append("old walk runners were not pruned")
             return ["runners: not pruned — this is a development build, whose runner pairing is gone at its next build; `simwalk prune` from the installed binary prunes"]
         }
