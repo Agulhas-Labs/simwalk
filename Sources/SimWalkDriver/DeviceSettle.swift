@@ -74,7 +74,13 @@ public struct DeviceSettle {
         // the strength of it, so a device left in another appearance would walk the second pass on a premise the
         // first did not share. Put back and read back where the boot changed it; read back alone where it did not.
         guard found != AppearanceRetry.bootAppearance else {
-            switch DeviceAppearance.reading(udid: udid, run: bounded) {
+            let reading: DeviceAppearance.Reading
+            do {
+                reading = try DeviceAppearance.reading(udid: udid, run: bounded)
+            } catch {
+                return .failed(.readBack(found), reason: "\(error)")
+            }
+            switch reading {
             case .reported(found):
                 return .settled
             case .cutShort:

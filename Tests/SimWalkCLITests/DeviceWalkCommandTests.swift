@@ -481,6 +481,9 @@ extension DeviceWalkCommandTests {
         /// The commands in order, each reduced to what names it.
         var summary: [String] {
             calls.map { call in
+                if call.arguments == ["--find", "simctl"] {
+                    return "find simctl"
+                }
                 if call.executable.hasSuffix("xcodebuild") {
                     return call.arguments.contains("build-for-testing") ? "xcodebuild build-for-testing" : "xcodebuild test-without-building"
                 }

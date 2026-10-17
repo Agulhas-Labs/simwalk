@@ -13,11 +13,26 @@ import Testing
 struct DeviceHandbackTests {
     /// `simctl ui <udid> appearance` is how the host knows the device's appearance, and an answer it does not recognise is not guessed at.
     @Test
-    func theappearanceIsReadFromSimctlAndAnUnknownAnswerIsNotGuessed() {
-        #expect(DeviceAppearance.read(udid: "UDID-1", run: Self.answering(appearance: "dark")) == .dark)
-        #expect(DeviceAppearance.read(udid: "UDID-1", run: Self.answering(appearance: "light")) == .light)
-        #expect(DeviceAppearance.read(udid: "UDID-1", run: Self.answering(appearance: "unsupported")) == nil)
+    func theappearanceIsReadFromSimctlAndAnUnknownAnswerIsNotGuessed() throws {
+        #expect(try DeviceAppearance.read(udid: "UDID-1", run: Self.answering(appearance: "dark")) == .dark)
+        #expect(try DeviceAppearance.read(udid: "UDID-1", run: Self.answering(appearance: "light")) == .light)
+        #expect(try DeviceAppearance.read(udid: "UDID-1", run: Self.answering(appearance: "unsupported")) == nil)
         #expect(DeviceAppearance.readArguments(udid: "UDID-1") == ["simctl", "ui", "UDID-1", "appearance"])
+    }
+
+    /// SimWalk#136: a read stalled behind `xcodebuild -runFirstLaunch` is thrown with its cause, where a plain timeout stays a read that failed (SimWalk#32).
+    @Test
+    func aReadStalledOnFirstLaunchIsThrownAndAPlainTimeoutIsAFailedRead() throws {
+        let stall = ShellError.stalledOnFirstLaunch(command: "xcrun simctl ui UDID-1 appearance", seconds: 10)
+        let timeout = ShellError.timedOut(command: "xcrun simctl ui UDID-1 appearance", seconds: 10)
+
+        let thrown = #expect(throws: ShellError.self) {
+            try DeviceAppearance.reading(udid: "UDID-1") { _, _ in throw stall }
+        }
+
+        #expect(thrown == stall)
+        #expect(try DeviceAppearance.reading(udid: "UDID-1") { _, _ in throw timeout } == .failed)
+        #expect(try DeviceAppearance.read(udid: "UDID-1") { _, _ in throw timeout } == nil)
     }
 
     /// The appearance the walk found is the one it puts back — set, then read back as that.

@@ -12,7 +12,7 @@ import SimWalkDriver
 struct WalkDryRun {
     /// Prepares as a walk does, runs the runner in its dry-run mode, reads back the report it wrote, and hands the device back.
     ///
-    /// Every child goes through `shell`, and the handback's waits through `pause` and `now` — the same seams as `WalkCommand.performWalk`, so a test can run the whole sequence against a script. `nonce` is the seam for the value passed the runner and checked back against the report — a test names a fixed one to match a report staged ahead of the run.
+    /// Every child goes through `shell`, and the handback's waits through `pause` and `now` — the same seams as `WalkCommand.performWalk`, so a test can run the whole sequence against a script. `nonce` is the seam for the value passed the runner and checked back against the report — a test names a fixed one to match a report staged ahead of the run. `firstLaunch` is the dry run's one preflight (SimWalk#136).
     static func perform(
         _ command: WalkCommand,
         shell: Shell = Shell(),
@@ -24,10 +24,11 @@ struct WalkDryRun {
         builds: RunnerBuilds,
         leases: LeaseStore,
         telemetry: WalkTelemetry? = nil,
+        firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
         note: (String) -> Void = { _ in }
     ) throws -> Outcome {
         try WalkTelemetry.recording(on: telemetry) {
-            let prepared = try command.prepare(shell: shell, runner: resolveRunner, builds: builds, leases: leases, now: now(), logPath: logFileURL.path, telemetry: telemetry, note: note)
+            let prepared = try command.prepare(shell: shell, runner: resolveRunner, builds: builds, leases: leases, now: now(), logPath: logFileURL.path, telemetry: telemetry, firstLaunch: firstLaunch, note: note)
             defer { WalkCommand.discardTemporary(prepared.temporaryWalkbook) }
             // Released once the device is handed back, as a walk's is; a `--lease` lease is left to its holder.
             defer {
@@ -40,7 +41,7 @@ struct WalkDryRun {
 
             // Read before the runner, so the handback has something to put back. A dry run never changes the
             // appearance — it changes no label — but the device is handed back exactly as a walk's is.
-            let foundAppearance = DeviceAppearance.read(udid: prepared.simulator.udid, run: run)
+            let foundAppearance = try DeviceAppearance.read(udid: prepared.simulator.udid, run: run)
             // The walkbook's setup, made as a walk makes it: a route that relies on a grant rather than a `systemTap` would
             // otherwise probe as drifted. Handed back below whichever way the runner went; not made at all under a lease that could
             // no longer be renewed.

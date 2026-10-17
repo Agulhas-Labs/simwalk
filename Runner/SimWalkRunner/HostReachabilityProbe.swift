@@ -30,10 +30,14 @@ final class HostReachabilityProbe: XCTestCase {
     }
 
     /// Whether the runner can see SpringBoard, which is what the permission-sheet tap depends on — the capability XCUITest was chosen for over window-poking from the host (Brief §2.1).
+    ///
+    /// `@MainActor` for the reason `WalkRunner` is, and `exists` is read before the assertion because its message autoclosure is nonisolated.
+    @MainActor
     func testSpringBoardIsReachable() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let reachable = springboard.exists
 
-        XCTAssertTrue(springboard.exists, "SpringBoard is not reachable from the runner process, so a walk could not answer a permission sheet")
+        XCTAssertTrue(reachable, "SpringBoard is not reachable from the runner process, so a walk could not answer a permission sheet")
     }
 
     private func assertRoundTrip(in directory: URL, file: StaticString = #filePath, line: UInt = #line) throws {

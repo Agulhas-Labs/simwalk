@@ -208,6 +208,13 @@ public struct RouteTarget {
     ///
     /// The SimWalk#17 review, twice. First: a tab item labelled `Workouts` is a whole-label control, and ranked as one it would beat the row `Workouts, 18` — and the tab it switches to changes the screen's identity, so the wrong tab would be captured under the screen's id with nothing to say so. A route that means a tab says `tab`, and one that means going back says `back`. Second: ranking them *with* the bar went too far — a navigation bar's Edit or a toolbar's Done then lost to a StaticText carrying the same word — so a bar's control sits between the two.
     static let barTypes: Set<String> = ["NavigationBar", "TabBar", "Toolbar"]
+
+    /// Whether `node` is a bar on `screen`: one of ``barTypes``, with area, and shorter than half the screen.
+    ///
+    /// The height test is what leaves out the `Toolbar` that iOS 27 puts, framed at the whole screen, in every navigation stack (SimWalk#131): a container, not a bar anything sits under or a section of its own. It asks the same of every bar type, so a whole-screen `TabBar` or `NavigationBar` is a container too.
+    static func isBar(_ node: AXNode, on screen: AXNode.Frame) -> Bool {
+        barTypes.contains(node.type) && node.frame.hasArea && node.frame.height < screen.height / 2
+    }
 }
 
 public extension RouteTarget {

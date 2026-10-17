@@ -56,6 +56,8 @@ struct SessionStartCommand: ParsableCommand {
     /// Resolves the runner, the device and the app as `inspect` does, then starts the session — every effect injectable.
     ///
     /// Writes the session's progress file beside the usage log at `logFileURL` until the runner takes it over (``SessionStartProgress``); `cancellation` ends it `failed` / `cancelled`, and anything thrown ends it `failed`.
+    ///
+    /// `firstLaunch` is the start's one preflight, made before its first `simctl` call on either path (SimWalk#136).
     func perform(
         shell: Shell = Shell(),
         pause: @escaping (TimeInterval) -> Void = Thread.sleep(forTimeInterval:),
@@ -70,10 +72,11 @@ struct SessionStartCommand: ParsableCommand {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         cancellation: Cancellation? = nil,
         deviceHello: ((DeviceSessionBind) throws -> LiveSessionReady)? = nil,
+        firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
         note: (String) -> Void = { _ in }
     ) throws -> Answer {
         // Which target, before the simulator path touches anything: a physical device has no progress file, as a device walk has none.
-        if let route = try PhysicalDeviceRoute.resolve(device: device, lease: lease, shell: shell, leases: leases) {
+        if let route = try PhysicalDeviceRoute.resolve(device: device, lease: lease, shell: shell, leases: leases, firstLaunch: firstLaunch) {
             let effects = DeviceStartEffects(shell: shell, pause: pause, now: now, runner: resolveRunner, builds: builds, leases: leases, store: store, processes: processes, environment: environment, hello: deviceHello)
             return try performOnDevice(route, id: id(), effects: effects, cancellation: cancellation, note: note)
         }
@@ -82,6 +85,9 @@ struct SessionStartCommand: ParsableCommand {
         }
         let progress = SessionStartProgress(environment: environment, logFileURL: logFileURL, cancellation: cancellation)
         do {
+            // Refused before any `simctl` call when this Xcode's `simctl` would first wait on an administrator password (SimWalk#136);
+            // already asked, and not asked again, when the route check's `simctl list` came first.
+            try firstLaunch.preflight(shell: shell)
             let run: (String, [String]) throws -> Shell.Result = { try shell.run($0, $1) }
             let launchState = try state.map(Self.captureState)
             let source = try resolveRunner?() ?? RunnerProject.resolve(executable: LaunchedBinary.url, binaryHash: { LaunchedBinary.hash }, run: run)
@@ -111,7 +117,7 @@ struct SessionStartCommand: ParsableCommand {
             progress.launching()
 
             // Read before anything changes the device: what the runner puts back on every exit and `end` puts back after it.
-            let found = DeviceAppearance.read(udid: simulator.udid, run: run)
+            let found = try DeviceAppearance.read(udid: simulator.udid, run: run)
             let settled = try launchState.flatMap { try Self.settle(simulator.udid, found: found, to: $0.theme, shell: shell) }
             let sessionID = id()
             let started: (record: LiveSessionRecord, ready: LiveSessionReady)

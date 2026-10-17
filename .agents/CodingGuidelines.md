@@ -206,3 +206,12 @@ exists to remove.
 The runner executes a plan; it never improvises navigation. Anything time- or randomness-dependent
 takes its inputs explicitly (no naked `Date()`/`Date.now` in core logic paths) so a walk is
 reproducible and its manifest can attest what actually ran.
+
+## A test never signals the shared test process
+A test that sends a signal to its own process, or changes a signal's disposition and then raises it,
+does so in an exit test (`#expect(processExitsWith:)`), never in the process the rest of the suite runs
+in. Swift Testing runs a suite's tests side by side in one process, and signal state is process-wide: a
+dispatch signal source hears a signal before its delivery to a thread has finished, so a handler that
+puts `SIG_DFL` back can lose the race and the process dies of that signal, even one whose default is to
+discard it (`SIGURG`, `SIGIO`). Every test beside it then ends unreported, with no crash report to say
+why (SimWalk#133).

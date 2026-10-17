@@ -8,7 +8,7 @@ import Foundation
 ///
 /// **Hittable is not clear.** On iOS 27 the floating tab bar sits over scrolling content, and XCUITest calls an element hittable while it is half beneath that bar — so a `scrollTo` that stopped at "a tap would land" captured with its target behind the bar, and the walk read `captured`. Once `ScrollSearch` has found the element, the runner reads its frame and asks this for the next move: nothing where no bar overlaps it, a nudge of the content where one does, or the stop. A `tap` whose label was swiped into the tree asks the same, because the row a seek brings in sits at the fold, where a tap would land on the tab bar instead.
 ///
-/// **A bar** is a `TabBar`, `Toolbar` or `NavigationBar` with area that is shorter than half the screen. That height test is what leaves out the `Toolbar` every capture holds framed at the whole screen: a container, not a bar anything sits under. An element taller than the room between the bars above and below it can never clear them, so it is accepted as it was before this existed. So is a target that is a bar or sits inside one — a tab item, a navigation bar's button — which no scroll moves out from under its own bar (the #108 review: a `scrollTo` whose only match is a tab item lands on it without scrolling).
+/// **A bar** is a `TabBar`, `Toolbar` or `NavigationBar` with area that is shorter than half the screen (``RouteTarget/isBar(_:on:)``, which the segmenter asks too). That height test is what leaves out the `Toolbar` every capture holds framed at the whole screen: a container, not a bar anything sits under. An element taller than the room between the bars above and below it can never clear them, so it is accepted as it was before this existed. So is a target that is a bar or sits inside one — a tab item, a navigation bar's button — which no scroll moves out from under its own bar (the #108 review: a `scrollTo` whose only match is a tab item lands on it without scrolling).
 ///
 /// **Only a bar in front counts** (the #108 review). A modal can leave the screen it covers in the tree, its tab bar included (SimWalk#95), and the order of the tree is not the order of painting — a navigation bar precedes the content it is drawn over — so the tree cannot say which bar is in front. The runner can: it binds the bar and asks whether it is hittable. `isInFront` is asked only of the bars that overlap the element, so a read with nothing covering it costs no query.
 ///
@@ -116,9 +116,7 @@ public struct ScrollClearance: Sendable {
 
     private static func bars(in tree: AXNode) -> [AXNode] {
         let screen = tree.screenBounds
-        return tree.flattened.filter {
-            RouteTarget.barTypes.contains($0.type) && $0.frame.hasArea && $0.frame.height < screen.height / 2
-        }
+        return tree.flattened.filter { RouteTarget.isBar($0, on: screen) }
     }
 
     private func reason(_ target: RouteTarget.Candidate, _ bar: AXNode, _ frame: AXNode.Frame, why: String) -> String {

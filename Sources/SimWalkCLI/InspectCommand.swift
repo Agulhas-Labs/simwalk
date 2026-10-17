@@ -50,7 +50,7 @@ struct InspectCommand: ParsableCommand {
 
     /// Resolves the runner, finds the booted device and the installed app, runs the runner in its live-read mode, reads back the file it wrote, and hands the device back.
     ///
-    /// Every child goes through `shell`, and the handback's waits through `pause` and `now` — the seams `WalkDryRun.perform` has. `nonce` is passed the runner, checked back against its file and names that file under `scratch`, which is deleted here whatever came of the run.
+    /// Every child goes through `shell`, and the handback's waits through `pause` and `now` — the seams `WalkDryRun.perform` has. `nonce` is passed the runner, checked back against its file and names that file under `scratch`, which is deleted here whatever came of the run. `firstLaunch` is the read's one preflight, made before its first `simctl` call (SimWalk#136).
     func perform(
         shell: Shell = Shell(),
         pause: (TimeInterval) -> Void = Thread.sleep(forTimeInterval:),
@@ -61,8 +61,11 @@ struct InspectCommand: ParsableCommand {
         builds: RunnerBuilds,
         leases: LeaseStore = .standard(),
         scratch: URL = FileManager.default.temporaryDirectory,
+        firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
         note: (String) -> Void = { _ in }
     ) throws -> Answer {
+        // Refused before any `simctl` call when this Xcode's `simctl` would first wait on an administrator password (SimWalk#136).
+        try firstLaunch.preflight(shell: shell)
         let run: (String, [String]) throws -> Shell.Result = { try shell.run($0, $1) }
         // Resolved and recorded before the device is looked at, as a walk's is (`WalkCommand.prepare`), so a prune keeps
         // the build this read is about to use.
@@ -90,8 +93,8 @@ struct InspectCommand: ParsableCommand {
         // build does not keep a session's handback off a device nothing is changing (SimWalk#128).
         let claim = try WalkClaim.take(udid: simulator.udid, in: leases)
         defer { claim.release() }
-        // Read before the runner, so the handback has something to put back.
-        let foundAppearance = DeviceAppearance.read(udid: simulator.udid, run: run)
+        // Read before the runner, so the handback has something to put back; a read stalled behind `xcodebuild -runFirstLaunch` refuses (SimWalk#136).
+        let foundAppearance = try DeviceAppearance.read(udid: simulator.udid, run: run)
         let runNonce = nonce()
         let outputURL = scratch.appendingPathComponent("simwalk-inspect-\(runNonce).json")
         defer { try? FileManager.default.removeItem(at: outputURL) }

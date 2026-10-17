@@ -22,7 +22,7 @@ struct SessionStartDeviceTests {
         let answer = try fixture.start(["--device", Self.udid, "--team", "TEAM", "--app", "com.example.live"])
 
         // The spawn is in the same log as the phone's calls, so a `bind.json` sent before it would show here.
-        #expect(fixture.phone.summary.prefix(9) == ["simctl list", "list", "list", "lockState", "appearance", "build-for-testing", "spawn", "list", "bind"])
+        #expect(fixture.phone.summary.prefix(10) == ["find simctl", "simctl list", "list", "list", "lockState", "appearance", "build-for-testing", "spawn", "list", "bind"])
         #expect(fixture.hellos.first?.address == "fd00::1")
         let record = try #require(fixture.store.record(id: "s1"))
         #expect(record.device?.address == "fd00::1")
@@ -140,8 +140,8 @@ struct SessionStartDeviceTests {
         #expect(lines.count == 1)
         #expect(lines.first?.contains(key) == true)
         #expect(fixture.leases.all().isEmpty)
-        // Only the route's own reads: no prerequisite, build or bind reached the phone.
-        #expect(fixture.phone.summary == ["simctl list", "list"])
+        // Only the preflight's and the route's own reads: no prerequisite, build or bind reached the phone.
+        #expect(fixture.phone.summary == ["find simctl", "simctl list", "list"])
         #expect(fixture.store.all().isEmpty)
     }
 
@@ -444,6 +444,9 @@ extension SessionStartDeviceTests {
             calls.map { arguments in
                 if arguments == ["spawn"] {
                     return "spawn"
+                }
+                if arguments == ["--find", "simctl"] {
+                    return "find simctl"
                 }
                 if arguments.first == "simctl" {
                     return "simctl list"

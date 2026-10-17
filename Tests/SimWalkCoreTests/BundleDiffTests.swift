@@ -73,7 +73,7 @@ struct BundleDiffTests {
         #expect(passages.runOutcome == .unreachable(routeTried: [.tab(label: "Passages")]))
     }
 
-    /// The rendering names every flag with its crop under its state, what is unpaired or not compared, and the clean screens on one line; the result survives a JSON round trip unchanged.
+    /// The rendering names every flag with its crop under its state, what is unpaired or not compared, and the clean screens on one line — and no `toolbar` presence flag for the full-screen `Toolbar` iOS 27 adds to the run's tree and not the reference's (SimWalk#131); the result survives a JSON round trip unchanged.
     @Test
     func theRenderingIsCompactAndTheResultCodable() throws {
         let (referenceDirectory, runDirectory) = try (TemporaryDirectory(), TemporaryDirectory())
@@ -92,12 +92,13 @@ struct BundleDiffTests {
 
         #expect(decoded == diff)
         #expect(lines.first == "bundle diff: run walk build a1b2c3d4 against reference walk build a1b2c3d4")
-        #expect(lines.contains("summary/light: 9 flags · screens/summary/light/screen.png"))
+        #expect(lines.contains("summary/light: 8 flags · screens/summary/light/screen.png"))
         #expect(lines.contains("  row template  untitled  run only: Time under sail | {n} – {n} July (leading, trailing) · run @22,78 343×161"))
         #expect(lines.contains("  presence  Underway  reference only · list — may be data-driven · ref @14,173 374×81"))
         #expect(lines.contains("  presence  Too few passages yet  run only · run @22,981 358×106 not in screenshot"))
+        #expect(!lines.contains { $0.hasPrefix("  presence  toolbar") })
         #expect(lines.last == "no form difference: passages")
-        #expect(lines.count == 14)
+        #expect(lines.count == 13)
     }
 
     /// The header states the facts — same or different build, same or changed walkbook — and asserts no cause for a flag.

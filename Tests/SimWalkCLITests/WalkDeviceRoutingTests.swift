@@ -38,8 +38,8 @@ struct WalkDeviceRoutingTests {
 
         let answer = try command(fixture, ["--device", Self.udid, "--team", "TEAM"]).walked(shell: machine.shell, runner: fixture.source(), builds: fixture.builds, leases: fixture.leases)
 
-        // The routing read is the first `list`; the rest is `device walk`'s own order, unchanged.
-        #expect(machine.phone.summary == ["list", "list", "lockState", "appearance", "xcodebuild build-for-testing", "xcodebuild test-without-building", "copy", "wipe", "appearance"])
+        // The preflight asks where `simctl` is first (SimWalk#136); the routing read is the first `list`; the rest is `device walk`'s own order, unchanged.
+        #expect(machine.phone.summary == ["find simctl", "list", "list", "lockState", "appearance", "xcodebuild build-for-testing", "xcodebuild test-without-building", "copy", "wipe", "appearance"])
         #expect(machine.simctl == [["simctl", "list", "devices", "available", "--json"]])
         #expect(answer.verdict == .unqualified("1 of 1 screens captured · 1 capture"))
     }
@@ -57,7 +57,8 @@ struct WalkDeviceRoutingTests {
             return
         }
 
-        #expect(machine.phone.calls.isEmpty)
+        // The preflight's `--find simctl` (SimWalk#136) is the one call that is not `simctl list`, and no phone is read.
+        #expect(machine.phone.calls.allSatisfy { $0.arguments == ["--find", "simctl"] })
     }
 
     @Test
@@ -90,7 +91,7 @@ struct WalkDeviceRoutingTests {
 
         #expect(thrown.description.hasPrefix(flag[0]))
         #expect(machine.simctl.allSatisfy { $0.starts(with: ["simctl", "list"]) })
-        #expect(machine.phone.calls.isEmpty)
+        #expect(machine.phone.calls.allSatisfy { $0.arguments == ["--find", "simctl"] })
     }
 
     @Test
@@ -104,7 +105,7 @@ struct WalkDeviceRoutingTests {
         })
 
         #expect(thrown.description.contains("--dry-run"))
-        #expect(machine.phone.calls.allSatisfy { $0.arguments.starts(with: ["devicectl", "list"]) })
+        #expect(machine.phone.calls.allSatisfy { $0.arguments == ["--find", "simctl"] || $0.arguments.starts(with: ["devicectl", "list"]) })
     }
 
     /// The real entries: the CLI's `runDryRun` around `probed` (what `run()` composes) and the MCP face's `answer()`.
@@ -130,7 +131,7 @@ struct WalkDeviceRoutingTests {
         #expect(recorder.err.first?.contains(DeviceWalkRefusal.dryRunOnDevice.description) == true)
         #expect(mcp.description == DeviceWalkRefusal.dryRunOnDevice.description)
         #expect(mcp.usageFailureKind == .inputRefused)
-        #expect(machine.phone.calls.allSatisfy { $0.arguments.starts(with: ["devicectl", "list"]) })
+        #expect(machine.phone.calls.allSatisfy { $0.arguments == ["--find", "simctl"] || $0.arguments.starts(with: ["devicectl", "list"]) })
     }
 
     /// The same entries for `--verbose`: `runServing` around `walked` (what `run()` composes) and `answer()`.
@@ -156,7 +157,7 @@ struct WalkDeviceRoutingTests {
         #expect(recorder.err.first?.contains(DeviceWalkRefusal.verboseOnDevice.description) == true)
         #expect(mcp.description == DeviceWalkRefusal.verboseOnDevice.description)
         #expect(mcp.usageFailureKind == .inputRefused)
-        #expect(machine.phone.calls.allSatisfy { $0.arguments.starts(with: ["devicectl", "list"]) })
+        #expect(machine.phone.calls.allSatisfy { $0.arguments == ["--find", "simctl"] || $0.arguments.starts(with: ["devicectl", "list"]) })
     }
 
     @Test

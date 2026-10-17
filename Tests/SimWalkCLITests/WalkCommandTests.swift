@@ -1287,7 +1287,106 @@ struct WalkCommandTests {
             try command.performWalk(shell: Shell(script: script.run), pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: leases)
         }
         #expect(!script.calls.isEmpty)
-        #expect(script.calls.allSatisfy { $0.arguments.starts(with: ["simctl", "list"]) })
+        #expect(script.calls.filter { $0.arguments != ["--find", "simctl"] }.allSatisfy { $0.arguments.starts(with: ["simctl", "list"]) })
+    }
+
+    /// SimWalk#136: every `simctl` call a walk makes — setup, settle, reboot, handback — reaches the shell bounded, so none can sit behind a stalled `xcrun` forever.
+    ///
+    /// Seen where `Shell.run` has applied the per-verb bound and handed the call to its script: a bound dropped from the walk's own calls arrives here as `nil`.
+    @Test
+    func everySimctlCallAWalkMakesIsBounded() throws {
+        let (directory, retryDirectory) = try (TemporaryDirectory(), TemporaryDirectory())
+        let writes = try (bundle: Self.refusingDark(in: directory).url, to: directory.url.appendingPathComponent("walked.\(CaptureBundleLayout.directoryExtension)"))
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 0, writes: writes, retryWrites: Self.progressAgain(in: retryDirectory, refusingDark: false).url)
+        let command = try WalkCommand.parse([Self.lightAndDarkWalkbook(in: directory, setup: true), "--output", writes.to.path, "--device", "UDID-1"])
+        var seen: [(arguments: [String], timeout: TimeInterval?)] = []
+        let shell = Shell(timedScript: { executable, arguments, environment, timeout in
+            seen.append((arguments, timeout))
+            return try script.run(executable, arguments, environment)
+        })
+
+        _ = try command.performWalk(shell: shell, pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory))
+
+        let simctl = seen.filter { $0.arguments.first == "simctl" }
+
+        #expect(simctl.contains { $0.arguments.starts(with: ["simctl", "boot"]) })
+        #expect(simctl.contains { $0.arguments.starts(with: ["simctl", "status_bar"]) })
+        #expect(simctl.contains { $0.arguments.starts(with: ["simctl", "privacy"]) })
+        #expect(simctl.filter { $0.timeout == nil }.map(\.arguments).isEmpty)
+    }
+
+    /// SimWalk#136: a `simctl` call that outlives its bound refuses the walk naming that command, and the walk's claim on the device is released.
+    ///
+    /// The install is the stalled call: an appearance read that times out is deliberately no refusal (SimWalk#32), it leaves the appearance unknown.
+    @Test
+    func aSimctlCallThatOutlivesItsBoundRefusesTheWalkNamingItAndReleasesTheDevice() throws {
+        let directory = try TemporaryDirectory()
+        let leases = Self.leases(in: directory)
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 0)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", directory.url.appendingPathComponent("out.simwalk").path, "--device", "UDID-1", "--app-path", Self.fakeApp(in: directory)])
+        var stalled = ""
+        let shell = Shell { executable, arguments, environment in
+            if arguments.starts(with: ["simctl", "install"]) {
+                stalled = (["xcrun"] + arguments).joined(separator: " ")
+                throw ShellError.timedOut(command: stalled, seconds: 300)
+            }
+            return try script.run(executable, arguments, environment)
+        }
+        var refusal: (any Error)?
+
+        do {
+            _ = try command.performWalk(shell: shell, pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: leases)
+        } catch {
+            refusal = error
+        }
+
+        #expect(stalled.hasPrefix("xcrun simctl install UDID-1"))
+        #expect(refusal as? ShellError == .timedOut(command: stalled, seconds: 300))
+        #expect(WalkClaim.walkedDevices(in: leases, isAlive: HolderProcess.isAlive).isEmpty)
+        #expect(leases.all().isEmpty)
+    }
+
+    /// SimWalk#136: the appearance read before the runner, stalled behind `xcodebuild -runFirstLaunch`, refuses the walk naming the cause and the fix, before the runner runs, and releases the device.
+    @Test
+    func anAppearanceReadStalledOnFirstLaunchRefusesTheWalkNamingTheCause() throws {
+        let directory = try TemporaryDirectory()
+        let leases = Self.leases(in: directory)
+        let stall = ShellError.stalledOnFirstLaunch(command: "xcrun simctl ui UDID-1 appearance", seconds: 10)
+        let (refusal, script) = try Self.walk(in: directory, leases: leases, appearanceReadThrows: stall)
+
+        #expect(refusal as? ShellError == stall)
+        #expect(refusal.map { String(describing: $0) }?.contains("run `sudo xcodebuild -runFirstLaunch` (or open Xcode once), then retry") == true)
+        #expect(!script.calls.contains { $0.arguments.contains("test-without-building") })
+        #expect(leases.all().isEmpty)
+    }
+
+    /// SimWalk#32, kept by SimWalk#136: the same read timing out with nothing to say why is no refusal — the walk goes on to the runner with the appearance unknown.
+    @Test
+    func anAppearanceReadThatTimesOutIsStillNoRefusal() throws {
+        let directory = try TemporaryDirectory()
+        let timeout = ShellError.timedOut(command: "xcrun simctl ui UDID-1 appearance", seconds: 10)
+        let (refusal, script) = try Self.walk(in: directory, leases: Self.leases(in: directory), appearanceReadThrows: timeout)
+
+        #expect(refusal as? ShellError == nil)
+        #expect(script.calls.contains { $0.arguments.contains("test-without-building") })
+    }
+
+    /// A walk of an owned device whose every appearance read throws `error`, answering what it was refused with, if anything, and the script it ran against.
+    private static func walk(in directory: TemporaryDirectory, leases: LeaseStore, appearanceReadThrows error: ShellError) throws -> (refusal: (any Error)?, script: WalkScript) {
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 0)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", directory.url.appendingPathComponent("out.simwalk").path, "--device", "UDID-1"])
+        let shell = Shell { executable, arguments, environment in
+            if arguments == DeviceAppearance.readArguments(udid: "UDID-1") {
+                throw error
+            }
+            return try script.run(executable, arguments, environment)
+        }
+        do {
+            _ = try command.performWalk(shell: shell, pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: leases)
+        } catch {
+            return (error, script)
+        }
+        return (nil, script)
     }
 
     /// A walkbook's setup: every change it can make, so each test sees every vector.
@@ -1497,7 +1596,7 @@ struct WalkCommandTests {
             try command.performWalk(shell: Shell(script: script.run), pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory))
         }
         #expect(!script.calls.isEmpty)
-        #expect(script.calls.allSatisfy { $0.arguments.starts(with: ["simctl", "list"]) })
+        #expect(script.calls.filter { $0.arguments != ["--find", "simctl"] }.allSatisfy { $0.arguments.starts(with: ["simctl", "list"]) })
         #expect(Self.leases(in: directory).all().isEmpty)
     }
 
@@ -1637,7 +1736,7 @@ struct WalkCommandTests {
             try command.performWalk(shell: Shell(script: script.run), pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: leases)
         }
         #expect(!script.calls.isEmpty)
-        #expect(script.calls.allSatisfy { $0.arguments.starts(with: ["simctl", "list"]) })
+        #expect(script.calls.filter { $0.arguments != ["--find", "simctl"] }.allSatisfy { $0.arguments.starts(with: ["simctl", "list"]) })
         #expect(try leases.lease(onDevice: "UDID-1") == lease)
     }
 
@@ -1654,7 +1753,7 @@ struct WalkCommandTests {
             try command.performWalk(shell: Shell(script: script.run), pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: leases)
         }
         #expect(!script.calls.contains { $0.arguments.starts(with: ["simctl", "boot"]) })
-        #expect(script.calls.allSatisfy { $0.arguments.starts(with: ["simctl", "list"]) })
+        #expect(script.calls.filter { $0.arguments != ["--find", "simctl"] }.allSatisfy { $0.arguments.starts(with: ["simctl", "list"]) })
     }
 
     /// A walk whose lease is gone by the time its first runner has run — expired, reclaimed, released by `prune` — reboots nothing: the device may be another session's by then, so the settle is declined with the reason and the refusals stand.

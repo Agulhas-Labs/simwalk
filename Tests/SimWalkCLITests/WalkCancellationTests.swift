@@ -68,50 +68,44 @@ struct WalkCancellationTests {
         #expect(responses.map { $0?["id"] as? Int } == [8])
     }
 
-    /// The signal's work is done off its handler: the run is cancelled first, then the signal is sent again with its default action back — read at the moment it is sent, since a real process sending it into the no-op handler would never end.
+    /// The signal's work is done off its handler: the run is cancelled first, then the default action is put back and the signal sent again, so the process ends by it as it would have without the object.
     ///
-    /// SIGIO stands in for SIGTERM and SIGINT, and the test's `end` for the `kill(2)` that ends a real process. Its default action is to discard it: a SIGUSR2 here once ended the test process, the signal apparently delivered after the default action was back, so a signal that terminates by default is not safe to send. Each signal test has a signal of its own: the suite's tests share one process and run at once.
+    /// **A signal test runs in a child process of its own** (an exit test), sending SIGTERM as the CLI is sent it, with the real `end`. Putting the default action back races the delivery of the signal that was heard: when the delivery lands after the reset, the process ends by that signal — even one whose default action is to discard it. In the test process itself that ended every test at once, by SIGUSR2, SIGURG or SIGIO, whichever the test had sent (SimWalk#133). For SIGTERM both outcomes are the one the CLI wants, and both come after the cancel.
     @Test
-    func aSignalCancelsTheRunBeforeItIsSentAgain() async {
-        let cancellation = Cancellation()
-        let order = Order()
-        cancellation.onCancel { order.append("cancel") }
-        let signals = TerminationSignals(cancelling: cancellation, signals: [SIGIO]) { number in
-            order.append("end \(number), \(TerminationSignals.disposition(of: number) == 0 ? "default" : "still caught")")
+    func aSignalCancelsTheRunBeforeItEndsTheProcess() async {
+        let result = await #expect(processExitsWith: .signal(SIGTERM), observing: [\.standardOutputContent]) {
+            let cancellation = Cancellation()
+            cancellation.onCancel { WalkCancellationTests.say("cancel") }
+            let signals = TerminationSignals(cancelling: cancellation)
+
+            kill(getpid(), SIGTERM)
+            // A signal swallowed rather than ending the process falls through to here, and the child exits 0.
+            _ = await WalkCancellationTests.poll { false }
+            withExtendedLifetime(signals) {}
         }
 
-        kill(getpid(), SIGIO)
-        let heard = await Self.poll { order.steps.count == 2 }
-        withExtendedLifetime(signals) {}
-
-        #expect(heard)
-        #expect(order.steps == ["cancel", "end \(SIGIO), default"])
+        #expect(result.map { String(decoding: $0.standardOutputContent, as: UTF8.self) } == "cancel\n")
     }
 
     /// A signal the caller set to `SIG_IGN` (`trap '' INT`) is left ignored and cancels nothing, while a signal beside it that was not ignored is still heard.
     ///
-    /// SIGWINCH and SIGURG, whose default action is to do nothing, so no outcome of this test can end the test process.
+    /// In a child process of its own, as the test above: SIGINT ignored, so sending it neither cancels the run nor ends the process; SIGTERM, not ignored, does both.
     @Test
     func aSignalTheCallerIgnoresStaysIgnoredAndCancelsNothing() async {
-        var ignore = sigaction()
-        ignore.__sigaction_u.__sa_handler = SIG_IGN
-        var before = sigaction()
-        sigaction(SIGWINCH, &ignore, &before)
-        defer { sigaction(SIGWINCH, &before, nil) }
-        let cancellation = Cancellation()
-        let order = Order()
-        cancellation.onCancel { order.append("cancel") }
-        let signals = TerminationSignals(cancelling: cancellation, signals: [SIGWINCH, SIGURG]) { number in order.append("end \(number)") }
+        let result = await #expect(processExitsWith: .signal(SIGTERM), observing: [\.standardOutputContent]) {
+            signal(SIGINT, SIG_IGN)
+            let cancellation = Cancellation()
+            cancellation.onCancel { WalkCancellationTests.say("cancel") }
+            let signals = TerminationSignals(cancelling: cancellation)
+            WalkCancellationTests.say(TerminationSignals.isIgnored(SIGINT) ? "still ignored" : "taken over")
 
-        let stillIgnored = TerminationSignals.isIgnored(SIGWINCH)
-        kill(getpid(), SIGWINCH)
-        kill(getpid(), SIGURG)
-        let heard = await Self.poll { order.steps.contains("end \(SIGURG)") }
-        withExtendedLifetime(signals) {}
+            kill(getpid(), SIGINT)
+            kill(getpid(), SIGTERM)
+            _ = await WalkCancellationTests.poll { false }
+            withExtendedLifetime(signals) {}
+        }
 
-        #expect(stillIgnored)
-        #expect(heard)
-        #expect(order.steps == ["cancel", "end \(SIGURG)"])
+        #expect(result.map { String(decoding: $0.standardOutputContent, as: UTF8.self) } == "still ignored\ncancel\n")
     }
 
     /// Once the object goes away, each signal has the action it had before, so a signal after the walk is not swallowed by a handler nothing listens behind.
@@ -146,18 +140,9 @@ extension WalkCancellationTests {
     /// A handler of the test's own, told apart from `SIG_DFL` and `SIG_IGN` by its address.
     static let marker: @convention(c) (Int32) -> Void = { _ in }
 
-    /// The steps a signal's handling took, in order.
-    final class Order: @unchecked Sendable {
-        private let lock = NSLock()
-        private var recorded: [String] = []
-
-        var steps: [String] {
-            lock.withLock { recorded }
-        }
-
-        func append(_ step: String) {
-            lock.withLock { recorded.append(step) }
-        }
+    /// Writes `line` to standard output at once, unbuffered, so it is not lost when a signal ends the child process straight after.
+    static func say(_ line: String) {
+        FileHandle.standardOutput.write(Data((line + "\n").utf8))
     }
 
     static var walkbook: String {

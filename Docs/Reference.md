@@ -755,6 +755,22 @@ each route followed once from a fresh launch, under its screen's first state's l
 accessibility: the XCUITest session switched com.apple.Accessibility AccessibilityEnabled off as it ended, and this walk switched it back on for <udid> and saw it hold — in-process accessibility suites on this device build their trees as before
 ```
 
+### When Xcode's `simctl` is not ready
+
+`walk` (a dry run too), `inspect` and `session start` check, once and before their first `simctl` call, that the Xcode on the machine can run `simctl` at all; a `--device` is looked up in `simctl list`, so a walk or a session start on a physical device named by `--device` is checked too, and one under a `--lease` on a phone, which makes no `simctl` call, is not. Some Xcodes ship a `simctl` that first runs `xcodebuild -runFirstLaunch` whenever the installed CoreSimulator is older than the version the script expects, and that command waits on an administrator password nobody is shown, so a call sat behind it forever. The check reads the version the script expects and the one installed, and refuses when the installed one is older or missing:
+
+```
+this Xcode's simctl expects CoreSimulator <expected> and <installed> is installed, so every simctl call first runs `xcodebuild -runFirstLaunch`, which waits on an administrator password — run `sudo xcodebuild -runFirstLaunch` (or open Xcode once), then retry
+```
+
+**No `simctl` call SimWalk makes is unbounded.** Each is stopped after a ceiling set by its verb: `boot` 120 s; `bootstatus`, `install` and `clone` 300 s; every other verb 60 s. A call that outlives its bound is stopped and refused naming it:
+
+```
+`xcrun simctl install <udid> <app>` did not finish within 300s and was stopped
+```
+
+Only when `xcodebuild -runFirstLaunch` was seen running inside the stalled call's own process tree does the refusal go on to name that cause and the fix ("it was waiting on `xcodebuild -runFirstLaunch`", then the same cause and fix as above). A stall with any other cause names the command and the bound and claims nothing more. An appearance read that is stopped this way is not a refusal: it leaves the device's appearance unknown, as any failed read does. The exception is the read a walk, a dry run, an `inspect` or a `session start` makes before its runner: stopped while waiting on `xcodebuild -runFirstLaunch`, it refuses the run with that cause and fix, since every `simctl` call after it would wait the same way.
+
 ## Devices and leases
 
 Use a lease when more than one session walks at once, or when you want a device that is yours alone. A walk works on a simulator or on a physical iPhone or iPad.
@@ -1120,7 +1136,10 @@ simwalk install-hook     # from the repo root
 A binary installed by Homebrew, npm or a release tarball has no checkout, and `install-hook` then takes the runner
 from the tree shipped beside it: `<prefix>/share/simwalk/` for `<prefix>/bin/simwalk`, found with symlinks in
 the binary's path resolved (Homebrew links `bin/simwalk` into its Cellar). The tree is used only when its
-`BINARY_SHA256` stamp equals this binary's SHA-256, and its `RUNNER_COMMIT` names the snapshot. A tree
+`BINARY_SHA256` stamp equals this binary's SHA-256, and its `RUNNER_COMMIT` names the snapshot. Its
+`RUNNER_FILES` stamp lists every other file as `shasum -a 256` prints it; the snapshot holds exactly those files,
+each checked against its hash as it is copied, so a file an older package left behind, a `.DS_Store`, a missing
+file or a changed byte never reaches a runner: the install refuses, naming the file and both hashes. A tree
 stamped for another binary, or with a missing or malformed stamp, is refused, and the `runner: not installed`
 line names every place it looked and why each was unusable. The shipped tree is tried first, the checkout the
 binary was compiled from second. **A walk installs the shipped tree by itself**: the first walk after

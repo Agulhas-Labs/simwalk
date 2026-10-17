@@ -21,11 +21,14 @@ enum PhysicalDeviceRoute: Equatable {
     /// The physical device named, or `nil` for the simulator path.
     ///
     /// A `--lease` whose lease is on a physical device, or a `--device` that `simctl` lists no simulator for (by UDID or name) and `devicectl list devices` reports as physical, is a physical device. Both are reads. A `--device` known to neither is left to the simulator path's own refusal, with the physical UDIDs present added when there are any; a `devicectl` that cannot be read changes nothing, as a machine without a phone has none to name.
-    static func resolve(device: String?, lease: String?, shell: Shell, leases: LeaseStore) throws -> PhysicalDeviceRoute? {
+    ///
+    /// The `simctl list` is the command's first `simctl` call on this path, so `firstLaunch` is asked first (SimWalk#136); a lease names its device without one, and asks nothing.
+    static func resolve(device: String?, lease: String?, shell: Shell, leases: LeaseStore, firstLaunch: XcodeFirstLaunch.Check) throws -> PhysicalDeviceRoute? {
         if let lease {
             return leases.entry(token: lease)?.lease.physicalDevice == true ? .leased : nil
         }
         guard let device else { return nil }
+        try firstLaunch.preflight(shell: shell)
         let simulators = try Simulator.available(shell: shell)
         guard !simulators.contains(where: { $0.udid == device || $0.name == device }) else { return nil }
         do {

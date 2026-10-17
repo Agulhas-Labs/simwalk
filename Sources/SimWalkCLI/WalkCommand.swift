@@ -111,9 +111,11 @@ struct WalkCommand: ParsableCommand {
     /// The dry run itself: refuses a dry run on a device, and a device-only flag on a simulator, before the probe boots anything.
     ///
     /// Shared by the CLI's `run()` and the MCP face's ``answer(environment:cancellation:shell:builds:leases:)`` so a test can drive the refusal through the entry both take.
-    func probed(shell: Shell = Shell(), builds: RunnerBuilds, leases: LeaseStore, telemetry: WalkTelemetry? = nil, note: (String) -> Void = { _ in }) throws -> WalkDryRun.Outcome {
-        _ = try target(shell: shell, leases: leases)
-        return try WalkDryRun.perform(self, shell: shell, builds: builds, leases: leases, telemetry: telemetry, note: note)
+    ///
+    /// `firstLaunch` is the dry run's one preflight, made before its first `simctl` call (SimWalk#136).
+    func probed(shell: Shell = Shell(), builds: RunnerBuilds, leases: LeaseStore, telemetry: WalkTelemetry? = nil, firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(), note: (String) -> Void = { _ in }) throws -> WalkDryRun.Outcome {
+        _ = try target(shell: shell, leases: leases, firstLaunch: firstLaunch)
+        return try WalkDryRun.perform(self, shell: shell, builds: builds, leases: leases, telemetry: telemetry, firstLaunch: firstLaunch, note: note)
     }
 
     /// What this run writes about itself: the progress file `<session>.json` beside the usage log, and a walk's result file beside that — a dry run writes none (`Docs/SIMWALK-PROGRESS.md` §1).
@@ -181,6 +183,8 @@ struct WalkCommand: ParsableCommand {
     /// `logFileURL` is resolved here, at the face, rather than inside the runner: `UsageLog.standard()` is what honours `SIMWALK_USAGE_LOG`, and resolving it once and handing the runner the *file* it names is what keeps the two processes' lines in the same place. A runner computing its own path from a bare `.simwalk` directory would agree with the driver only when nobody had moved the log — which a test always does.
     ///
     /// `builds` is where the runner is built, and a walk writes its record there before the build starts — so a test hands it a scratch directory, never the machine's own.
+    ///
+    /// `firstLaunch` is the walk's one preflight (SimWalk#136): a caller that has already asked it hands it on, so it is not asked twice.
     func performWalk(
         shell: Shell = Shell(),
         pause: (TimeInterval) -> Void = Thread.sleep(forTimeInterval:),
@@ -191,10 +195,11 @@ struct WalkCommand: ParsableCommand {
         builds: RunnerBuilds,
         leases: LeaseStore,
         telemetry: WalkTelemetry? = nil,
+        firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
         note: (String) -> Void = { _ in }
     ) throws -> Outcome {
         try WalkTelemetry.recording(on: telemetry) {
-            let prepared = try prepare(shell: shell, runner: resolveRunner, builds: builds, leases: leases, now: now(), logPath: logFileURL.path, telemetry: telemetry, note: note)
+            let prepared = try prepare(shell: shell, runner: resolveRunner, builds: builds, leases: leases, now: now(), logPath: logFileURL.path, telemetry: telemetry, firstLaunch: firstLaunch, note: note)
             defer { Self.discardTemporary(prepared.temporaryWalkbook) }
             // Released once the device is handed back, whichever way the walk went; a `--lease` lease is left to its holder.
             defer {
@@ -208,8 +213,8 @@ struct WalkCommand: ParsableCommand {
 
             // Read before any state touches it, on the host: what the walk puts back afterwards, and what the
             // state check decides a failed light/dark comparison by. `nil` when it cannot be read, which the
-            // check answers by refusing both sides.
-            let foundAppearance = DeviceAppearance.read(udid: simulator.udid, run: run)
+            // check answers by refusing both sides; a read stalled behind `xcodebuild -runFirstLaunch` refuses the walk (SimWalk#136).
+            let foundAppearance = try DeviceAppearance.read(udid: simulator.udid, run: run)
             // And the locale it is already in, which the state check needs to tell a discarded locale from one the
             // device already had (SimWalk#18). Nothing to put back: a locale state is a launch argument.
             let foundLocale = DeviceLocale.read(udid: simulator.udid, run: run)
@@ -393,6 +398,7 @@ struct WalkCommand: ParsableCommand {
         scratch: URL = FileManager.default.temporaryDirectory,
         logPath: String? = nil,
         telemetry: WalkTelemetry? = nil,
+        firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
         note: (String) -> Void = { _ in }
     ) throws -> Prepared {
         telemetry?.begin(tool: dryRun ? Self.dryRunLogName : "walk", logPath: logPath)
@@ -428,6 +434,9 @@ struct WalkCommand: ParsableCommand {
 
         // The device, a lease on it and the walk's claim, taken before anything touches the device: a walk that names no lease
         // takes one of its own on the device it resolves, so no other simwalk session can take that device for the length of the walk.
+        // Refused before any `simctl` call when this Xcode's `simctl` would first wait on an administrator password (SimWalk#136);
+        // already asked, and not asked again, when the route check's `simctl list` came first.
+        try firstLaunch.preflight(shell: shell)
         let held = try HeldDevice.take(for: self, shell: shell, leases: leases, now: now)
         let simulator = held.simulator
         telemetry?.resolved(simulator, app: book.appBundleID)

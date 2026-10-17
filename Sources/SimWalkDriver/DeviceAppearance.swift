@@ -12,16 +12,28 @@ import SimWalkCore
 /// Read through `simctl ui`, on the host, rather than from inside the runner — the host is where a walk begins and ends, so it is the one place that can say what the device was before any state touched it.
 public struct DeviceAppearance {
     /// The device's appearance as `simctl` reports it, or `nil` when it could not be read, named something this tool has no theme for, or was cut short.
-    public static func read(udid: String, run: (String, [String]) throws -> Shell.Result) -> Walkbook.Theme? {
-        guard case let .reported(theme) = reading(udid: udid, run: run) else { return nil }
+    ///
+    /// Throws only what ``reading(udid:run:)`` throws: a read stalled behind `xcodebuild -runFirstLaunch`.
+    public static func read(udid: String, run: (String, [String]) throws -> Shell.Result) throws -> Walkbook.Theme? {
+        guard case let .reported(theme) = try reading(udid: udid, run: run) else { return nil }
         return theme
     }
 
     /// What asking `simctl` for the device's appearance came to — with an answer cut short at a bounded call's drain limit, and a call that did not run to a reported answer at all (a non-zero exit or a thrown error, a timeout included), each told apart from an answer the device gave (SimWalk#30, SimWalk#32).
     ///
     /// **A judgement that compares the appearance with an expected one reads this, not `read`.** Neither a cut-short nor a failed answer parses as anything the device said — "the device read nothing" beside an expected `light` is not a mismatch to hold the device to; only `.reported` carries one.
-    public static func reading(udid: String, run: (String, [String]) throws -> Shell.Result) -> Reading {
-        guard let result = try? run(xcrun, readArguments(udid: udid)), result.succeeded else { return .failed }
+    ///
+    /// **A read stalled behind `xcodebuild -runFirstLaunch` is thrown, not `.failed`** (SimWalk#136): every `simctl` call after it would stall the same way, so it is a cause to name, where a plain timeout is one device's read gone missing.
+    public static func reading(udid: String, run: (String, [String]) throws -> Shell.Result) throws -> Reading {
+        let result: Shell.Result
+        do {
+            result = try run(xcrun, readArguments(udid: udid))
+        } catch let ShellError.stalledOnFirstLaunch(command, seconds) {
+            throw ShellError.stalledOnFirstLaunch(command: command, seconds: seconds)
+        } catch {
+            return .failed
+        }
+        guard result.succeeded else { return .failed }
         guard !result.truncated else { return .cutShort }
         return .reported(Walkbook.Theme(rawValue: result.standardOutput.trimmed))
     }
@@ -31,7 +43,13 @@ public struct DeviceAppearance {
         guard let written = try? run(xcrun, setArguments(theme, udid: udid)), written.succeeded else {
             return .failed(found: theme, reason: "setting it did not succeed")
         }
-        return switch reading(udid: udid, run: run) {
+        let readBack: Reading
+        do {
+            readBack = try reading(udid: udid, run: run)
+        } catch {
+            return .unconfirmed(found: theme, reason: "it was set, but reading it back stalled (\(error))")
+        }
+        return switch readBack {
         case .reported(theme):
             .restored(theme)
         case .cutShort:

@@ -34,7 +34,7 @@ public struct Shell {
 
     /// Runs `executable` with `arguments`, optionally adding to its environment, and waits for it — for at most `timeout` seconds when one is given.
     ///
-    /// **A bound is for a child that can wedge in the middle of a walk**, where waiting forever turns a failure the walk could have reported into a session that never answers (SimWalk#26: `simctl bootstatus` on a device whose boot hung). Past it the child's process group is sent `SIGTERM`, then `SIGKILL` if any of it is still there a moment later — whatever the child started goes with it, unless it left the group — and the call throws `ShellError.timedOut` naming the command. A scripted shell answers from its script, which decides for itself what a timeout looks like.
+    /// **A bound is for a child that can wedge in the middle of a walk**, where waiting forever turns a failure the walk could have reported into a session that never answers (SimWalk#26: `simctl bootstatus` on a device whose boot hung). Past it the child's process group is sent `SIGTERM`, then `SIGKILL` if any of it is still there a moment later — whatever the child started goes with it, unless it left the group — and the call throws `ShellError.timedOut` naming the command — or `stalledOnFirstLaunch`, when the tree held `xcodebuild -runFirstLaunch` as the bound ran out. **An `xcrun simctl` call given no bound gets its verb's** (``SimctlBound``), so no `simctl` call waits forever. A scripted shell answers from its script, which decides for itself what a timeout looks like.
     ///
     /// `input`, when given, is the child's stdin — read from a file this call writes and removes, so a child that exits without reading it cannot raise `SIGPIPE` here, and one that writes before it reads cannot deadlock against a writer. `workingDirectory` is the child's own. A scripted shell sees neither.
     public func run(
@@ -45,6 +45,8 @@ public struct Shell {
         input: Data? = nil,
         workingDirectory: URL? = nil
     ) throws -> Result {
+        // Every `simctl` call is bounded, by its verb, unless its caller set a bound of its own (SimWalk#136).
+        let timeout = timeout ?? SimctlBound.seconds(for: executable, arguments)
         if let script {
             return try script(executable, arguments, environment, timeout)
         }
@@ -120,12 +122,16 @@ public struct Shell {
         let collector = OutputCollector()
         let drains = [Drain(out, into: collector, isStandardError: false), Drain(error, into: collector, isStandardError: true)]
         if let timeout, exited.wait(timeout: .now() + timeout) == .timedOut {
+            // Read before the stop, while the stalled tree is still there to say what it was waiting on — the only
+            // evidence a refusal may name a cause on (SimWalk#136).
+            let waitingOnFirstLaunch = XcodeFirstLaunch.isWaiting(in: ProcessTree.commandLines(of: process.processIdentifier, group: group))
             Self.stop(process, group: group, exited: exited)
             // A grandchild still holding a pipe would keep a drain open for as long as it lives; the answer
             // here is already known, so the drains get a moment and are then stopped — each closes its end of
             // the pipe, and nothing is left waiting on it.
             Self.settle(drains)
-            throw ShellError.timedOut(command: ([URL(fileURLWithPath: executable).lastPathComponent] + arguments).joined(separator: " "), seconds: timeout)
+            let command = ([URL(fileURLWithPath: executable).lastPathComponent] + arguments).joined(separator: " ")
+            throw waitingOnFirstLaunch ? ShellError.stalledOnFirstLaunch(command: command, seconds: timeout) : ShellError.timedOut(command: command, seconds: timeout)
         }
         process.waitUntilExit()
         var truncated = false

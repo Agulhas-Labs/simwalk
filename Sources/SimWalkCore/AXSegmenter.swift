@@ -6,7 +6,7 @@ import Foundation
 
 /// Cuts a screen into sections from its accessibility tree alone — what any app offers, with no design system's help (Brief §7.2).
 ///
-/// **The rule, in three parts.** (1) The bars — navigation, tab, tool — are sections of their own, marked by ``ScreenSection/Role``. (2) The content is the first element, descending from the root through unlabelled wrappers, with more than one child that carries text: the *stack* — a SwiftUI scroll view's content, a table's or a collection view's cells. (3) The stack's items are grouped in order: a new section starts at every *heading*, and between two cells separated by a gap (a grouped table's sections, which the tree draws no other boundary for).
+/// **The rule, in three parts.** (1) The bars — navigation, tab, tool — are sections of their own, marked by ``ScreenSection/Role``; an element of a bar's type is a bar only where ``RouteTarget/isBar(_:on:)`` says so, shorter than half the screen. One framed at the whole screen, as the `Toolbar` iOS 27 puts in every navigation stack (SimWalk#131), is a plain container: no section of its own, and what it holds is read as anywhere else — a bar inside it is a bar, labelled text inside it is content. (2) The content is the first element, descending from the root through unlabelled wrappers, with more than one child that carries text: the *stack* — a SwiftUI scroll view's content, a table's or a collection view's cells. (3) The stack's items are grouped in order: a new section starts at every *heading*, and between two cells separated by a gap (a grouped table's sections, which the tree draws no other boundary for).
 ///
 /// **A heading is read from shape, because the tree carries no header trait** (`XCUIElementSnapshot` exposes none). It is an item that is text rather than a control; whose title — its own text, or its first run where it is a header row of title and detail on one line (`Power` … `121 W avg`; a row's title over its subtitle is not one) — has no number in it and at most five words; that starts at the stack's leading edge; and that nothing else in the stack sits beside. **A heading that directly follows a heading joins its section** instead of opening one, but only when it is an axis row — two runs or more, none with a number (`start` … `finish`); a one-run heading, or one with a count (`Worth a look` … `2`), opens its own section, so an empty section does not swallow the next one's key. That is what keeps a chart card's axis row (`start` … `finish`, the shape of a header row) with its card when the plot between them draws nothing the tree can see — a field round's power chart card.
 ///
@@ -14,8 +14,9 @@ import Foundation
 public struct AXSegmenter: Segmenter {
     public init() {}
 
-    public func sections(of tree: AXNode) -> [ScreenSection] {
-        let viewport = tree.frame
+    public func sections(of captured: AXNode) -> [ScreenSection] {
+        let viewport = captured.frame
+        let tree = Self.withContainersUnbarred(captured, screen: captured.screenBounds)
         let bars = Self.bars(in: tree).map { Self.barSection($0.node, role: $0.role, viewport: viewport) }
         let stack = Self.stack(from: tree)
         let content = Self.groups(in: stack).map { Self.contentSection($0, viewport: viewport) }
@@ -57,6 +58,18 @@ extension AXSegmenter {
     /// The least vertical gap, in points, between two cells that ends a grouped table's section; cells inside one section touch.
     static var cellGroupGap: Double {
         8
+    }
+
+    /// `node` with every element of a bar's type that is not a bar on `screen` (``RouteTarget/isBar(_:on:)``) made a plain container — an `Other` with no label, identifier or value — so the steps below look inside it as they would any wrapper, and its own name (`Toolbar`) is neither a run nor a key.
+    static func withContainersUnbarred(_ node: AXNode, screen: AXNode.Frame) -> AXNode {
+        var plain = node
+        plain.children = node.children.map { withContainersUnbarred($0, screen: screen) }
+        guard barRoles[node.type] != nil, !RouteTarget.isBar(node, on: screen) else { return plain }
+        plain.type = "Other"
+        plain.label = nil
+        plain.identifier = nil
+        plain.value = nil
+        return plain
     }
 
     /// The bars under `node`, outermost first, in tree order.

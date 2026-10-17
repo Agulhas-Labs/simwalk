@@ -56,7 +56,8 @@ public struct DeviceHandback: Equatable, Sendable {
     /// **A cut-short or failed read after a runner that did not finish is `inconclusive`, not `unknown`** — a failed runner already qualifies the walk, and `unknown` would add a second qualification for a read a crash, not this reset, left unconfirmed.
     public static func resetCheck(udid: String, found: Walkbook.Theme?, runnerFinished: Bool, run: (String, [String]) throws -> Shell.Result) -> ResetCheck {
         found.map { found in
-            guard case let .reported(read) = DeviceAppearance.reading(udid: udid, run: run) else {
+            // A read stalled behind `xcodebuild -runFirstLaunch` is no answer here, as a timeout is: the runner has already run, and refusing now would discard what it made.
+            guard case let .reported(read) = (try? DeviceAppearance.reading(udid: udid, run: run)) ?? .failed else {
                 return runnerFinished ? .unknown : .inconclusive(read: nil)
             }
             guard read != found else { return .held }

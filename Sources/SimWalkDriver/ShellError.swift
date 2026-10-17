@@ -10,6 +10,10 @@ public enum ShellError: Error, Equatable, CustomStringConvertible {
     case couldNotRun(executable: String, reason: String)
     /// The command was still running when the bound its caller set ran out, and was stopped — a wedged child ends as an answer rather than a hang.
     case timedOut(command: String, seconds: TimeInterval)
+    /// A command timed out as `timedOut` did, and something it started was `xcodebuild -runFirstLaunch` when the bound ran out.
+    ///
+    /// An Xcode's `simctl` script runs it first, and it waits on an administrator password nobody is shown (SimWalk#136). Thrown only on that evidence, read from the stalled tree before it was stopped.
+    case stalledOnFirstLaunch(command: String, seconds: TimeInterval)
 
     public var description: String {
         switch self {
@@ -17,6 +21,8 @@ public enum ShellError: Error, Equatable, CustomStringConvertible {
             "cannot run \(executable): \(reason)"
         case let .timedOut(command, seconds):
             "`\(command)` did not finish within \(Int(seconds.rounded()))s and was stopped"
+        case let .stalledOnFirstLaunch(command, seconds):
+            "`\(command)` did not finish within \(Int(seconds.rounded()))s and was stopped: it was waiting on `xcodebuild -runFirstLaunch` — \(XcodeFirstLaunch.cause); \(XcodeFirstLaunch.fix)"
         }
     }
 }

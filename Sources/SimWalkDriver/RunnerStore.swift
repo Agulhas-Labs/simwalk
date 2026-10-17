@@ -70,15 +70,15 @@ public struct RunnerStore {
 
     /// Pairs `binaryHash` with the runner source a packaged release shipped beside the binary (`ShippedRunner`), answering what it did.
     ///
-    /// The same pairing as a checkout's, minus git: the files are every regular file in the tree, the commit is the one the release stamped, and the tree is never dirty — it is a release, as built. The binding's `checkout` records the shipped root, so a reader tracing a runner back finds where it came from.
+    /// The same pairing as a checkout's, minus git: the files are the ones the release listed, each checked against its listed hash as it is copied, the commit is the one the release stamped, and the tree is never dirty — it is a release, as built. The binding's `checkout` records the shipped root, so a reader tracing a runner back finds where it came from.
     public func install(shipped: ShippedRunner, binaryHash: String, repoint: Bool = false) throws -> Installation {
         let files = shipped.files()
         let content = Self.contentHash(of: files, in: shipped.root)
-        return try pair(commit: shipped.commit, content: content, files: files, from: shipped.root, binaryHash: binaryHash, repoint: repoint)
+        return try pair(commit: shipped.commit, content: content, files: files, from: shipped.root, binaryHash: binaryHash, repoint: repoint, listed: shipped.hashes)
     }
 
     /// What both installs share once they know the tree's commit, files and content hash: keep an existing pairing unless asked, reuse a snapshot whose bytes still match, else copy, then write the binding.
-    private func pair(commit: String, content: String, files: [String], from source: URL, binaryHash: String, repoint: Bool) throws -> Installation {
+    private func pair(commit: String, content: String, files: [String], from source: URL, binaryHash: String, repoint: Bool, listed: [String: String] = [:]) throws -> Installation {
         let existing = binding(forBinary: binaryHash)
         if let existing, existing.commit != commit || existing.contentHash != content, !repoint {
             return Installation(binding: existing, outcome: .kept(checkoutCommit: commit))
@@ -87,7 +87,7 @@ public struct RunnerStore {
         let snapshot = snapshotsDirectory.appendingPathComponent(commit, isDirectory: true)
         let reused = FileManager.default.fileExists(atPath: snapshot.path) && Self.contentHash(ofSnapshotAt: snapshot) == content
         if !reused {
-            try copy(files, from: source, to: snapshot, content: content)
+            try copy(files, from: source, to: snapshot, content: content, listed: listed)
         }
         let binding = Binding(commit: commit, contentHash: content, snapshot: snapshot.path, checkout: source.path)
         // A binding that already names this runner, whose snapshot had gone, has just been snapshotted again —
@@ -123,7 +123,9 @@ public struct RunnerStore {
     /// Copies `files` into `snapshot`, replacing whatever is there — a snapshot whose bytes did not match its name — by a move rather than an edit in place.
     ///
     /// **A snapshot already there whose bytes hash to `content` is kept, and the copy just made is discarded.** The reuse check in `pair` happens before the copy, and the copy takes time: a second walk (or install) of the same tree can have moved its own snapshot into place in between, and may already be building it. Replacing that one would delete a directory out from under its `xcodebuild`.
-    func copy(_ files: [String], from checkout: URL, to snapshot: URL, content: String) throws {
+    ///
+    /// **A file with a hash in `listed` is checked as it is copied**: the bytes read are the bytes hashed and the bytes written, so a tree swapped after it was found cannot reach the snapshot, and a refusal removes the partial copy before anything is paired.
+    func copy(_ files: [String], from checkout: URL, to snapshot: URL, content: String, listed: [String: String] = [:]) throws {
         let manager = FileManager.default
         try manager.createDirectory(at: snapshotsDirectory, withIntermediateDirectories: true)
         let partial = snapshotsDirectory.appendingPathComponent(".partial-\(UUID().uuidString)", isDirectory: true)
@@ -131,7 +133,21 @@ public struct RunnerStore {
         for file in files {
             let destination = partial.appendingPathComponent(file)
             try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try manager.copyItem(at: checkout.appendingPathComponent(file), to: destination)
+            guard let expected = listed[file] else {
+                try manager.copyItem(at: checkout.appendingPathComponent(file), to: destination)
+                continue
+            }
+            guard let data = try? Data(contentsOf: checkout.appendingPathComponent(file)) else {
+                throw ShippedRunner.Absence.fileMissing(root: checkout.path, path: file)
+            }
+            let found = ShippedRunner.sha256(of: data)
+            guard found == expected else {
+                throw ShippedRunner.Absence.fileChanged(root: checkout.path, path: file, listed: expected, found: found)
+            }
+            try data.write(to: destination)
+            if let permissions = try? manager.attributesOfItem(atPath: checkout.appendingPathComponent(file).path)[.posixPermissions] {
+                try manager.setAttributes([.posixPermissions: permissions], ofItemAtPath: destination.path)
+            }
         }
         if manager.fileExists(atPath: snapshot.path) {
             if Self.contentHash(ofSnapshotAt: snapshot) == content {
