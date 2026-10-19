@@ -17,8 +17,7 @@ public struct TranscriptScan {
         // every line is prose that cannot contribute. A *result* carries no tool name, so the ids still
         // awaiting one are markers too — matching on those keeps the filter exact, since only the results
         // of calls this scan actually counted are ever parsed.
-        guard mayContribute(line, awaiting: state.pending.keys) else { return }
-        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+        guard mayContribute(line, awaiting: state.pending.keys), let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let message = object["message"] as? [String: Any],
               let content = message["content"] as? [[String: Any]]
         else {
@@ -42,7 +41,7 @@ public extension TranscriptScan {
     ///
     /// Spelled here rather than read off the command tree because `SimWalkMCP` cannot see the executable target that owns it. `SimWalkCommandTests` fails when the two disagree, which is the same guarantee from the one side that can have it.
     static var invocationVerbs: Set<String> {
-        ["validate", "walk", "inspect", "bundle", "usage", "mcp", "statusline", "install-hook", "uninstall-hook", "prune", "hook", "lease", "session", "mirror", "device"]
+        ["validate", "walk", "inspect", "bundle", "usage", "mcp", "statusline", "install", "doctor", "install-hook", "uninstall-hook", "prune", "hook", "lease", "session", "mirror", "device"]
     }
 
     /// The argument vectors a shell command hands this tool — one per invocation, each the words after the binary, verb first, as the shell will split them.
@@ -119,11 +118,7 @@ private extension TranscriptScan {
     /// Closes out a counted call, taking it back when the result says it never ran.
     static func settle(_ block: [String: Any], into tally: inout SessionTally, state: inout SessionScanState) {
         guard let id = block["tool_use_id"] as? String,
-              let wasWalk = state.pending.removeValue(forKey: id)
-        else {
-            return
-        }
-        guard block["is_error"] as? Bool == true, !answered(block) else { return }
+              let wasWalk = state.pending.removeValue(forKey: id), block["is_error"] as? Bool == true, !answered(block) else { return }
         tally.calls -= 1
         tally.walks -= wasWalk ? 1 : 0
     }
@@ -185,7 +180,7 @@ private extension TranscriptScan {
     /// A word with a leading `~/` spelled out as the home directory it names, as the shell hands it on.
     static func expandingTilde(_ word: String) -> String {
         guard word.hasPrefix("~/") else { return word }
-        return FileManager.default.homeDirectoryForCurrentUser.path + word.dropFirst()
+        return HomeDirectories.user().path + word.dropFirst()
     }
 
     /// Whether a word reaches this tool's binary, however the path spells the way to it.
@@ -273,7 +268,7 @@ private extension TranscriptScan {
             hasWord = false
         }
 
-        /// Whether nothing has been read since the last command ended, which is where a `(` or `{` opens a group the shell runs rather than a body it stores.
+        // Whether nothing has been read since the last command ended, which is where a `(` or `{` opens a group the shell runs rather than a body it stores.
         func startsACommand() -> Bool {
             guard let last = tokens.last else { return true }
             if case .separator = last {
@@ -282,9 +277,9 @@ private extension TranscriptScan {
             return false
         }
 
-        /// Whether the command a `(` or `{` is starting is a function's body rather than a group.
-        ///
-        /// A brace written on a line of its own follows a separator exactly as a group's does, so the start of a command does not tell the two apart on its own — what does is the declaration one line further back, and it is read here in the two spellings that reach it: a name ending in `()`, and `function` before the name.
+        // Whether the command a `(` or `{` is starting is a function's body rather than a group.
+        //
+        // A brace written on a line of its own follows a separator exactly as a group's does, so the start of a command does not tell the two apart on its own — what does is the declaration one line further back, and it is read here in the two spellings that reach it: a name ending in `()`, and `function` before the name.
         func opensAStoredBody() -> Bool {
             var position = tokens.count - 1
             while position >= 0, case .separator = tokens[position] {

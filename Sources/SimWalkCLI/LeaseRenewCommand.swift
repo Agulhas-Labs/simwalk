@@ -3,6 +3,7 @@
 //
 
 import ArgumentParser
+import Fieldwork
 import Foundation
 import SimWalkCore
 import SimWalkDriver
@@ -38,7 +39,7 @@ struct LeaseRenewCommand: ParsableCommand {
     }
 
     func answer(store: LeaseStore, now: Date) throws -> Answer {
-        let renewed = try store.renew(token: token, ttl: LeaseAcquireCommand.seconds(ttl) ?? 0, now: now)
+        let renewed = try LeaseError.mapping { try store.renew(token: token, ttl: LeaseAcquireCommand.seconds(ttl) ?? 0, now: now) }
         let udid = store.entry(token: token)?.udid ?? "the device"
         return Answer(
             header: "leases: \(store.directory.path.tildedPath)",

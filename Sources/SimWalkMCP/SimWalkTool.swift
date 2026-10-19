@@ -2,7 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
-/// The eight tools the MCP face exposes — `session` one tool over its six actions and `mirror` one over its six, since every definition here is re-sent on every agent turn.
+/// The tools the MCP face exposes: eight for Claude Code, nine for a bounded client, which also lists `walk_status` — `session` one tool over its six actions and `mirror` one over its six, since every definition here is re-sent on every agent turn.
 ///
 /// A type rather than a string, because it is what the server hands the face that does the work: an exhaustive switch there cannot fall through to an "unknown tool" branch that only exists to be unreachable — the name is refused once, where it arrives, and every later step is about a verb that exists.
 public enum SimWalkTool: String, CaseIterable, Sendable {
@@ -14,6 +14,7 @@ public enum SimWalkTool: String, CaseIterable, Sendable {
     case oracle
     case session
     case mirror
+    case walkStatus = "walk_status"
 }
 
 public extension SimWalkTool {
@@ -30,6 +31,7 @@ public extension SimWalkTool {
         case .oracle: "bundle oracle"
         case .session: "session"
         case .mirror: "mirror"
+        case .walkStatus: "walk_status"
         }
     }
 

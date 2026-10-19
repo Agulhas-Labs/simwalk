@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 import SimWalkCore
 
@@ -143,7 +144,7 @@ public struct LiveSessionDeviceStop {
     /// **The handback and the wipe act on the phone, not on this session's own files**: a lease that has lapsed may have been taken by another walk with the same runner, whose container the wipe would empty mid-run and whose theme the handback would flip. Any failure counts — a renewal that could not be confirmed is not a phone this session may still change.
     private func renewLease(now: Date) -> String? {
         do {
-            _ = try leases.renew(token: endpoint.leaseToken, ttl: WalkLease.ttl, now: now)
+            _ = try LeaseError.mapping { try leases.renew(token: endpoint.leaseToken, ttl: WalkLease.ttl, now: now) }
             return nil
         } catch {
             return "\(error)"
@@ -194,7 +195,7 @@ public struct LiveSessionDeviceStop {
             return "kept the session's lease on \(udid): the runner is still running — `end` releases it once it has stopped"
         }
         do {
-            return try leases.remove(udid: udid, token: endpoint.leaseToken)
+            return try LeaseError.mapping { try leases.remove(udid: udid, token: endpoint.leaseToken) }
                 ? "released the session's lease on \(udid)"
                 : "the session's lease on \(udid) was already gone or taken over, so nothing was released"
         } catch {

@@ -648,9 +648,17 @@ public extension Walkbook.CaptureState {
         return launched + (arguments ?? [])
     }
 
-    /// The launch environment this state asks for, laid over `base` — the environment the launch already carries — with the state's value winning on a shared key.
+    /// The launch environment this state asks for, laid over `base` — the environment the launch already carries — with the state's value winning on a shared key, except `DYLD_INSERT_LIBRARIES`, which when both carry it becomes the state's value, `:`, then the base's.
     func launchEnvironment(over base: [String: String]) -> [String: String] {
         base.merging(environment ?? [:]) { _, stated in stated }
+            .merging(joinedLibraries(over: base)) { _, joined in joined }
+    }
+
+    /// `DYLD_INSERT_LIBRARIES` joined, when the state and the base both carry it, so a state's library never drops SimWalk's (SimWalk#154); a state's empty value keeps the base's rather than replacing it.
+    private func joinedLibraries(over base: [String: String]) -> [String: String] {
+        let key = AnimationsOptIn.insertLibrariesKey
+        guard let stated = environment?[key], let inherited = base[key], !inherited.isEmpty else { return [:] }
+        return [key: stated.isEmpty ? inherited : stated + ":" + inherited]
     }
 }
 

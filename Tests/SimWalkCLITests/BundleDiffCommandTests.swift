@@ -115,6 +115,26 @@ struct BundleDiffCommandTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: crops.path) == ["earlier.png"])
     }
 
+    /// A reference captured with animations on and a run captured with them off are refused with the reason, and no diff is printed (SimWalk#154).
+    @Test
+    func bundlesCapturedWithAnimationsInDifferentStatesAreRefused() throws {
+        let (directory, other) = try (TemporaryDirectory(), TemporaryDirectory())
+        let (reference, run) = try Self.pair(in: directory, other, reference: [Self.alpha], run: [Self.alpha])
+        let manifestURL = CaptureBundle.manifestURL(in: run.url)
+        var json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any])
+        json["animations"] = "off"
+        try JSONSerialization.data(withJSONObject: json).write(to: manifestURL)
+        let recorder = StreamRecorder()
+
+        let thrown = try #require(#expect(throws: ExitCode.self) {
+            try BundleDiffCommand.parse([reference.url.path, run.url.path]).run(log: Self.log(in: directory), emit: recorder.emit, emitError: recorder.emitError)
+        })
+
+        #expect(thrown == ExitCode.failure)
+        #expect(recorder.out.isEmpty)
+        #expect(recorder.err.first?.contains("bundle diff refused: the reference was captured with animations on (recorded before SimWalk recorded it) and the run with animations off") == true)
+    }
+
     /// A bundle that cannot be read is a refusal, exit 1, with nothing on stdout.
     @Test
     func anUnreadableBundleRefuses() throws {

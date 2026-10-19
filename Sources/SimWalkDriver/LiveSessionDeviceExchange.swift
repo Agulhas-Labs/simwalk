@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 import SimWalkCore
 
@@ -37,7 +38,7 @@ public struct LiveSessionDeviceExchange {
     /// Renews the session's lease for a full ``WalkLease/ttl`` from `now`; refuses as ``LiveSessionHostError/deviceLeaseNotRenewed(id:udid:reason:)`` when it cannot.
     public func renewLease(now: () -> Date) throws {
         do {
-            _ = try leases.renew(token: endpoint.leaseToken, ttl: WalkLease.ttl, now: now())
+            _ = try LeaseError.mapping { try leases.renew(token: endpoint.leaseToken, ttl: WalkLease.ttl, now: now()) }
         } catch {
             throw LiveSessionHostError.deviceLeaseNotRenewed(id: record.id, udid: record.udid, reason: "\(error)")
         }

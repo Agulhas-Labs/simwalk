@@ -68,12 +68,13 @@ struct MCPMirrorInvocationTests {
 
     @Test
     func theCatalogListsMirrorWithItsSixActions() throws {
-        let entry = try #require(MCPToolCatalog.tools.first { $0["name"] as? String == "mirror" })
+        let entry = try #require(MCPToolCatalog.tools(for: .blocking).first { $0["name"] as? String == "mirror" })
         let schema = try #require(entry["inputSchema"] as? [String: Any])
         let properties = try #require(schema["properties"] as? [String: Any])
         let action = try #require(properties["action"] as? [String: Any])
 
         #expect(action["enum"] as? [String] == ["read", "tap", "swipe", "scroll", "menu", "burst"])
-        #expect(MCPToolCatalog.tools.count == SimWalkTool.allCases.count)
+        #expect(MCPToolCatalog.tools(for: .blocking).count == SimWalkTool.allCases.count - 1)
+        #expect(MCPToolCatalog.tools(for: .bounded).count == SimWalkTool.allCases.count)
     }
 }

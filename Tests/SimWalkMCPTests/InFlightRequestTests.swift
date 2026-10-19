@@ -20,7 +20,7 @@ struct InFlightRequestTests {
         try inFlight.hear(Self.cancel(naming: 1))
         let byItsOwnID = cancellation.isCancelled
         let next = inFlight.start(id: 2)
-        inFlight.finish()
+        inFlight.finish(id: 2)
         try inFlight.hear(Self.cancel(naming: 2))
 
         #expect(!byLookalikes)
@@ -34,15 +34,15 @@ struct InFlightRequestTests {
         let inFlight = InFlightRequest()
         try inFlight.hear(Self.cancel(naming: 5))
         let queued = inFlight.start(id: 5)
-        inFlight.finish()
+        inFlight.finish(id: 5)
         let again = inFlight.start(id: 5)
-        inFlight.finish()
+        inFlight.finish(id: 5)
 
         for id in 100 ..< 100 + InFlightRequest.capacity + 1 {
             try inFlight.hear(Self.cancel(naming: id))
         }
         let evicted = inFlight.start(id: 100)
-        inFlight.finish()
+        inFlight.finish(id: 100)
         let newest = inFlight.start(id: 100 + InFlightRequest.capacity)
 
         #expect(queued.isCancelled)

@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 @testable import SimWalkDriver
 import SimWalkTestSupport
@@ -175,7 +176,7 @@ struct DeviceLeasingTests {
         let released = DeviceLeasing(store: store, shell: Shell(script: script.run)).releaseExpired(now: now, dryRun: false)
 
         #expect(leaseAtDelete == nil)
-        #expect(throws: LeaseError.awaitingDeletion(udid: "CLONE-1")) { try rival?.get() }
+        #expect(throws: LeaseStoreError.awaitingDeletion(udid: "CLONE-1")) { try rival?.get() }
         #expect(released.map(\.failure) == [nil])
         #expect(store.all().isEmpty)
         #expect(try FileManager.default.contentsOfDirectory(atPath: directory.url.path).filter { !$0.hasPrefix(".") }.isEmpty)

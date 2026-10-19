@@ -24,8 +24,8 @@ public struct SystemTapSearch {
     /// Why the step found nothing it could take, from every poll made: what its UNREACHABLE says, and the cause the walk's verdict names it under where there is one.
     ///
     /// `bootAge` is the seconds since the device booted as the runner reads it now, `nil` where the host could not tell; a refusal that saw no sheet on a freshly booted device names the boot (SimWalk#88). **A sheet seen by any poll keeps the answered-sheet wording**: a sheet that was up and whose control the label missed is not one HealthKit failed to raise, and "wait and walk again" would be wrong advice for it.
-    public func refusal(bootAge: TimeInterval?) -> Refusal {
-        Refusal(reason: scope.refusal(for: label, passedOver: passedOver, bootAge: sawSheet ? nil : bootAge, springBoardShowedAlert: sawSpringBoardAlert, appWindowShowedSheet: sawAppWindowSheet), cause: passedOver.unseenByTree ? .snapshotBlind : nil)
+    public func refusal(bootAge: TimeInterval?, slim: SlimDevice? = nil) -> Refusal {
+        Refusal(reason: scope.refusal(for: label, passedOver: passedOver, bootAge: sawSheet ? nil : bootAge, springBoardShowedAlert: sawSpringBoardAlert, appWindowShowedSheet: sawAppWindowSheet, slim: sawSheet ? nil : slim), cause: passedOver.unseenByTree ? .snapshotBlind : nil)
     }
 
     /// One poll of the app's window, whose tree read `tree`, through `find`.

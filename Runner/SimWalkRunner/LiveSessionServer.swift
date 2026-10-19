@@ -95,7 +95,7 @@ final class LiveSessionServer {
             if isDevice, state.location != nil {
                 throw WalkRunner.InspectRefusal(description: "a launch state's location is not honoured on a physical device")
             }
-            let baseEnvironment = app.launchEnvironment
+            let baseEnvironment = AnimationsOptIn.inserting(AnimationsOptIn.library(in: ProcessInfo.processInfo.environment), into: app.launchEnvironment)
             XCUIDevice.shared.appearance = WalkRunner.style(state.theme)
             if let location = state.location {
                 setsLocation = true
@@ -104,6 +104,7 @@ final class LiveSessionServer {
             }
             WalkRunner.launch(app, under: state, over: baseEnvironment)
         } else {
+            app.launchEnvironment = AnimationsOptIn.inserting(AnimationsOptIn.library(in: ProcessInfo.processInfo.environment), into: app.launchEnvironment)
             app.launch()
         }
         return LiveSessionReady(device: WalkRunner.device(), runnerCommit: runnerCommit, readyAt: Date())

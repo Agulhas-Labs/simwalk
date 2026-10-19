@@ -19,6 +19,8 @@ public enum LiveSessionHostError: Error, Equatable, CustomStringConvertible {
     /// The runner answered a request with a failure of its own.
     case runnerFailed(number: Int, failure: String)
     case unreadableState(reason: String)
+    /// A valid `--state` whose environment sets `variable`, the one a session's animation state is made from, which a state may not set.
+    case stateSetsAnimations(variable: String)
     /// A state asked for an appearance the device was not in, and rebooting the device into it (`DeviceSettle`) stopped at `step`, so nothing was started.
     ///
     /// `command` is the whole settle as a person runs it.
@@ -72,6 +74,8 @@ public enum LiveSessionHostError: Error, Equatable, CustomStringConvertible {
             "the session's runner could not serve request \(number): \(failure)"
         case let .unreadableState(reason):
             "--state is not a capture state: \(reason)"
+        case let .stateSetsAnimations(variable):
+            "--state sets \(variable) in its environment, which a state may not set: a session has one animation state; pass --animations to keep animations on"
         case let .settleFailed(udid, theme, step, reason, command):
             "the state is \(theme.rawValue) and \(udid) was not, so the session settles it first — and settling it failed \(step) (\(reason)), so no session was started; settle it by hand, then start again: \(command)"
         case let .deviceOnly(flag):
@@ -85,7 +89,7 @@ public enum LiveSessionHostError: Error, Equatable, CustomStringConvertible {
 extension LiveSessionHostError: UsageFailureClassifiable {
     public var usageFailureKind: UsageFailureKind {
         switch self {
-        case .unknownSession, .deviceNotReady, .deviceLeaseNotRenewed, .alreadyRunning, .startInProgress, .deviceNotOwned, .notBooted, .unreadableState, .deviceOnly, .unsupportedOnDevice, .startCancelled: .inputRefused
+        case .unknownSession, .deviceNotReady, .deviceLeaseNotRenewed, .alreadyRunning, .startInProgress, .deviceNotOwned, .notBooted, .unreadableState, .stateSetsAnimations, .deviceOnly, .unsupportedOnDevice, .startCancelled: .inputRefused
         case .neverReady, .runnerFailed, .deviceTokenUnreadable, .deviceRunnerStopped: .runnerFailed
         case .settleFailed: .deviceLeftBad
         }

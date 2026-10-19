@@ -29,6 +29,7 @@ struct MCPToolInvocationTests {
             "appPath": "/build/App.app",
             "settle": 800,
             "motion": true,
+            "animations": true,
             "screenIDs": ["today", "steps-detail"],
             "verbose": true,
         ])
@@ -41,6 +42,7 @@ struct MCPToolInvocationTests {
             "--app-path=/build/App.app",
             "--settle=800",
             "--motion",
+            "--animations",
             "--screens=today", "--screens=steps-detail",
             "--verbose",
             "--", "example.json",
@@ -481,6 +483,17 @@ struct MCPToolInvocationTests {
         #expect(try MCPToolInvocation(tool: "session", arguments: ["action": "end", "id": "s1"]).argumentVector == ["end", "--", "s1"])
         #expect(list.argumentVector == ["list"])
         #expect(list.logName == "session list")
+    }
+
+    /// `animations` on a `session start` becomes `--animations` when true, nothing when false; any other action refuses it by name (SimWalk#154).
+    @Test
+    func aSessionStartCarriesAnimationsAndOtherActionsRefuseIt() throws {
+        let asked = try MCPToolInvocation(tool: "session", arguments: ["action": "start", "app": "dev.x", "device": "UDID", "animations": true])
+        let off = try MCPToolInvocation(tool: "session", arguments: ["action": "start", "app": "dev.x", "device": "UDID", "animations": false])
+
+        #expect(asked.argumentVector == ["start", "--app=dev.x", "--device=UDID", "--animations"])
+        #expect(off.argumentVector == ["start", "--app=dev.x", "--device=UDID"])
+        #expect(throws: MCPError.self) { try MCPToolInvocation(tool: "session", arguments: ["action": "read", "id": "s1", "animations": true]) }
     }
 
     /// `team` and `runnerBundleId` on a `session start` become `--team` and `--runner-bundle-id`; any other action refuses them by name.

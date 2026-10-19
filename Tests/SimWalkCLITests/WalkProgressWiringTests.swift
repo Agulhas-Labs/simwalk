@@ -2,7 +2,9 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
+import SimulatorAnimations
 @testable import SimWalkCLI
 import SimWalkCore
 import SimWalkDriver
@@ -211,6 +213,69 @@ struct WalkProgressWiringTests {
         #expect(walk.runnerEnvironments.first?[MotionOptIn.hostEnvironmentKey] == MotionOptIn.walkWideValue)
         #expect(walk.runnerEnvironments.last?[MotionOptIn.hostEnvironmentKey] == nil)
         #expect(throws: (any Error).self) { try WalkCommand.parse(["book.json", "--output", "probe.json", "--dry-run", "--motion"]) }
+    }
+
+    /// A simulator walk hands the runner the animations-off library unless `--animations` or motion keeps them on, and its answer says which (SimWalk#154).
+    @Test
+    func aSimulatorWalkSwitchesAnimationsOffUnlessAskedOrRecordingMotion() throws {
+        let walk = try Walk()
+        let library: WalkCommand.AnimationsLibrary = { URL(fileURLWithPath: "/libs/animations-1.dylib") }
+
+        let plain = try walk.perform([], animationsLibrary: library)
+        try FileManager.default.removeItem(at: walk.output)
+        let asked = try walk.perform(["--animations"], animationsLibrary: library)
+        try FileManager.default.removeItem(at: walk.output)
+        let motion = try walk.perform(["--motion"], animationsLibrary: library)
+
+        let keys = walk.runnerEnvironments.map { $0[AnimationsOptIn.hostEnvironmentKey] }
+        #expect(keys == ["/libs/animations-1.dylib", nil, nil])
+        #expect(plain.answer().residue.contains("animations: UIKit off in the app under walk (SwiftUI animations still run); --animations keeps them"))
+        #expect(!asked.answer().residue.joined(separator: "\n").contains("animations:"))
+        #expect(motion.answer().residue.contains("animations: kept on, because this walk records motion"))
+    }
+
+    /// A walk offered no library launches the app untouched and says nothing about animations, as every walk did before.
+    @Test
+    func aWalkOfferedNoLibraryDecidesNothingAboutAnimations() throws {
+        let walk = try Walk()
+
+        let outcome = try walk.perform([])
+
+        #expect(walk.runnerEnvironments.last?[AnimationsOptIn.hostEnvironmentKey] == nil)
+        #expect(!outcome.answer().residue.joined(separator: "\n").contains("animations:"))
+    }
+
+    /// A library that cannot be built refuses the walk with the reason and the way round, before the runner is built.
+    @Test
+    func aLibraryThatCannotBeBuiltRefusesTheWalkWithTheWayRound() throws {
+        let walk = try Walk()
+
+        let refusal = #expect(throws: WalkCommand.AnimationsLibraryError.self) {
+            try walk.perform([], animationsLibrary: { throw AnimationsOffLibraryError.notBuilt("a.m:1:1: error: boom") })
+        }
+
+        #expect(refusal?.description == "the animations-off library could not be built: a.m:1:1: error: boom; --animations walks without it")
+        #expect(walk.runnerEnvironments.isEmpty)
+    }
+
+    /// The library a face offers lives under `$SIMWALK_HOME/libraries` and is compiled once.
+    @Test
+    func theStandardLibraryIsBuiltUnderSimwalkHomeOnce() throws {
+        let home = try TemporaryDirectory()
+        var compiles = 0
+        let library = WalkCommand.standardAnimationsLibrary(environment: ["SIMWALK_HOME": home.url.path]) { _, arguments in
+            compiles += 1
+            let output = try #require(arguments.firstIndex(of: "-o").map { arguments[$0 + 1] })
+            try Data("dylib".utf8).write(to: URL(fileURLWithPath: output))
+            return Subprocess.Output(succeeded: true, standardOutput: "")
+        }
+
+        let first = try library()
+        let second = try library()
+
+        #expect(first == second)
+        #expect(first.deletingLastPathComponent().path == home.url.appendingPathComponent("libraries").path)
+        #expect(compiles == 1)
     }
 
     /// The runner is told where the progress file is only when there is one.
@@ -429,9 +494,15 @@ extension WalkProgressWiringTests {
             (try? Data(contentsOf: progressURL)).flatMap { try? WalkProgress.decoder().decode(WalkProgress.self, from: $0) }
         }
 
-        func perform(_ arguments: [String], watched: Bool = true) throws -> WalkCommand.Outcome {
+        func perform(_ arguments: [String], watched: Bool = true, animationsLibrary: WalkCommand.AnimationsLibrary? = nil) throws -> WalkCommand.Outcome {
             let command = try command(arguments)
-            return try walk(command, telemetry: watched ? makeTelemetry() : nil)
+            return try walk(command, telemetry: watched ? makeTelemetry() : nil, animationsLibrary: animationsLibrary)
+        }
+
+        /// The walk as the CLI's `walk` answers it, through `walked` (the simulator's served answer).
+        func performWalked(_ arguments: [String], runner: (() throws -> RunnerSource)? = nil, animationsLibrary: WalkCommand.AnimationsLibrary? = nil) throws -> Answer {
+            let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: 0, writes: (staged, output))
+            return try command(arguments).walked(shell: shell(script), runner: runner ?? { Self.runner }, builds: builds, leases: leases, now: script.now, animationsLibrary: animationsLibrary)
         }
 
         /// The walk watched by the telemetry the command builds in production, from an environment naming `session` and moving the usage log into this scratch directory, so both files land beside it.
@@ -448,18 +519,18 @@ extension WalkProgressWiringTests {
             try WalkCommand.parse([walkbookPath, "--output", output.path, "--device", "UDID-1"] + arguments)
         }
 
-        private func walk(_ command: WalkCommand, telemetry: WalkTelemetry?) throws -> WalkCommand.Outcome {
+        private func walk(_ command: WalkCommand, telemetry: WalkTelemetry?, animationsLibrary: WalkCommand.AnimationsLibrary? = nil) throws -> WalkCommand.Outcome {
             let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: 0, writes: (staged, output))
-            return try command.performWalk(shell: shell(script), pause: { _ in }, now: script.now, nonce: { "the-walks-own-nonce" }, runner: { Self.runner }, builds: builds, leases: leases, telemetry: telemetry)
+            return try command.performWalk(shell: shell(script), pause: { _ in }, now: script.now, nonce: { "the-walks-own-nonce" }, runner: { Self.runner }, builds: builds, leases: leases, telemetry: telemetry, animationsLibrary: animationsLibrary)
         }
 
-        func performDryRun(leaving report: RouteProbeReport, of book: Walkbook) throws -> WalkDryRun.Outcome {
+        func performDryRun(leaving report: RouteProbeReport, of book: Walkbook, animationsLibrary: WalkCommand.AnimationsLibrary? = nil) throws -> WalkDryRun.Outcome {
             let stagedReport = directory.url.appendingPathComponent("staged-report.json")
             let reportURL = directory.url.appendingPathComponent("probe.json")
             try report.write(to: stagedReport, of: book)
             let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: 0, writes: (stagedReport, reportURL))
             let command = try WalkCommand.parse([walkbookPath, "--output", reportURL.path, "--device", "UDID-1", "--dry-run"])
-            return try WalkDryRun.perform(command, shell: shell(script), pause: { _ in }, now: script.now, nonce: { RouteProbeFixture.nonce }, runner: { Self.runner }, builds: builds, leases: leases, telemetry: makeTelemetry())
+            return try WalkDryRun.perform(command, shell: shell(script), pause: { _ in }, now: script.now, nonce: { RouteProbeFixture.nonce }, runner: { Self.runner }, builds: builds, leases: leases, telemetry: makeTelemetry(), animationsLibrary: animationsLibrary)
         }
 
         private func makeTelemetry() -> WalkTelemetry {

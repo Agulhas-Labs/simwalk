@@ -171,8 +171,8 @@ ok — 5 of 5 routes resolved · nothing captured
 
 ## For coding agents
 
-`simwalk mcp` is an MCP server on stdio. It has eight tools: `walk`, `validate`, `inspect`, `audit`, `diff`,
-`oracle`, `session` and `mirror`. Each returns the same text as the CLI command of that name. The tools are
+`simwalk mcp` is an MCP server on stdio. It has eight tools for Claude Code: `walk`, `validate`, `inspect`, `audit`, `diff`,
+`oracle`, `session` and `mirror`; a bounded client (any other) gets a ninth, `walk_status`. Each returns the same text as the CLI command of that name. The tools are
 described in [Using SimWalk from a coding agent (MCP)](Docs/Reference.md#using-simwalk-from-a-coding-agent-mcp).
 
 `simwalk inspect --app <bundle id>` reads the screen the app is on now, as text. This took 12 seconds, which
@@ -248,6 +248,18 @@ things.
 
 Without Claude Code, `install-hook` installs the runner, skips those four, and exits 2 to say so. For
 another MCP client, such as Cursor, run `simwalk mcp` as a stdio server.
+
+`simwalk install` does the same for every agent it finds, asking once per agent: Claude Code (exactly what
+`install-hook` does) and Cursor (the MCP server in `mcp.json` and the `preToolUse` hook in `hooks.json`,
+beside whatever else they hold). Codex is skipped. Without a terminal, pass `--yes` (every agent found),
+`--all`, or `--agent claude|cursor|codex`. `install-hook` stays for Claude Code alone.
+Afterwards it runs the other Fieldwork tools' installs (sift) once, into the same agents, so one command sets the
+family up. `--dry-run` shows what would change in each agent, and in the other tools, and writes nothing.
+
+`simwalk doctor` then checks that each agent is wired end to end: the registration, the registered binary, each
+hook fed a payload of that agent's shape, and the server's tool list, one line per check (`--json` for one
+object, exit 1 on a failure). It checks Claude Code and Cursor; Codex is not checked. See
+[Checking an install](Docs/Reference.md#checking-an-install-with-simwalk-doctor).
 
 To build from source instead, see [Building from source](#building-from-source). That route needs a
 Swift 6.2 toolchain; the package itself declares macOS 13 and iOS 17 as its floor.

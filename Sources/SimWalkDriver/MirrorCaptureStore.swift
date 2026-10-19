@@ -3,6 +3,7 @@
 //
 
 import Foundation
+import SimWalkCore
 
 /// Where a mirror call's captures live: scratch files while it reads, the served capture kept beside the newest hundred (Brief §8 "The observation").
 ///
@@ -26,7 +27,7 @@ public struct MirrorCaptureStore: Sendable {
 
     /// The machine's own store, `~/.simwalk/mirror/captures/`, found as `MirrorCallLock.standard()` finds `~`.
     public static func standard() -> MirrorCaptureStore {
-        MirrorCaptureStore(directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".simwalk/mirror/captures", isDirectory: true))
+        MirrorCaptureStore(directory: HomeDirectories.simwalk().appendingPathComponent("mirror/captures", isDirectory: true))
     }
 
     /// An `--out` store over `directory`: unpruned, with its scratch in the standard store's `.scratch`, emptied there by every call, rather than a `.scratch` left in the caller's directory.

@@ -14,7 +14,8 @@ import SimWalkCore
 /// **Ids match as JSON values**: `1` and `"1"` are different requests, and `true` is not `1` — which `NSNumber`'s own equality would say it is — so an id is compared by its canonical JSON text.
 final class InFlightRequest: @unchecked Sendable {
     private let lock = NSLock()
-    private var current: (id: String, cancellation: Cancellation)?
+    /// The calls being answered, by id: one at a time for a blocking client, overlapping for a bounded one.
+    private var current: [String: Cancellation] = [:]
     private var cancelledAhead: [String] = []
 
     /// How many cancels naming no call in flight are remembered.
@@ -27,7 +28,9 @@ final class InFlightRequest: @unchecked Sendable {
         let cancellation = Cancellation()
         lock.withLock {
             let key = Self.key(id)
-            current = key.map { ($0, cancellation) }
+            if let key {
+                current[key] = cancellation
+            }
             if let key, let index = cancelledAhead.firstIndex(of: key) {
                 cancelledAhead.remove(at: index)
                 cancellation.cancel()
@@ -36,9 +39,10 @@ final class InFlightRequest: @unchecked Sendable {
         return cancellation
     }
 
-    /// Marks the call in flight as answered: a cancel arriving after this names nothing.
-    func finish() {
-        lock.withLock { current = nil }
+    /// Marks the call `id` as answered: a cancel arriving after this names nothing.
+    func finish(id: Any) {
+        guard let key = Self.key(id) else { return }
+        lock.withLock { current[key] = nil }
     }
 
     /// Cancels the call in flight when `line` is a `notifications/cancelled` naming it.
@@ -56,9 +60,9 @@ final class InFlightRequest: @unchecked Sendable {
         else {
             return
         }
-        let cancellation = lock.withLock {
-            if current?.id == requestID {
-                return current?.cancellation
+        let cancellation: Cancellation? = lock.withLock {
+            if let running = current[requestID] {
+                return running
             }
             if !cancelledAhead.contains(requestID) {
                 cancelledAhead.append(requestID)

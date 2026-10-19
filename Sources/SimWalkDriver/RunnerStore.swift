@@ -23,8 +23,7 @@ public struct RunnerStore {
 
     /// The machine's own store.
     public static func standard() -> RunnerStore {
-        RunnerStore(directory: FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".simwalk", isDirectory: true)
+        RunnerStore(directory: HomeDirectories.simwalk()
             .appendingPathComponent("runner", isDirectory: true))
     }
 

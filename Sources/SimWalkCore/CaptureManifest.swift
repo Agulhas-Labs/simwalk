@@ -79,6 +79,15 @@ public struct CaptureManifest: Codable, Equatable, Sendable {
     ///
     /// **Absent rather than empty, inside the current format**, like `nonce`: a bundle written before the field decodes with `nil`, which is what it meant, and a reader that predates it still reads every screen correctly. Written by the runner from `SIMWALK_BUILD_PROVENANCE` beside the hash, so the nonce check covers it.
     public var appBuildProvenance: AppBuildProvenance?
+    /// Whether the app ran with UIKit animations on or off (SimWalk#154); `nil` in a bundle written before SimWalk recorded it, when every walk ran with them on.
+    ///
+    /// **Absent rather than empty, and inside format 8.** The manifest's top level decodes leniently, so a format-8 reader that predates the field ignores it and reads every screen correctly; what it misses is which state the figures were taken in, not a fact about any capture. No bump is taken for a field whose absence cannot make a reader misreport the bundle, the test the format-3 to 8 bumps each met and this does not. `bundle diff` reads it through ``recordedAnimations`` and refuses to compare a pair that differ.
+    public var animations: Animations?
+
+    /// The state the bundle was captured in: `animations`, or `.on` for a bundle that does not say, since every walk before SimWalk recorded it ran with animations on.
+    public var recordedAnimations: Animations {
+        animations ?? .enabled
+    }
 
     /// The screens the walkbook asked for that this bundle does not hold, in walkbook order.
     ///
@@ -143,6 +152,7 @@ public struct CaptureManifest: Codable, Equatable, Sendable {
         appearanceSettle: AppearanceSettle? = nil,
         nonce: String? = nil,
         appBuildProvenance: AppBuildProvenance? = nil,
+        animations: Animations? = nil,
         screens: [ScreenRecord]
     ) {
         self.formatVersion = formatVersion
@@ -160,6 +170,7 @@ public struct CaptureManifest: Codable, Equatable, Sendable {
         self.appearanceSettle = appearanceSettle
         self.nonce = nonce
         self.appBuildProvenance = appBuildProvenance
+        self.animations = animations
         self.screens = screens
     }
 }
@@ -719,5 +730,13 @@ public extension CaptureManifest {
     enum AppBuildProvenance: String, Codable, Equatable, Sendable {
         /// The host hashed the `.app` on the Mac and installed it (`device walk --app`); the phone's copy was not read back.
         case installed
+    }
+}
+
+public extension CaptureManifest {
+    /// The animation state of the app under walk.
+    enum Animations: String, Codable, Equatable, Sendable {
+        case enabled = "on"
+        case disabled = "off"
     }
 }

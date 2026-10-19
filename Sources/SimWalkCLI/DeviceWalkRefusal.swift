@@ -27,6 +27,8 @@ enum DeviceWalkRefusal: Error, CustomStringConvertible, UsageFailureClassifiable
     case dryRunOnDevice
     /// `walk --verbose` on a physical device, whose answer is `device walk`'s and writes no result file for it to shape.
     case verboseOnDevice
+    /// `walk --stock` on a physical device, whose launchd services SimWalk never switches off.
+    case stockOnDevice
     /// `--device` is no simulator `simctl` lists and no physical device `devicectl` lists, though `devicectl` lists others.
     case unknownDevice(requested: String, simulators: [String], physical: [String])
 
@@ -52,6 +54,8 @@ enum DeviceWalkRefusal: Error, CustomStringConvertible, UsageFailureClassifiable
             "--dry-run follows routes against a simulator and is not available on a physical device — drop it, or walk a simulator"
         case .verboseOnDevice:
             "--verbose shapes a simulator walk's result file, and a device walk writes none — drop it, or walk a simulator"
+        case .stockOnDevice:
+            "--stock boots a simulator SimWalk created with every service on, and a physical device has none switched off — drop it, or walk a simulator"
         case let .unknownDevice(requested, simulators, physical):
             "no simulator or physical device '\(requested)' — simulators: \(simulators.prefix(8).joined(separator: ", "))\(simulators.count > 8 ? ", …" : ""); physical devices present: \(physical.joined(separator: ", "))"
         }
@@ -60,7 +64,7 @@ enum DeviceWalkRefusal: Error, CustomStringConvertible, UsageFailureClassifiable
     /// The caller's walkbook is what is wrong for an unsupported feature; a wrapped failure keeps its own kind.
     var usageFailureKind: UsageFailureKind {
         switch self {
-        case .unsupported, .unusableApp, .deviceOnly, .dryRunOnDevice, .verboseOnDevice, .unknownDevice: .inputRefused
+        case .unsupported, .unusableApp, .deviceOnly, .dryRunOnDevice, .verboseOnDevice, .stockOnDevice, .unknownDevice: .inputRefused
         case .noBundleAfterRunnerFailure, .appChangedBeforeInstall, .bundleNotThisWalks: .runnerFailed
         // The runner never started: a setup step did not take, as a simulator's `DeviceSetupError` is classed.
         case .contrastNotSet: .setupFailed

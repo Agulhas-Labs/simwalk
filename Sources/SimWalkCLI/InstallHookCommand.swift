@@ -3,6 +3,7 @@
 //
 
 import ArgumentParser
+import Fieldwork
 import Foundation
 import SimWalkCore
 import SimWalkDriver
@@ -51,12 +52,26 @@ struct InstallHookCommand: ParsableCommand {
 
     /// What the install did, in the contract's shape: every step named, and every step it could not take carried on the verdict.
     func answer() throws -> Answer {
-        let executable = ExecutablePath.current
-        return try Self.answer(
-            locations: HookLocations.standard(settings: settings, rule: rule),
+        try installed(executable: ExecutablePath.current).answer
+    }
+
+    /// The install, with what it changed beside the answer — against this machine, or against `surroundings` where a test stands in for it.
+    func installed(executable: String, in surroundings: Surroundings? = nil) throws -> Installed {
+        let surroundings = surroundings ?? standardSurroundings()
+        return try Self.install(
+            locations: surroundings.locations,
             executable: executable,
-            claude: ClaudeCommandLine.resolve(),
+            claude: surroundings.claude,
             guide: Self.locateGuide(explicit: guide, beside: executable),
+            runnerSource: surroundings.runnerSource
+        )
+    }
+
+    /// This machine's locations, its `claude` (`nil` where none is on PATH) and the runner source.
+    func standardSurroundings() -> Surroundings {
+        Surroundings(
+            locations: HookLocations.standard(settings: settings, rule: rule),
+            claude: ClaudeCommandLine.runner(),
             runnerSource: RunnerSnapshotSource(
                 checkout: RunnerProject.compiledCheckout,
                 binaryHash: LaunchedBinary.hash,
@@ -71,12 +86,23 @@ struct InstallHookCommand: ParsableCommand {
     static func answer(
         locations: HookLocations,
         executable: String,
-        claude: ClaudeCommandLine?,
+        claude: (any ClaudeMcpRunner)?,
         guide: GuideSource,
         runnerSource: RunnerSnapshotSource,
         now: Date = Date()
     ) throws -> Answer {
-        let serverCommand = [executable, "mcp"]
+        try install(locations: locations, executable: executable, claude: claude, guide: guide, runnerSource: runnerSource, now: now).answer
+    }
+
+    /// ``answer(locations:executable:claude:guide:runnerSource:now:)`` and what it changed in Claude Code's configuration: the files it rewrote and whether it registered the server.
+    static func install(
+        locations: HookLocations,
+        executable: String,
+        claude: (any ClaudeMcpRunner)?,
+        guide: GuideSource,
+        runnerSource: RunnerSnapshotSource,
+        now: Date = Date()
+    ) throws -> Installed {
         var qualifications: [String] = []
         var residue = [installRunner(locations.runner, from: runnerSource, qualifications: &qualifications)]
         residue += pruneRunners(locations: locations, source: runnerSource, now: now, qualifications: &qualifications)
@@ -84,37 +110,57 @@ struct InstallHookCommand: ParsableCommand {
         // pieces — status line, hook, guide, server — are all done or all skipped: a half-done install would show a
         // status line, or tell an agent to call tools that are not there, with nothing saying which step had not happened.
         guard let claude else {
-            qualifications.append("'claude' is not on PATH, so Claude Code's registrations were skipped. Walks work without them. To finish, install Claude Code and re-run `simwalk install-hook`, or register the server with another MCP client: \(ClaudeCommandLine.manualRegistration(command: serverCommand)) (the server is `\(executable.tildedPath) mcp`)")
-            return Answer(
+            qualifications.append("'claude' is not on PATH, so Claude Code's registrations were skipped. Walks work without them. To finish, install Claude Code and re-run `simwalk install-hook`, or register the server with another MCP client: \(SimWalkClaudeSetup.server.manual(binary: executable)) (the server is `\(executable.tildedPath) mcp`)")
+            let answer = Answer(
                 header: "binary: \(executable.tildedPath)",
                 verdict: .reporting(qualifications: qualifications, detail: "runner installed — Claude Code not found, its registrations skipped"),
                 residue: residue
             )
+            return Installed(answer: answer, claudeFound: false)
         }
+        // The settings file and the segment are written by steps that do not say whether they changed anything, so the bytes before and after do.
+        let watched = [locations.settings] + (locations.segments.map { [$0.fileURL] } ?? [])
+        let before = watched.map { try? Data(contentsOf: $0) }
         var settingsBackedUp = false
         residue += try statusline(locations: locations, executable: executable, qualifications: &qualifications, settingsBackedUp: &settingsBackedUp)
         residue += registerPreToolUseHook(settings: locations.settings, executable: executable, qualifications: &qualifications, settingsBackedUp: &settingsBackedUp)
-        residue += installGuide(locations.guide, from: guide, qualifications: &qualifications)
+        let rule = try installRule(at: locations.rule, from: guide, qualifications: &qualifications)
+        residue += rule.lines + rule.notes
+        let server: InstallOutcome
         do {
-            try claude.registerServer(command: serverCommand)
-        } catch let HookInstallError.claudeRefused(command, reason, _) {
+            server = try SimWalkClaudeSetup.mcp.install(config: locations.config, binary: executable, runner: claude)
+        } catch {
+            // A `claude` that is on PATH but cannot launch throws out of the install rather than reporting a failure.
+            // That is Claude Code's own configuration, the same shape as a refusal, and the status line, hook and rule
+            // are already written: left bare, the error would say neither.
+            throw HookInstallError.claudeRefused(
+                failures: rule.failures + ["mcp: simwalk was not registered because `claude` could not run: \(error). To register it by hand: \(SimWalkClaudeSetup.server.manual(binary: executable))"],
+                written: residue
+            )
+        }
+        residue += server.lines + server.notes
+        let failures = rule.failures + server.failures
+        guard failures.isEmpty else {
             // The refusal carries what was already written. This is the last step precisely so a failure
             // here leaves only files, but a refusal that did not name them would leave somebody with a
             // status line and a user rule pointing at tools nothing registered — and no sign either exists.
-            throw HookInstallError.claudeRefused(command: command, reason: reason, written: residue)
+            throw HookInstallError.claudeRefused(failures: failures, written: residue)
         }
-        residue.append("mcp: registered at user scope — \"\(executable.tildedPath)\" mcp")
 
-        return Answer(
+        let answer = Answer(
             header: "binary: \(executable.tildedPath)",
             verdict: .reporting(qualifications: qualifications, detail: "registered for Claude Code — start a new session to pick it up"),
             residue: residue
         )
+        let rewritten = zip(watched, before).filter { (try? Data(contentsOf: $0.0)) != $0.1 }.map { SettingsFile.named($0.0) }
+        return Installed(answer: answer, claudeFound: true, written: rewritten + rule.written + server.written, registered: !server.written.isEmpty)
     }
 
     /// The guide to install, or why there is none.
     ///
     /// **A named `--guide` is the only candidate.** Falling through to another file when the one the caller pointed at cannot be read would install a *different* guide from the one they asked for and report success over it — and on an upgrade that means silently reinstalling last release's copy sitting beside the binary.
+    ///
+    /// Unnamed, the library looks beside the binary and in the share tree a package manager ships beside it, then the working directory, for a checkout.
     static func locateGuide(explicit: String?, beside executable: String) -> GuideSource {
         let manager = FileManager.default
         if let explicit {
@@ -124,20 +170,11 @@ struct InstallHookCommand: ParsableCommand {
             }
             return .found(named)
         }
-        let candidates = [
-            URL(fileURLWithPath: executable).deletingLastPathComponent().appendingPathComponent(guideName),
-            ShippedRunner.directory(besideExecutable: URL(fileURLWithPath: executable)).appendingPathComponent(guideName),
-            URL(fileURLWithPath: manager.currentDirectoryPath).appendingPathComponent(guideName),
-        ]
-        guard let found = candidates.first(where: { manager.isReadableFile(atPath: $0.path) }) else {
-            return .missing(reason: "no readable \(guideName) at \(candidates.map(\.path.tildedPath).joined(separator: ", "))")
+        if let shipped = SimWalkClaudeSetup.rule.source(forBinary: executable) {
+            return .found(shipped)
         }
-        return .found(found)
-    }
-
-    /// The guide's filename in the repository and in a distribution bundle — one spelling, since the installer looks for it and the repository has to hold it under that name.
-    static var guideName: String {
-        "SimWalk.md"
+        let local = URL(fileURLWithPath: manager.currentDirectoryPath).appendingPathComponent(SimWalkClaudeSetup.rule.shippedFileName)
+        return manager.isReadableFile(atPath: local.path) ? .found(local) : .notShipped
     }
 
     /// `pruneRunners`'s whole report — the one place that decides it, so a test exercising this function pins `pruneRunners`'s wiring too (SimWalk#33 review) — separated out so a manufactured plan and outcome can pin its wording without racing a real removal.
@@ -292,9 +329,7 @@ private extension InstallHookCommand {
             // and this tool did not author it, so a copy is cheap insurance against a merge bug on a machine
             // where nobody is watching. Once per run — a later step's own backup would otherwise overwrite
             // this pristine copy with the settings this step already edited.
-            backUpSettingsOnce(original, to: settingsURL, backedUp: &settingsBackedUp)
-            try FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try updated.write(to: settingsURL, options: .atomic)
+            try SettingsRewrite.write(updated, to: settingsURL, original: original, backedUp: &settingsBackedUp, qualifications: &qualifications)
             return ["statusline: registered in \(path) — \"\(executable.tildedPath)\" statusline"]
         case .unchanged:
             return ["statusline: already registered in \(path)"]
@@ -315,61 +350,46 @@ private extension InstallHookCommand {
     static func registerPreToolUseHook(settings settingsURL: URL, executable: String, qualifications: inout [String], settingsBackedUp: inout Bool) -> [String] {
         let path = settingsURL.path.tildedPath
         // Quoted for the status line's reason: Claude Code runs it through a shell.
-        let command = "\"\(executable)\" \(PreToolUseRegistration.subcommand)"
+        let command = "\"\(executable)\" \(SimWalkClaudeSetup.hookSubcommand)"
         let original = try? Data(contentsOf: settingsURL)
         do {
-            switch try PreToolUseRegistration.apply(to: original, command: command, path: path) {
-            case let .installed(updated):
-                backUpSettingsOnce(original, to: settingsURL, backedUp: &settingsBackedUp)
-                try FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try updated.write(to: settingsURL, options: .atomic)
-                return ["hook: PreToolUse registered in \(path) — \"\(executable.tildedPath)\" \(PreToolUseRegistration.subcommand)"]
-            case .unchanged:
+            let registered = try SimWalkClaudeSetup.hooks.apply(to: original, command: command, event: SimWalkClaudeSetup.preToolUse)
+            guard registered.changed else {
                 return ["hook: PreToolUse already registered in \(path)"]
-            case let .refused(existing):
-                qualifications.append("the PreToolUse hook was not registered")
-                return ["hook: not registered — \(path) has \(existing); shell calls are logged without their session until it is"]
             }
-        } catch {
+            try SettingsRewrite.write(registered.data, to: settingsURL, original: original, backedUp: &settingsBackedUp, qualifications: &qualifications)
+            return ["hook: PreToolUse registered in \(path) — \"\(executable.tildedPath)\" \(SimWalkClaudeSetup.hookSubcommand)"]
+        } catch HookRegistrationError.hooksNotMergeable {
+            qualifications.append("the PreToolUse hook was not registered")
+            return ["hook: not registered — \(path) has hooks of an unrecognised shape; shell calls are logged without their session until it is"]
+        } catch let error where error is SettingsFile.Unresolved || error is SettingsFile.Unwritten {
             qualifications.append("the PreToolUse hook was not registered")
             return ["hook: not registered — \(path): \(error)"]
+        } catch {
+            // Anything else is the file not parsing as a JSON object, which is the one failure the shared registration reports by its own name.
+            qualifications.append("the PreToolUse hook was not registered")
+            return ["hook: not registered — \(path): \(StatuslineRegistrationError.settingsNotAnObject(path: path))"]
         }
-    }
-
-    /// Backs up `settingsURL` from `original` bytes before this run's first rewrite of it, and never again — a second step editing the same file in the same run would otherwise back up what the first step already edited, overwriting the pristine copy.
-    static func backUpSettingsOnce(_ original: Data?, to settingsURL: URL, backedUp: inout Bool) {
-        guard !backedUp, let original, !original.isEmpty else { return }
-        try? original.write(to: settingsURL.appendingPathExtension("bak-simwalk"))
-        backedUp = true
     }
 
     /// The agent guide, installed as a path-scoped user rule so it costs nothing in a session that never touches a walkbook, a capture bundle or a UI-test target.
     ///
-    /// Not fatal when it cannot be found or written: the status line is in place by then and the server registration follows, and a missing guide is a thing to say rather than a thing to unwind an install over.
-    static func installGuide(_ guide: AgentGuide, from source: GuideSource, qualifications: inout [String]) -> [String] {
-        let path = guide.fileURL.path.tildedPath
+    /// A guide that cannot be found is a thing to say rather than a thing to unwind an install over; one that cannot be written is a failure the install ends on, after the server registration has been tried.
+    static func installRule(at destination: URL, from source: GuideSource, qualifications: inout [String]) throws -> ClaudeInstallOutcome {
+        let outcome: ClaudeInstallOutcome
         switch source {
         case let .missing(reason):
             qualifications.append("the agent guide was not installed")
-            return ["rule: not installed — \(reason); copy it to \(path) by hand"]
+            return ClaudeInstallOutcome(notes: ["rule: skipped — \(reason)"])
         case let .found(url):
-            do {
-                switch try guide.install(from: url) {
-                case .installed:
-                    return ["rule: \(path) (loads when a walkbook, capture bundle or UI-test file is open)"]
-                case .unchanged:
-                    return ["rule: unchanged — \(path)"]
-                case let .symlink(target):
-                    // A symlink means this machine has the checkout and the rule *is* the repo file.
-                    // Copying would follow the link and write through it, silently reverting a newer
-                    // working tree to whatever this binary was built beside.
-                    return ["rule: \(path) is a symlink to \(target.tildedPath) — left as is"]
-                }
-            } catch {
-                qualifications.append("the agent guide was not installed")
-                return ["rule: not installed — \(path): \(error)"]
-            }
+            outcome = try SimWalkClaudeSetup.rule.install(source: url, destination: destination)
+        case .notShipped:
+            outcome = try SimWalkClaudeSetup.rule.install(source: nil, destination: destination)
         }
+        if !outcome.notes.isEmpty {
+            qualifications.append("the agent guide was not installed")
+        }
+        return outcome
     }
 }
 
@@ -379,6 +399,29 @@ extension InstallHookCommand {
     /// A named `--guide` that cannot be read lands here as `missing` carrying its own reason rather than falling through to the next candidate — the difference between "no guide was found" and "the guide you named is not readable" is the whole of what the caller needs told.
     enum GuideSource: Equatable {
         case found(URL)
+        /// A named `--guide` that cannot be read.
         case missing(reason: String)
+        /// No guide ships beside the binary or in the working directory.
+        case notShipped
+    }
+}
+
+extension InstallHookCommand {
+    /// What the install touched beside the machine it ran on: where it writes, the `claude` it registers with (`nil` is none on PATH), and the runner's source.
+    struct Surroundings {
+        let locations: HookLocations
+        let claude: (any ClaudeMcpRunner)?
+        let runnerSource: RunnerSnapshotSource
+    }
+
+    /// An install's answer and what it changed in Claude Code's configuration, which the answer's verdict does not say: a qualified verdict is a first install or a re-run alike.
+    struct Installed {
+        let answer: Answer
+        /// Whether `claude` was on PATH; without it none of Claude Code's registrations were attempted.
+        let claudeFound: Bool
+        /// Each Claude Code file rewritten, as an answer names it.
+        var written: [String] = []
+        /// Whether the MCP server was registered or repointed through `claude`.
+        var registered = false
     }
 }

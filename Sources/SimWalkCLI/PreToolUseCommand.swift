@@ -3,6 +3,7 @@
 //
 
 import ArgumentParser
+import Fieldwork
 import Foundation
 import SimWalkCore
 import SimWalkMCP
@@ -18,12 +19,47 @@ struct PreToolUseCommand: ParsableCommand {
         )
     }
 
+    @Option(name: .customLong("agent"), help: "The agent running the hook: claude or cursor (default claude). cursor reads Cursor's preToolUse payload and answers in Cursor's schema.")
+    var agent: Agent = .claude
+
     func run() {
         // Run by hand at a terminal there is no payload coming, and waiting for one would hang the shell.
         guard isatty(FileHandle.standardInput.fileDescriptor) == 0 else { return }
         let payload = FileHandle.standardInput.readDataToEndOfFile()
         let log = UsageLog.standard()
-        guard let output = PreToolUseHook.handle(payload, attribution: CallAttribution(beside: log), nudges: NudgeLedger(beside: log)) else { return }
-        StandardStreams.emit(output)
+        let attribution = CallAttribution(beside: log)
+        let nudges = NudgeLedger(beside: log)
+        guard let answer = Self.answer(for: agent, payload, attribution: attribution, nudges: nudges) else { return }
+        StandardStreams.emit(answer)
+    }
+}
+
+extension PreToolUseCommand {
+    /// What the hook prints for `payload` from `agent`, or `nil` for nothing: the one place `--agent` picks the harness, so a test drives the dispatch `run()` does.
+    static func answer(for agent: Agent, _ payload: Data, attribution: CallAttribution, nudges: NudgeLedger) -> String? {
+        switch agent {
+        case .claude: PreToolUseHook.handle(payload, attribution: attribution, nudges: nudges)
+        case .cursor: cursorAnswer(payload, attribution: attribution, nudges: nudges)
+        }
+    }
+
+    /// The harness a hook command answers, named by the `--agent` its registration carries and never sniffed from the payload.
+    enum Agent: String, ExpressibleByArgument, CaseIterable {
+        case claude
+        case cursor
+    }
+
+    /// What `--agent cursor` prints for Cursor's `preToolUse` `payload`, or `nil` for nothing: the payload read as the Claude Code one ``PreToolUseHook`` judges (Cursor's `Shell` as `Bash`), and its answer written in Cursor's schema.
+    ///
+    /// Nothing is printed for a payload that is not a `preToolUse` of a tool input Fieldwork reads, or for an answer Cursor's schema has no room for. SimWalk's hook acts on shell calls only, so no MCP tool name maps in either direction.
+    static func cursorAnswer(_ payload: Data, attribution: CallAttribution, nudges: NudgeLedger) -> String? {
+        guard let object = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any],
+              let claude = CursorPreToolUse.claudePayload(from: object, mcpToolName: { _, _ in nil }),
+              let translated = try? JSONSerialization.data(withJSONObject: claude),
+              let output = PreToolUseHook.handle(translated, attribution: attribution, nudges: nudges)
+        else {
+            return nil
+        }
+        return CursorPreToolUse.response(to: output, toolName: claude["tool_name"] as? String) { _ in false }
     }
 }

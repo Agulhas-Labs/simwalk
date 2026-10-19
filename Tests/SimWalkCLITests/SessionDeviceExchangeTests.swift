@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 @testable import SimWalkCLI
 import SimWalkCore

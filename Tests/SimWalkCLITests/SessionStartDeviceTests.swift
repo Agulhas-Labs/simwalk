@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 @testable import SimWalkCLI
 import SimWalkCore
@@ -354,7 +355,7 @@ extension SessionStartDeviceTests {
             processes.onSpawn = { [phone] _ in phone.calls.append(["spawn"]) }
         }
 
-        func start(_ arguments: [String], cancellation: Cancellation? = nil, note: (String) -> Void = { _ in }) throws -> Answer {
+        func start(_ arguments: [String], cancellation: Cancellation? = nil, animationsLibrary: WalkCommand.AnimationsLibrary? = nil, note: (String) -> Void = { _ in }) throws -> Answer {
             try SessionStartCommand.parse(arguments).perform(
                 shell: phone.shell,
                 pause: { [self] in elapsed += $0 },
@@ -380,6 +381,7 @@ extension SessionStartDeviceTests {
                     }
                     return LiveSessionReady(device: CaptureManifest.Device(name: "Test Phone", udid: SessionStartDeviceTests.udid, osVersion: "27.0"), runnerCommit: "c0ffee", readyAt: Date())
                 },
+                animationsLibrary: animationsLibrary,
                 note: note
             )
         }

@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 
 /// The lease a walk runs under: the one it was handed (`--lease`), or one it took itself on the device it resolved (Brief §2.4).
@@ -19,6 +20,11 @@ public struct WalkLease: Sendable {
         self.udid = udid
         self.token = token
         self.taken = taken
+    }
+
+    /// Whether the device is a clone SimWalk made for this lease (`lease acquire --clone-from`), so its launchd services are SimWalk's to switch off; `false` for a lease on any other device and for a token the store no longer holds.
+    public var createdDevice: Bool {
+        store.entry(token: token)?.lease.createdDevice == true
     }
 
     /// How long a walk's lease holds from its last renewal: longer than a walk runs between two renewals, short enough that a walk killed outright frees its device within the half hour.
@@ -44,7 +50,7 @@ public struct WalkLease: Sendable {
         var refusal: LeaseError?
         for candidate in candidates {
             do {
-                let lease = try store.acquire(udid: candidate.udid, ttl: ttl, holderPID: holderPID, now: now)
+                let lease = try LeaseError.mapping { try store.acquire(udid: candidate.udid, ttl: ttl, holderPID: holderPID, now: now) }
                 return (candidate, WalkLease(store: store, udid: candidate.udid, token: lease.token, taken: true))
             } catch let error as LeaseError {
                 if case .storeFailed = error {
@@ -63,7 +69,7 @@ public struct WalkLease: Sendable {
     ///
     /// Taken before any `devicectl` call, reads included, so a phone leased by someone else is refused (`LeaseError.held`, naming the holder and expiry) with nothing run on it. The store's exclusive create is the whole guarantee that two walks started together on one phone give one winner.
     public static func takePhysical(udid: String, store: LeaseStore, holderPID: Int32, now: Date) throws -> WalkLease {
-        let lease = try store.acquire(udid: udid, ttl: ttl, holderPID: holderPID, now: now, physicalDevice: true)
+        let lease = try LeaseError.mapping { try store.acquire(udid: udid, ttl: ttl, holderPID: holderPID, now: now, physicalDevice: true) }
         return WalkLease(store: store, udid: udid, token: lease.token, taken: true)
     }
 
@@ -80,13 +86,13 @@ public struct WalkLease: Sendable {
 
     /// ``renew(now:)``, thrown: the refusal a walk makes before it changes anything on the device.
     public func requireRenewed(now: Date) throws {
-        try store.renew(token: token, ttl: Self.ttl, now: now)
+        _ = try LeaseError.mapping { try store.renew(token: token, ttl: Self.ttl, now: now) }
     }
 
     /// Extends the lease by `ttl` from `now`: `nil` when it holds, else why it could not be renewed — expired, its holder gone, or no longer in the store.
     public func renew(now: Date) -> String? {
         do {
-            try store.renew(token: token, ttl: Self.ttl, now: now)
+            _ = try LeaseError.mapping { try store.renew(token: token, ttl: Self.ttl, now: now) }
             return nil
         } catch {
             return String(describing: error)
@@ -98,6 +104,6 @@ public struct WalkLease: Sendable {
     /// A removal that fails leaves the lease to lapse on its own — at `ttl`, or when its holder exits — which is what a walk killed before this ran leaves too.
     public func release() {
         guard taken else { return }
-        _ = try? store.remove(udid: udid, token: token)
+        _ = try? LeaseError.mapping { try store.remove(udid: udid, token: token) }
     }
 }

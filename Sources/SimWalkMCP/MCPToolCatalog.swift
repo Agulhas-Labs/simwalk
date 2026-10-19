@@ -4,11 +4,54 @@
 
 import SimWalkCore
 
-/// The seven exposed tools and their schemas, as `tools/list` returns them.
+/// The exposed tools and their schemas, as `tools/list` returns them: eight for a blocking client (Claude Code), nine for a bounded one, which also lists `walk_status`.
 ///
 /// **Every description here is spent in every session, whether or not the tool is ever called**, so each says the two things that decide a call — what to reach for it *for*, and what it is reached for *instead of* — and stops. The long version is the agent guide, which loads only when a walkbook, capture bundle or UI-test file is open.
 struct MCPToolCatalog {
-    static var tools: [[String: Any]] {
+    /// What `tools/list` returns for a client in `mode`.
+    static func tools(for mode: MCPClientMode) -> [[String: Any]] {
+        switch mode {
+        case .blocking: blockingTools
+        case .bounded: blockingTools.map(boundedWalk) + [walkStatus]
+        }
+    }
+
+    /// The names `tools/list` returns for `mode`, in order.
+    static func toolNames(for mode: MCPClientMode) -> [String] {
+        tools(for: mode).compactMap { $0["name"] as? String }
+    }
+
+    private static var blockingWalkSentence: String {
+        "A walk takes minutes and nothing is served until it finishes; the answer names"
+    }
+
+    private static var boundedWalkSentence: String {
+        "A walk takes minutes, and a call answers within the budget with either the answer or a handle to poll with walk_status; the answer names"
+    }
+
+    /// `walk` for a bounded client: today's description with the one sentence replaced; every other tool as it is.
+    private static func boundedWalk(_ tool: [String: Any]) -> [String: Any] {
+        guard tool["name"] as? String == SimWalkTool.walk.rawValue, let description = tool["description"] as? String else { return tool }
+        var bounded = tool
+        bounded["description"] = description.replacingOccurrences(of: blockingWalkSentence, with: boundedWalkSentence)
+        return bounded
+    }
+
+    private static var walkStatus: [String: Any] {
+        [
+            "name": SimWalkTool.walkStatus.rawValue,
+            "description": "Poll a walk that 'walk' answered with a handle: waits up to the budget, then returns the walk's answer if it has ended, else one running line with its progress.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "handle": ["type": "string", "description": "the handle that 'walk' returned on its running line"],
+                ],
+                "required": ["handle"],
+            ],
+        ]
+    }
+
+    private static var blockingTools: [[String: Any]] {
         [
             [
                 "name": SimWalkTool.walk.rawValue,
@@ -32,7 +75,9 @@ struct MCPToolCatalog {
                             "description": "Walk only these screen ids, in walkbook order. The bundle records the subset as the plan it ran, so it does not stand in for a full walk.",
                         ],
                         "settle": ["type": "integer", "description": "How long the screen must hold still before each capture, in milliseconds. Raise it for content that streams in after the screen appears."],
+                        "animations": ["type": "boolean", "description": "Keep UIKit animations on in the app under walk. A simulator walk switches them off by default; a walk that records motion keeps them on."],
                         "motion": ["type": "boolean", "description": "Record on every screen's captures when the tree last changed before the capture (settle time, ms), with the read cadence and read count — the resolution of that figure. A screen asks for it alone with \"motion\": true in the walkbook. Absent from a capture means motion was not recorded, never that there was none."],
+                        "stock": ["type": "boolean", "description": "Boot a device SimWalk created (a `lease acquire` with `cloneFrom`) with every launchd service on. Without it, such a device boots with the services the app at appPath does not need switched off, and the answer says so on a `device:` line. Refused for a device that SimWalk did not create and that has services off, and for a physical device."],
                         "dryRun": ["type": "boolean", "description": "Follow every screen's route against the booted app and report each step that no longer lands, capturing nothing. Writes a route-probe report to 'output' instead of a capture bundle."],
                         "verbose": ["type": "boolean", "description": "Write the full result file: every state, every route taken."],
                     ],
@@ -123,6 +168,7 @@ struct MCPToolCatalog {
                         "state": ["type": "object", "description": "start: a capture state (a walkbook 'states' entry) to launch under."],
                         "team": ["type": "string", "description": "start, physical device only, and required there: the Apple signing team ID the runner is built under. Refused on a simulator."],
                         "runnerBundleId": ["type": "string", "description": "start, physical device only: the runner's bundle identifier, when the default is not one your team can sign. Refused on a simulator."],
+                        "animations": ["type": "boolean", "description": "start: keep UIKit animations on in the app. A simulator session switches them off by default."],
                         "id": ["type": "string", "description": "read, step, save, end: the session id start printed."],
                         "match": ["type": "string", "description": "read: only the text elements whose label or value contains this."],
                         "step": ["type": "object", "description": "step: one walkbook route step, e.g. {\"tap\":{\"label\":\"Next\"}}."],

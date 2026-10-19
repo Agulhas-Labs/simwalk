@@ -3,6 +3,7 @@
 //
 
 import Foundation
+import SimWalkCore
 
 /// Where walks build the runner — `~/.simwalk/runner-builds/<key>`, one directory per snapshot and one per working tree (SimWalk#16) — and the record each directory carries of what it builds.
 ///
@@ -17,8 +18,7 @@ public struct RunnerBuilds {
 
     /// The machine's own build directories.
     public static func standard() -> RunnerBuilds {
-        RunnerBuilds(directory: FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".simwalk", isDirectory: true)
+        RunnerBuilds(directory: HomeDirectories.simwalk()
             .appendingPathComponent("runner-builds", isDirectory: true))
     }
 

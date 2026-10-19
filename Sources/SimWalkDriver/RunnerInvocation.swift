@@ -3,6 +3,7 @@
 //
 
 import Foundation
+import SimulatorServices
 import SimWalkCore
 
 /// Builds the XCUITest runner and runs a walkbook through it.
@@ -15,11 +16,22 @@ public struct RunnerInvocation {
     public let projectPath: String
     public let derivedDataPath: String
     private let shell: Shell
+    private let overrideRoot: URL
+    private let profileLookup: @Sendable (String) -> ServiceProfile?
 
-    public init(projectPath: String, derivedDataPath: String, shell: Shell = Shell()) {
+    /// `overrideRoot` is where a slim device's launchd override file lives and `profileLookup` names the runtime's service profile; both are injectable so a test reads a temporary directory and a fixture profile.
+    public init(
+        projectPath: String,
+        derivedDataPath: String,
+        shell: Shell = Shell(),
+        overrideRoot: URL = DisabledServicesOverride.defaultRoot,
+        profileLookup: @escaping @Sendable (String) -> ServiceProfile? = ServiceProfiles.profile(forRuntime:)
+    ) {
         self.projectPath = projectPath
         self.derivedDataPath = derivedDataPath
         self.shell = shell
+        self.overrideRoot = overrideRoot
+        self.profileLookup = profileLookup
     }
 
     /// The line to print before a build that has to start from nothing, or `nil` when the build directory already holds built products (SimWalk#98).
@@ -60,6 +72,7 @@ public struct RunnerInvocation {
         logFilePath: String?,
         settleMilliseconds: Int? = nil,
         motion: Bool = false,
+        animationsOffLibrary: String? = nil,
         deviceAppearance: Walkbook.Theme? = nil,
         deviceLocale: String? = nil,
         runnerCommit: String? = nil,
@@ -101,6 +114,11 @@ public struct RunnerInvocation {
         if motion {
             environment[MotionOptIn.hostEnvironmentKey] = MotionOptIn.walkWideValue
         }
+        // The animations-off library's path (SimWalk#154), which the runner inserts into the app's launch environment. Absent means the
+        // app launches as it is: `--animations`, a walk that records motion, and every device walk.
+        if let animationsOffLibrary {
+            environment[AnimationsOptIn.hostEnvironmentKey] = animationsOffLibrary
+        }
         // The runner's second mode (`walk --dry-run`, SimWalk#1 item 4): every route followed through the same step
         // code a walk runs, nothing captured, and a route-probe report written to `outputPath` in place of a bundle.
         // Absent means a walk, so every existing invocation is unchanged.
@@ -122,8 +140,20 @@ public struct RunnerInvocation {
         // a second pass — so a `systemTap` that saw no sheet can say the device is too freshly booted for HealthKit to
         // raise one (SimWalk#88). Absent means unknown, and the refusal keeps its answered-sheet wording.
         addDeviceBootedAt(to: &environment, on: simulator)
+        // Whether the device booted slim, so a `systemTap` that saw no sheet can say a service that is off never raises one.
+        addSlimDevice(to: &environment, on: simulator)
 
         try runBuilt(environment: environment, resultBundlePath: resultBundlePath, on: simulator)
+    }
+
+    /// Adds how many launchd services are off on `simulator` and which capabilities they serve to `environment`; left out where none are off or the override cannot be read.
+    private func addSlimDevice(to environment: inout [String: String], on simulator: Simulator) {
+        guard let off = try? DisabledServicesOverride(root: overrideRoot).labels(for: simulator.udid), !off.isEmpty else { return }
+        let profile = simulator.runtimeIdentifier.flatMap(profileLookup)
+        let capabilities = profile.map { profile in
+            Capability.allCases.filter { !off.isDisjoint(with: profile.labels(for: $0)) }.map(\.rawValue)
+        } ?? []
+        environment[SlimDevice.hostEnvironmentKey] = SlimDevice(servicesOff: off.count, capabilities: capabilities).environmentValue
     }
 
     /// Adds when `simulator` booted to `environment`, where the host can read it (SimWalk#88); left out otherwise.
@@ -291,6 +321,8 @@ public struct RunnerInvocation {
     ///
     /// The session's directory (`layout`) is the only input the runner needs beyond its commit and log — what it launches is in `launch.json` there, and its result bundle goes there too. `idleOverride` is the host's `SIMWALK_SESSION_IDLE_SECONDS`, passed on verbatim so both sides read it with ``LiveSessionIdle/timeout(fromOverride:)``.
     ///
+    /// `animationsOffLibrary` is the path of the animations-off library, which the runner inserts into the app it launches; `nil` leaves animations on.
+    ///
     /// `deviceAppearance` is the device's appearance as `start` found it, before any settle: the runner puts it back on every exit, including an idle one no host command sees, as a walk's runner does before every state. Absent means unknown, and the runner then leaves the appearance as the session left it.
     public func session(
         layout: LiveSessionLayout,
@@ -299,6 +331,7 @@ public struct RunnerInvocation {
         idleOverride: String?,
         deviceAppearance: Walkbook.Theme?,
         progress: ProgressClaim? = nil,
+        animationsOffLibrary: String? = nil,
         on simulator: Simulator
     ) -> RunnerCommand {
         var environment = ["TEST_RUNNER_SIMWALK_SESSION": layout.directory.path]
@@ -309,6 +342,8 @@ public struct RunnerInvocation {
         environment["TEST_RUNNER_SIMWALK_RUNNER_COMMIT"] = runnerCommit
         environment["TEST_RUNNER_" + LiveSessionIdle.overrideVariable] = idleOverride
         environment["TEST_RUNNER_SIMWALK_DEVICE_APPEARANCE"] = deviceAppearance?.rawValue
+        // The library that switches UIKit animations off in the app the runner launches; absent leaves them on (SimWalk#154).
+        environment[AnimationsOptIn.hostEnvironmentKey] = animationsOffLibrary
         // A live session's steps are `systemTap`s too, so they name a fresh boot as a walk's do (SimWalk#88).
         addDeviceBootedAt(to: &environment, on: simulator)
         return RunnerCommand(

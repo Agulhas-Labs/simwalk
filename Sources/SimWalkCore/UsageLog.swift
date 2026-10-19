@@ -30,12 +30,12 @@ public struct UsageLog: Sendable {
 
     /// The variable that moves the log: a path to the file itself, honoured by ``standard(environment:)``.
     ///
-    /// **Anything that drives the binary and is not a real use of it sets this** — a test, a review, a mutation run — so what it records lands in a file it owns rather than in the one `simwalk usage` reports adoption and failures from. `HOME` cannot do that job: `homeDirectoryForCurrentUser` ignores it.
+    /// **Anything that drives the binary and is not a real use of it sets this** — a test, a review, a mutation run — so what it records lands in a file it owns rather than in the one `simwalk usage` reports adoption and failures from. `HOME` and `SIMWALK_HOME` move the directory the log lives in (``HomeDirectories``), but a harness that must not touch the real log names it here.
     public static var overrideVariable: String {
         "SIMWALK_USAGE_LOG"
     }
 
-    // Host-only: `homeDirectoryForCurrentUser` is unavailable on iOS, and rightly — the runner executes
+    // Host-only: `homeDirectoryForCurrentUser` (read only by ``HomeDirectories``) is unavailable on iOS, and rightly — the runner executes
     // inside a simulator where `~` is an app container, so a "standard location" there would be a
     // per-install directory nobody could find and nothing could aggregate. The log's own machinery is
     // platform-neutral; it is only *this* location that is a fact about the host.
@@ -49,7 +49,7 @@ public struct UsageLog: Sendable {
         if let override = environment[overrideVariable], !override.trimmed.isEmpty {
             return UsageLog(fileURL: URL(fileURLWithPath: override), now: { Date() })
         }
-        return UsageLog(directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".simwalk"), now: { Date() })
+        return UsageLog(directory: HomeDirectories.simwalk(environment: environment), now: { Date() })
     }
     #endif
 

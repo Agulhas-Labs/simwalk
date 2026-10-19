@@ -3,6 +3,7 @@
 //
 
 import ArgumentParser
+import Fieldwork
 import Foundation
 import SimWalkCore
 import SimWalkDriver
@@ -51,13 +52,19 @@ struct LeaseAcquireCommand: ParsableCommand {
         }
     }
 
+    /// What a holder warning tells the caller to do: the store's warning says what may happen, and this command's flag is the remedy.
+    static var holderPIDHint: String {
+        " — pass --holder-pid <pid> naming the session's long-lived process"
+    }
+
     /// The same run with its three effects and the answer injectable.
     func run(log: UsageLog, emit: (String) -> Void, emitError: (String) -> Void, isStdoutPiped: () -> Bool = { false }, body: () throws -> Answer) throws {
         try TimedCall.run(tool: "lease acquire", target: physical ?? cloneFrom ?? device, log: log, emit: emit, emitError: emitError, defaultFailureKind: .runnerFailed, isStdoutPiped: isStdoutPiped, body: body)
     }
 
-    /// `holderWarning` qualifies the answer when the holder chosen may not outlive this command (``HolderProcess/unverifiedHolderWarning(holder:parent:name:)``).
+    /// `holderWarning` qualifies the answer when the holder chosen may not outlive this command (``HolderProcess/unverifiedHolderWarning(holder:parent:name:)``), with ``holderPIDHint`` after it.
     func answer(leasing: DeviceLeasing, holderPID: Int32, now: Date, holderWarning: String? = nil) throws -> Answer {
+        let holderWarning = holderWarning.map { $0 + Self.holderPIDHint }
         let ttlSeconds = Self.seconds(ttl) ?? 0
         if let physical {
             let grant = try leasing.acquirePhysical(udid: physical, ttl: ttlSeconds, holderPID: holderPID, now: now)

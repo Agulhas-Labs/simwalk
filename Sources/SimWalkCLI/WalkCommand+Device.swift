@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 import SimWalkCore
 import SimWalkDriver
@@ -34,6 +35,9 @@ extension WalkCommand {
         guard !verbose else {
             throw DeviceWalkRefusal.verboseOnDevice
         }
+        guard !stock else {
+            throw DeviceWalkRefusal.stockOnDevice
+        }
         return .device(device)
     }
 
@@ -58,11 +62,12 @@ extension WalkCommand {
         now: @escaping () -> Date = { Date() },
         telemetry: WalkTelemetry? = nil,
         firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
+        animationsLibrary: AnimationsLibrary? = nil,
         note: (String) -> Void = { _ in }
     ) throws -> Answer {
         let target = try target(shell: shell, leases: leases, firstLaunch: firstLaunch)
         guard case let .device(walk) = target else {
-            return try performWalk(shell: shell, now: now, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, firstLaunch: firstLaunch, note: note).servedAnswer()
+            return try performWalk(shell: shell, now: now, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, firstLaunch: firstLaunch, animationsLibrary: animationsLibrary, note: note).servedAnswer()
         }
         return try walk.answer(shell: shell, builds: builds, resolveRunner: resolveRunner, leases: leases, holderPID: ProcessInfo.processInfo.processIdentifier, now: now())
     }

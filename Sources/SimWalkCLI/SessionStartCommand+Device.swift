@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 import SimWalkCore
 import SimWalkDriver
@@ -110,7 +111,7 @@ extension SessionStartCommand {
             ? "lease: taken for this session\(until), held by pid \(effects.leases.entry(token: held.token)?.lease.holderPID ?? 0); `session end` releases it"
             : "lease: presented, renewed\(until); left to its holder"
         return Answer(
-            header: "live session: app: \(app)  device: \(started.ready.device.name) (\(started.ready.device.osVersion))",
+            header: "live session: app: \(app)  device: \(started.ready.device.name) (\(started.ready.device.osVersion))  animations: on",
             verdict: .unqualified("session \(sessionID) ready"),
             residue: [
                 "id: \(sessionID)",

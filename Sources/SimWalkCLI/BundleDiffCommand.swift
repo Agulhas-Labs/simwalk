@@ -41,6 +41,9 @@ struct BundleDiffCommand: ParsableCommand {
         }
         let referenceBundle = try CaptureBundle.read(at: URL(fileURLWithPath: referencePath))
         let runBundle = try CaptureBundle.read(at: URL(fileURLWithPath: runPath))
+        if let refusal = BundleDiff.animationsRefusal(run: runBundle.manifest, reference: referenceBundle.manifest) {
+            throw BundleDiffError.animationsDiffer(message: refusal)
+        }
         let diff = BundleDiff.compare(run: runBundle, against: referenceBundle)
         let written = try directory.map { try BundleDiffCrops.write(diff, reference: referenceBundle, run: runBundle, into: $0) }
         return BundleDiffSummary(diff, reference: referenceBundle, run: runBundle, crops: written).answer()

@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 import SimWalkCore
 import SimWalkDriver
@@ -25,10 +26,11 @@ struct WalkDryRun {
         leases: LeaseStore,
         telemetry: WalkTelemetry? = nil,
         firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
+        animationsLibrary: WalkCommand.AnimationsLibrary? = nil,
         note: (String) -> Void = { _ in }
     ) throws -> Outcome {
         try WalkTelemetry.recording(on: telemetry) {
-            let prepared = try command.prepare(shell: shell, runner: resolveRunner, builds: builds, leases: leases, now: now(), logPath: logFileURL.path, telemetry: telemetry, firstLaunch: firstLaunch, note: note)
+            let prepared = try command.prepare(shell: shell, runner: resolveRunner, builds: builds, leases: leases, now: now(), logPath: logFileURL.path, telemetry: telemetry, firstLaunch: firstLaunch, animationsLibrary: animationsLibrary, note: note)
             defer { WalkCommand.discardTemporary(prepared.temporaryWalkbook) }
             // Released once the device is handed back, as a walk's is; a `--lease` lease is left to its holder.
             defer {
@@ -79,6 +81,7 @@ struct WalkDryRun {
                         buildHash: prepared.buildHash,
                         logFilePath: logFileURL.path,
                         settleMilliseconds: command.settle,
+                        animationsOffLibrary: prepared.animationsOffLibrary,
                         runnerCommit: prepared.source.commit,
                         dryRun: true,
                         nonce: runNonce,

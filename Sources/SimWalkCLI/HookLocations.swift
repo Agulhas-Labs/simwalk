@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 import SimWalkDriver
 import SimWalkMCP
@@ -13,8 +14,11 @@ struct HookLocations {
     /// Claude Code's settings file, where the `PreToolUse` hook goes (SimWalk#14), and the status line when sift is not here to carry it.
     let settings: URL
 
+    /// Claude Code's own `.claude.json`, where `claude mcp add --scope user` records the server and where the install reads it back to confirm.
+    let config: URL
+
     /// The user rule the agent guide is installed as.
-    let guide: AgentGuide
+    let rule: URL
 
     /// sift's segment directory, or `nil` when sift is not on this machine to carry a segment.
     let segments: StatuslineSegments?
@@ -35,7 +39,8 @@ struct HookLocations {
     static func standard(settings: String?, rule: String?) -> HookLocations {
         HookLocations(
             settings: settings.map { URL(fileURLWithPath: $0) } ?? SimWalkPaths.claudeSettings,
-            guide: rule.map { AgentGuide(destination: URL(fileURLWithPath: $0)) } ?? .standard(),
+            config: AgentPaths.claudeConfig(environment: ProcessInfo.processInfo.environment),
+            rule: rule.map { URL(fileURLWithPath: $0) } ?? SimWalkPaths.claudeRule,
             segments: StatuslineSegments.isAvailable ? .standard() : nil,
             visibility: .standard(),
             runner: .standard(),

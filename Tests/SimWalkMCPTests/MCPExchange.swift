@@ -15,20 +15,36 @@ struct MCPExchange {
         _ requests: [[String: Any]],
         usage: UsageLog? = nil,
         session: String? = nil,
-        answering: @escaping SimWalkMCPServer.AnswerProvider = { _, _, _ in Self.answer }
+        answering: @escaping SimWalkMCPServer.AnswerProvider = { _, _, _, _ in Self.answer },
+        environment: [String: String] = [:],
+        log: @escaping @Sendable (String) -> Void = { _ in }
+    ) async throws -> [[String: Any]] {
+        let lines = try requests.map { try JSONSerialization.data(withJSONObject: $0) }
+        return try await send(lines: lines, usage: usage, session: session, answering: answering, environment: environment, log: log)
+    }
+
+    /// Sends request lines exactly as given (a recorded client line must reach the server as recorded) and returns every response line, in order.
+    static func send(
+        lines requests: [Data],
+        usage: UsageLog? = nil,
+        session: String? = nil,
+        answering: @escaping SimWalkMCPServer.AnswerProvider = { _, _, _, _ in Self.answer },
+        environment: [String: String] = [:],
+        log: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> [[String: Any]] {
         let input = Pipe()
         let output = Pipe()
         let server = SimWalkMCPServer(
             input: input.fileHandleForReading,
             output: output.fileHandleForWriting,
-            log: { _ in },
+            log: log,
             usage: usage,
             session: session,
-            answering: answering
+            answering: answering,
+            environment: environment
         )
         for request in requests {
-            var line = try JSONSerialization.data(withJSONObject: request)
+            var line = request
             line.append(0x0A)
             try input.fileHandleForWriting.write(contentsOf: line)
         }

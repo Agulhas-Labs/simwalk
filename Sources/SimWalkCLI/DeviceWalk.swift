@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 import SimWalkCore
 import SimWalkDriver
@@ -70,7 +71,7 @@ struct DeviceWalk {
         }
         defer { held.release() }
         let udid = held.udid
-        let claim = try WalkClaim.take(udid: udid, in: leases)
+        let claim = try LeaseError.mapping { try WalkClaim.take(udid: udid, in: leases) }
         defer { claim.release() }
 
         let device = try PhysicalDevicePrerequisites.check(udid: udid, team: team, shell: shell)

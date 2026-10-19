@@ -43,7 +43,10 @@ final class WalkTelemetry {
     }
 
     /// Starts the run in `booting`, naming the usage log (`logPath`) in that first write — the result carries the same path once it ends — replacing whatever the file held — and from here a cancel ends it, one that came before included: registered after the begin, since a writer that has not begun has no run to end.
+    ///
+    /// Begun once: a second call is ignored, so the MCP face can begin before the target is resolved and the walk's own `begin` in `prepare` leaves the run, and its `startedAt`, as they are.
     func begin(tool: String, logPath: String? = nil) {
+        guard startedAt == nil else { return }
         startedAt = clock()
         timings = PhaseTimings()
         writer.begin(tool: tool, logPath: logPath)
@@ -146,6 +149,29 @@ final class WalkTelemetry {
             telemetry?.fail(error)
             throw error
         }
+    }
+
+    /// `body`, with anything it throws ending the run as `failed` unless something has ended it already.
+    static func recordingUnended<T>(on telemetry: WalkTelemetry, _ body: () throws -> T) throws -> T {
+        do {
+            return try body()
+        } catch {
+            if !telemetry.writer.current.phase.isTerminal {
+                telemetry.fail(error)
+            }
+            throw error
+        }
+    }
+
+    /// Ends a run that nothing ended — a physical device's walk, which writes no result — `done` when its answer is unqualified, else `failed`.
+    func endUnended(by answer: Answer) {
+        guard !writer.current.phase.isTerminal else { return }
+        stampTotal()
+        writer.commit { [timings] in $0.summary = timings }
+        guard case .unqualified = answer.verdict else {
+            return writer.finish(.failed, error: answer.verdict.line)
+        }
+        writer.finish(.done)
     }
 
     /// `body` in `phase`, timed into `segment`, when the run is watched; `body` alone when it is not.

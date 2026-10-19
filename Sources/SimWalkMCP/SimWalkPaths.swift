@@ -16,8 +16,7 @@ public struct SimWalkPaths {
 
     /// `~/.simwalk` — one directory across every repository, since the usage log and the status line's cache are both per-user rather than per-repo.
     public static var home: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".\(binaryName)", isDirectory: true)
+        HomeDirectories.simwalk()
     }
 
     /// Where the status line keeps one scan state per session — beside the usage log, wherever `SIMWALK_USAGE_LOG` has put it.
@@ -29,8 +28,7 @@ public struct SimWalkPaths {
 
     /// `~/.claude` — Claude Code's own configuration directory, which this tool reads and writes only at the two paths below.
     public static var claudeHome: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude", isDirectory: true)
+        HomeDirectories.user().appendingPathComponent(".claude", isDirectory: true)
     }
 
     /// The settings file a status-line registration lands in when sift is not on the machine to carry it.

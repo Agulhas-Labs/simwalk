@@ -3,6 +3,7 @@
 //
 
 import ArgumentParser
+import Fieldwork
 import Foundation
 import SimWalkCore
 import SimWalkDriver
@@ -36,6 +37,9 @@ struct SessionStartCommand: ParsableCommand {
     @Option(name: .long, help: "Physical device only: the runner's bundle identifier, when the default is not one your team can sign.")
     var runnerBundleId: String?
 
+    @Flag(name: .long, help: "Keep UIKit animations on in the app. A simulator session switches them off by default so screens settle sooner.")
+    var animations = false
+
     func validate() throws {
         guard (device == nil) != (lease == nil) else {
             throw ValidationError("pass --device <udid> or --lease <token> — exactly one; a session runs only on a device you own")
@@ -49,7 +53,7 @@ struct SessionStartCommand: ParsableCommand {
         let signals = TerminationSignals(cancelling: cancellation)
         defer { withExtendedLifetime(signals) {} }
         try TimedCall.run(tool: "session start", target: app, defaultFailureKind: .runnerFailed) {
-            try perform(builds: .standard(), cancellation: cancellation, note: StandardStreams.emitError)
+            try perform(builds: .standard(), cancellation: cancellation, animationsLibrary: WalkCommand.standardAnimationsLibrary(), note: StandardStreams.emitError)
         }
     }
 
@@ -73,6 +77,7 @@ struct SessionStartCommand: ParsableCommand {
         cancellation: Cancellation? = nil,
         deviceHello: ((DeviceSessionBind) throws -> LiveSessionReady)? = nil,
         firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
+        animationsLibrary: WalkCommand.AnimationsLibrary? = nil,
         note: (String) -> Void = { _ in }
     ) throws -> Answer {
         // Which target, before the simulator path touches anything: a physical device has no progress file, as a device walk has none.
@@ -90,6 +95,8 @@ struct SessionStartCommand: ParsableCommand {
             try firstLaunch.preflight(shell: shell)
             let run: (String, [String]) throws -> Shell.Result = { try shell.run($0, $1) }
             let launchState = try state.map(Self.captureState)
+            // Built before the device is touched, so a session that cannot have it is refused while that is cheap (SimWalk#154); `--animations` skips it.
+            let animationsOffLibrary = try animations ? nil : animationsLibrary.map { try WalkCommand.builtLibrary($0).path }
             let source = try resolveRunner?() ?? RunnerProject.resolve(executable: LaunchedBinary.url, binaryHash: { LaunchedBinary.hash }, run: run)
             try builds.recordUse(of: source)
 
@@ -137,6 +144,7 @@ struct SessionStartCommand: ParsableCommand {
                                 idleOverride: environment[LiveSessionIdle.overrideVariable],
                                 deviceAppearance: found,
                                 progress: progress.claim,
+                                animationsOffLibrary: animationsOffLibrary,
                                 on: simulator
                             )
                         },
@@ -156,7 +164,7 @@ struct SessionStartCommand: ParsableCommand {
             }
             let idle = LiveSessionIdle.timeout(fromOverride: environment[LiveSessionIdle.overrideVariable])
             return Answer(
-                header: "live session: app: \(app)  device: \(started.ready.device.name) (\(started.ready.device.osVersion))",
+                header: "live session: app: \(app)  device: \(started.ready.device.name) (\(started.ready.device.osVersion))  animations: \(animationsOffLibrary == nil ? "on" : "off")",
                 verdict: .unqualified("session \(sessionID) ready"),
                 residue: [
                     "id: \(sessionID)",
@@ -216,10 +224,15 @@ struct SessionStartCommand: ParsableCommand {
     }
 
     static func captureState(_ json: String) throws -> Walkbook.CaptureState {
+        let state: Walkbook.CaptureState
         do {
-            return try JSONDecoder().decode(Walkbook.CaptureState.self, from: Data(json.utf8))
+            state = try JSONDecoder().decode(Walkbook.CaptureState.self, from: Data(json.utf8))
         } catch {
             throw LiveSessionHostError.unreadableState(reason: "\(error)")
         }
+        if state.environment?.keys.contains(AnimationsOptIn.libraryEnvironmentKey) == true {
+            throw LiveSessionHostError.stateSetsAnimations(variable: AnimationsOptIn.libraryEnvironmentKey)
+        }
+        return state
     }
 }

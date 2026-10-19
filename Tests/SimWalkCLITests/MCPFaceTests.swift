@@ -183,7 +183,7 @@ struct MCPFaceTests {
         let owned = ["SIMWALK_USAGE_LOG": directory.url.appendingPathComponent("usage.jsonl").path]
 
         #expect(throws: CaptureBundleError.self) {
-            try MCPToolRunner.answer(tool: .walk, arguments: invocation.argumentVector, environment: owned)
+            try MCPToolRunner.answer(tool: .walk, arguments: invocation.argumentVector, environment: owned, animationsLibrary: { _ in { URL(fileURLWithPath: "/libs/animations-1.dylib") } })
         }
     }
 
@@ -264,7 +264,7 @@ struct MCPFaceTests {
             log: { _ in },
             usage: nil,
             session: nil,
-            answering: { try MCPToolRunner.answer(tool: $0, arguments: $1, cancellation: $2) }
+            answering: { try MCPToolRunner.answer(tool: $0, arguments: $1, cancellation: $2, started: $3) }
         )
         for request in requests {
             var line = try JSONSerialization.data(withJSONObject: request)

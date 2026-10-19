@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 @testable import SimWalkCLI
 import SimWalkCore
@@ -32,7 +33,7 @@ struct WalkCancellationTests {
             log: { _ in },
             usage: nil,
             session: nil,
-            answering: { _, arguments, cancellation in
+            answering: { _, arguments, cancellation, _ in
                 let command = try WalkCommand.parse(arguments)
                 return try command.performWalk(
                     runner: {

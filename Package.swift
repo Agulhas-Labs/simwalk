@@ -6,8 +6,7 @@ import PackageDescription
 
 /// Swift 6 language mode + zero-warning builds for every target.
 ///
-/// Unlike a shared library, this package is never consumed by an Xcode app as an external dependency, so
-/// `.treatAllWarnings(as: .error)` is safe to set in the manifest itself.
+/// Unlike a shared library, this package is never consumed by an Xcode app as an external dependency, so `.treatAllWarnings(as: .error)` is safe to set in the manifest itself.
 let strictSettings: [SwiftSetting] = [
     .swiftLanguageMode(.v6),
     .treatAllWarnings(as: .error),
@@ -35,6 +34,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
+        .package(url: "https://github.com/Agulhas-Labs/swift-fieldwork.git", from: "0.7.0"),
     ],
     targets: [
         .target(
@@ -50,6 +50,9 @@ let package = Package(
             name: "SimWalkDriver",
             dependencies: [
                 "SimWalkCore",
+                .product(name: "Fieldwork", package: "swift-fieldwork"),
+                .product(name: "SimulatorServices", package: "swift-fieldwork"),
+                .product(name: "SimulatorAnimations", package: "swift-fieldwork"),
             ],
             swiftSettings: strictSettings
         ),
@@ -67,6 +70,8 @@ let package = Package(
                 "SimWalkDriver",
                 "SimWalkMCP",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "Fieldwork", package: "swift-fieldwork"),
+                .product(name: "SimulatorAnimations", package: "swift-fieldwork"),
             ],
             swiftSettings: strictSettings
         ),
@@ -102,6 +107,7 @@ let package = Package(
         .testTarget(
             name: "SimWalkDriverTests",
             dependencies: [
+                .product(name: "Fieldwork", package: "swift-fieldwork"),
                 "SimWalkDriver",
                 "SimWalkCore",
                 "SimWalkTestSupport",
@@ -122,6 +128,9 @@ let package = Package(
                 "SimWalkCore",
                 "SimWalkTestSupport",
             ],
+            resources: [
+                .copy("Fixtures"),
+            ],
             swiftSettings: strictSettings
         ),
         // The CLI's contract — which stream, which exit code, which log line — is only checkable
@@ -129,6 +138,8 @@ let package = Package(
         .testTarget(
             name: "SimWalkCLITests",
             dependencies: [
+                .product(name: "Fieldwork", package: "swift-fieldwork"),
+                .product(name: "SimulatorAnimations", package: "swift-fieldwork"),
                 "SimWalkCLI",
                 "SimWalkCore",
                 // The driver's own errors, because one of the CLI's contracts is what it does with a

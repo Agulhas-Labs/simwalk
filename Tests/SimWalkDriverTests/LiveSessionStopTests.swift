@@ -3,6 +3,7 @@
 //
 
 import Darwin
+import Fieldwork
 import Foundation
 import SimWalkCore
 @testable import SimWalkDriver

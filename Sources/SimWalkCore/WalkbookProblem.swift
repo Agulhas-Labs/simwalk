@@ -46,6 +46,8 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
     case emptyLaunchCondition(screenID: String, index: Int, key: String)
     /// A capture state writes an empty string as one of its `arguments` or as an `environment` key — `key` names which — so the app would be launched with something nobody meant (SimWalk#44).
     case blankLaunchCondition(screenID: String, index: Int, key: String)
+    /// A capture state's `environment` names `SIMWALK_ANIMATIONS`, which would make the walk's one animation state two (SimWalk#154).
+    case animationsInStateEnvironment(screenID: String, index: Int)
     /// A capture state's `resetPermissions` names a resource `ProtectedResourceName` does not, so there is nothing the runner could reset for it.
     case unknownPermission(screenID: String, index: Int, value: String, suggestion: String?)
     /// A capture state's `location` is not a place: a latitude outside -90…90 or a longitude outside -180…180.
@@ -163,6 +165,8 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
             "\(Self.subject(screenID, index)) requests \(key) \(key == "environment" ? "{}" : "[]") — an empty \(key == "environment" ? "object" : "list") \(key == "resetPermissions" ? "resets nothing" : "launches the app") exactly as its absence does, so omit the key"
         case let .blankLaunchCondition(screenID, index, key):
             "\(Self.subject(screenID, index)) requests \(key == "arguments" ? "an empty string among its arguments" : "an environment variable with an empty name") — the app would be launched with something that names nothing; remove it"
+        case let .animationsInStateEnvironment(screenID, index):
+            "\(Self.subject(screenID, index)): \(AnimationsOptIn.stateEnvironmentRefusal)"
         case let .unknownPermission(screenID, index, value, suggestion):
             "\(Self.subject(screenID, index)) requests resetPermissions '\(value)', which is not a protected resource this platform can reset — one of \(ProtectedResourceName.allCases.map(\.rawValue).joined(separator: ", "))\(Self.meantInstead(suggestion))"
         case let .locationOutOfRange(screenID, index, latitude, longitude):
@@ -245,7 +249,7 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
             nil
         case .blankWalkName, .blankAppBundleID, .noScreens, .blankScreenID, .duplicateScreenID, .collidingScreenIDs, .emptyRoute,
              .blankRouteStepLabel, .blankTypedText, .malformedTapPoint, .tapPointOutsideElement, .tapPointOffScreen, .tapPointFractionalWithoutLabel, .noCaptureStates, .duplicateCaptureState, .unknownDynamicTypeSize, .unknownLocale,
-             .emptyLaunchCondition, .blankLaunchCondition, .unknownPermission, .locationOutOfRange, .nonPositiveSettle, .emptyBudgets, .negativeBudget, .measureIterationsOutOfRange, .blankExpect, .paddedExpect, .emptyExpectMenu, .blankExpectMenuLabel, .paddedExpectMenuLabel, .unknownKey, .misplacedKey, .mangledExpect, .placeholderInTabStep,
+             .emptyLaunchCondition, .blankLaunchCondition, .animationsInStateEnvironment, .unknownPermission, .locationOutOfRange, .nonPositiveSettle, .emptyBudgets, .negativeBudget, .measureIterationsOutOfRange, .blankExpect, .paddedExpect, .emptyExpectMenu, .blankExpectMenuLabel, .paddedExpectMenuLabel, .unknownKey, .misplacedKey, .mangledExpect, .placeholderInTabStep,
              .placeholderInSystemTapStep, .ownerInSystemTapStep, .atLaunchAfterFirstStep, .unopenableURL, .emptyOracleCommand, .unknownPrivacyService, .privacyGrantedAndRevoked, .privacyGrantUndoneByReset, .figuresWithoutOracle, .emptyFigures,
              .blankFigureField, .emptyFigureWindows, .duplicateFigureID, .figureElementPlaceholders, .unsupportedOnDevice:
             nil

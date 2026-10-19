@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 import SimWalkDriver
 
@@ -17,7 +18,7 @@ struct HeldDevice {
     static func take(for walk: WalkCommand, shell: Shell, leases: LeaseStore, now: Date) throws -> HeldDevice {
         let (simulator, lease) = try leased(device: walk.device, token: walk.lease, shell: shell, leases: leases, now: now)
         do {
-            return try HeldDevice(simulator: simulator, lease: lease, claim: WalkClaim.take(udid: simulator.udid, in: leases))
+            return try HeldDevice(simulator: simulator, lease: lease, claim: LeaseError.mapping { try WalkClaim.take(udid: simulator.udid, in: leases) })
         } catch {
             lease.release()
             throw error
@@ -38,7 +39,7 @@ struct HeldDevice {
             return try WalkLease.take(device, among: Simulator.available(shell: shell), store: leases, holderPID: ProcessInfo.processInfo.processIdentifier, now: now)
         }
         let simulator = try Simulator.resolve(device, lease: token, leases: leases, now: now, shell: shell)
-        try leases.renew(token: token, ttl: WalkLease.ttl, now: now)
+        _ = try LeaseError.mapping { try leases.renew(token: token, ttl: WalkLease.ttl, now: now) }
         return (simulator, WalkLease(store: leases, udid: simulator.udid, token: token, taken: false))
     }
 }

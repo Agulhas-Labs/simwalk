@@ -112,6 +112,21 @@ struct AnswerContractTests {
         #expect(CaptureBundleHeader.line(withUnrecorded).contains("settled: 1/3 (1 unrecorded)"))
     }
 
+    /// The animation state sits between the device and the settle count when the bundle records it, and is absent when it does not (SimWalk#154).
+    @Test
+    func theHeaderNamesTheAnimationStateOnlyWhenRecorded() {
+        var manifest = CaptureBundleTests.manifest()
+        manifest.screens = []
+
+        #expect(!CaptureBundleHeader.line(manifest).contains("animations"))
+
+        manifest.animations = .disabled
+        #expect(CaptureBundleHeader.line(manifest).contains("device: iPhone 17 Pro (26.0)  animations: off  settled: no captures"))
+
+        manifest.animations = .enabled
+        #expect(CaptureBundleHeader.line(manifest).contains("device: iPhone 17 Pro (26.0)  animations: on  settled: no captures"))
+    }
+
     /// A bundle holding no captures at all is not a bundle whose captures failed to settle.
     @Test
     func aBundleWithNoCapturesSaysSoRatherThanReportingNoneSettled() {

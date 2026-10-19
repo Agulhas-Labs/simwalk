@@ -106,6 +106,21 @@ struct CaptureStateLaunchTests {
         #expect(state.launchEnvironment(over: ["SHARED": "base", "BASE": "1"]) == ["SHARED": "state", "OWN": "1", "BASE": "1"])
     }
 
+    @Test
+    func astatesLibrariesJoinTheBasesInsteadOfReplacingThem() {
+        let state = Walkbook.CaptureState(theme: .light, environment: ["DYLD_INSERT_LIBRARIES": "/state.dylib"])
+
+        #expect(state.launchEnvironment(over: ["DYLD_INSERT_LIBRARIES": "/base.dylib"]) == ["DYLD_INSERT_LIBRARIES": "/state.dylib:/base.dylib"])
+        #expect(state.launchEnvironment(over: [:]) == ["DYLD_INSERT_LIBRARIES": "/state.dylib"])
+    }
+
+    @Test
+    func anotherSharedKeyStillGoesToTheStateBesideTheJoinedLibraries() {
+        let state = Walkbook.CaptureState(theme: .light, environment: ["DYLD_INSERT_LIBRARIES": "/s", "SHARED": "state"])
+
+        #expect(state.launchEnvironment(over: ["DYLD_INSERT_LIBRARIES": "/b", "SHARED": "base"]) == ["DYLD_INSERT_LIBRARIES": "/s:/b", "SHARED": "state"])
+    }
+
     /// A state carrying neither encodes exactly as before SimWalk#44 — its JSON is unchanged, while every manifest this build writes declares format 8.
     @Test
     func astateWithNeitherWritesNeitherKey() throws {
@@ -117,5 +132,15 @@ struct CaptureStateLaunchTests {
 
         #expect(plain == #"{"locale":"en_GB","theme":"light"}"#)
         #expect(launched == #"{"arguments":["-a"],"environment":{"K":"v"},"theme":"light"}"#)
+    }
+
+    /// A state's empty `DYLD_INSERT_LIBRARIES` leaves SimWalk's library in place rather than replacing it (SimWalk#154).
+    @Test
+    func aStatesEmptyInsertedLibrariesKeepTheBases() {
+        let state = Walkbook.CaptureState(theme: .light, environment: ["DYLD_INSERT_LIBRARIES": ""])
+
+        let launched = state.launchEnvironment(over: ["DYLD_INSERT_LIBRARIES": "/libs/animations.dylib"])
+
+        #expect(launched["DYLD_INSERT_LIBRARIES"] == "/libs/animations.dylib")
     }
 }

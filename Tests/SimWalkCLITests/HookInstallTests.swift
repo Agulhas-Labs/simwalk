@@ -18,7 +18,7 @@ struct HookInstallTests {
     /// `setup-failed` is named for exactly this.
     @Test
     func hookInstallErrorIsSetupFailed() {
-        let refused = HookInstallError.claudeRefused(command: "claude mcp add", reason: "exit 1", written: [])
+        let refused = HookInstallError.claudeRefused(failures: ["mcp: not registered — `claude mcp add` failed: exit 1"], written: [])
 
         #expect(UsageFailureKind.of(refused) == .setupFailed)
     }
@@ -68,36 +68,37 @@ struct HookInstallTests {
     @Test
     func afullInstallWritesTheSegmentTheGuideAndTheRegistration() throws {
         let scratch = try Scratch()
-        let recorder = ShellRecorder()
+        let recorder = scratch.claude()
 
         let answer = try InstallHookCommand.answer(
             locations: scratch.locations(),
             executable: Self.executable,
-            claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: recorder.run),
+            claude: recorder,
             guide: .found(scratch.guideSource),
             runnerSource: scratch.runnerSource
         )
         let shim = try String(contentsOf: scratch.segments.fileURL, encoding: .utf8)
-        let rule = try String(contentsOf: scratch.guide.fileURL, encoding: .utf8)
+        let rule = try String(contentsOf: scratch.guide, encoding: .utf8)
+        let source = try String(contentsOf: scratch.guideSource, encoding: .utf8)
 
         #expect(answer.verdict.exitCode == 0)
         #expect(shim.contains("exec \"\(Self.executable)\" statusline"))
         #expect(FileManager.default.isExecutableFile(atPath: scratch.segments.fileURL.path))
-        #expect(AgentGuide.isOurs(rule))
+        #expect(rule == source)
         #expect(rule.hasPrefix("---\npaths:"))
-        #expect(answer.text.contains("mcp: registered at user scope"))
+        #expect(answer.text.contains("mcp: registered simwalk"))
     }
 
     /// **The removal has to come first and `--scope` has to precede the `--`.** `claude mcp add` fails outright on a name already present, so without the removals an upgrade leaves the *old* binary registered while reporting success; and `--scope` after the `--` is passed through to the binary as an argument, registering at the default scope under a command line that reads as though it asked for user scope.
     @Test
     func theRegistrationRemovesFirstAndKeepsScopeAheadOfTheSeparator() throws {
         let scratch = try Scratch()
-        let recorder = ShellRecorder()
+        let recorder = scratch.claude()
 
         _ = try InstallHookCommand.answer(
             locations: scratch.locations(),
             executable: Self.executable,
-            claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: recorder.run),
+            claude: recorder,
             guide: .found(scratch.guideSource),
             runnerSource: scratch.runnerSource
         )
@@ -113,6 +114,22 @@ struct HookInstallTests {
         #expect(scope < separator)
     }
 
+    /// The second run reads `.claude.json` back and finds this binary registered, so it runs no `mcp add` (and no removal) and says so.
+    @Test
+    func aSecondInstallRunsNoAddAndSaysTheServerIsAlreadyRegistered() throws {
+        let scratch = try Scratch()
+        let claude = scratch.claude()
+        let first = try InstallHookCommand.answer(locations: scratch.locations(), executable: Self.executable, claude: claude, guide: .found(scratch.guideSource), runnerSource: scratch.runnerSource)
+        let runsAfterFirst = claude.vectors.count
+
+        let second = try InstallHookCommand.answer(locations: scratch.locations(), executable: Self.executable, claude: claude, guide: .found(scratch.guideSource), runnerSource: scratch.runnerSource)
+
+        #expect(first.text.contains("mcp: registered simwalk"))
+        #expect(claude.adds.count == 1)
+        #expect(claude.vectors.count == runsAfterFirst)
+        #expect(second.text.contains("mcp: already registered"))
+    }
+
     @Test
     func areRunSaysWhatItLeftAloneRatherThanRewritingIt() throws {
         let scratch = try Scratch()
@@ -122,24 +139,24 @@ struct HookInstallTests {
 
         #expect(again.verdict.exitCode == 0)
         #expect(again.text.contains("statusline: unchanged"))
-        #expect(again.text.contains("rule: unchanged"))
+        #expect(again.text.contains("rule: already installed"))
     }
 
     @Test
     func theUninstallTakesBackExactlyWhatTheInstallWrote() throws {
         let scratch = try Scratch()
-        let recorder = ShellRecorder()
+        let recorder = scratch.claude()
         _ = try Self.install(scratch)
 
         let answer = try UninstallHookCommand.answer(
             locations: scratch.locations(),
             executable: Self.executable,
-            claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: recorder.run)
+            claude: recorder
         )
 
         #expect(answer.verdict.exitCode == 0)
         #expect(!FileManager.default.fileExists(atPath: scratch.segments.fileURL.path))
-        #expect(!FileManager.default.fileExists(atPath: scratch.guide.fileURL.path))
+        #expect(!FileManager.default.fileExists(atPath: scratch.guide.path))
         #expect(recorder.vectors == [["mcp", "remove", "simwalk", "--scope", "user"], ["mcp", "remove", "simwalk"]])
         #expect(answer.text.contains("statusline: removed"))
         #expect(answer.text.contains("hook: PreToolUse removed from"))
@@ -151,20 +168,23 @@ struct HookInstallTests {
     func theUninstallLeavesFilesThisToolDidNotWrite() throws {
         let scratch = try Scratch()
         try FileManager.default.createDirectory(at: scratch.segments.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: scratch.guide.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: scratch.guide.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("#!/bin/sh\necho mine\n".utf8).write(to: scratch.segments.fileURL)
-        try Data("# my own notes on simwalk\n".utf8).write(to: scratch.guide.fileURL)
+        let notes = scratch.directory.url.appendingPathComponent("notes.md")
+        try Data("# my own notes on simwalk\n".utf8).write(to: notes)
+        try FileManager.default.createSymbolicLink(at: scratch.guide, withDestinationURL: notes)
 
         let answer = try UninstallHookCommand.answer(
             locations: scratch.locations(),
             executable: Self.executable,
-            claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: ShellRecorder().run)
+            claude: scratch.claude()
         )
 
         #expect(answer.verdict.isQualified)
-        #expect(try String(contentsOf: scratch.guide.fileURL, encoding: .utf8) == "# my own notes on simwalk\n")
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: scratch.guide.path) == notes.path)
+        #expect(try String(contentsOf: notes, encoding: .utf8) == "# my own notes on simwalk\n")
         #expect(FileManager.default.fileExists(atPath: scratch.segments.fileURL.path))
-        #expect(answer.text.contains("rule: left in place"))
+        #expect(answer.text.contains("is a symlink to"))
         #expect(answer.text.contains("statusline: left alone"))
     }
 
@@ -176,15 +196,15 @@ struct HookInstallTests {
         let answer = try InstallHookCommand.answer(
             locations: scratch.locations(),
             executable: Self.executable,
-            claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: ShellRecorder().run),
+            claude: scratch.claude(),
             guide: InstallHookCommand.locateGuide(explicit: "/nowhere/SimWalk.md", beside: Self.executable),
             runnerSource: scratch.runnerSource
         )
 
         #expect(answer.verdict.isQualified)
         #expect(answer.text.contains("/nowhere/SimWalk.md"))
-        #expect(answer.text.contains("rule: not installed"))
-        #expect(!FileManager.default.fileExists(atPath: scratch.guide.fileURL.path))
+        #expect(answer.text.contains("rule: skipped"))
+        #expect(!FileManager.default.fileExists(atPath: scratch.guide.path))
     }
 
     /// Claude Code runs the status-line command through a shell, so an unquoted path with a space in it becomes a command and an argument.
@@ -196,7 +216,7 @@ struct HookInstallTests {
         _ = try InstallHookCommand.answer(
             locations: scratch.locations(sift: false),
             executable: spaced,
-            claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: ShellRecorder().run),
+            claude: scratch.claude(),
             guide: .found(scratch.guideSource),
             runnerSource: scratch.runnerSource
         )
@@ -241,7 +261,7 @@ struct HookInstallTests {
         let uninstalled = try UninstallHookCommand.answer(
             locations: scratch.locations(),
             executable: Self.executable,
-            claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: ShellRecorder().run)
+            claude: scratch.claude()
         )
         let restored = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: scratch.settings)) as? [String: Any])
 
@@ -264,9 +284,9 @@ struct HookInstallTests {
         #expect(answer.verdict.isQualified)
         #expect(answer.text.contains("hook: not registered"))
         #expect(answer.text.contains("rule:"))
-        #expect(!answer.text.contains("rule: not installed"))
-        #expect(answer.text.contains("mcp: registered at user scope"))
-        #expect(FileManager.default.fileExists(atPath: scratch.guide.fileURL.path))
+        #expect(!answer.text.contains("rule: skipped"))
+        #expect(answer.text.contains("mcp: registered simwalk"))
+        #expect(FileManager.default.fileExists(atPath: scratch.guide.path))
     }
 
     /// Where sift is absent the status line goes into `settings.json` too, and a file that cannot be read stops that step alone — the guide and the MCP server are still registered.
@@ -279,7 +299,7 @@ struct HookInstallTests {
         let answer = try InstallHookCommand.answer(
             locations: scratch.locations(sift: false),
             executable: Self.executable,
-            claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: ShellRecorder().run),
+            claude: scratch.claude(),
             guide: .found(scratch.guideSource),
             runnerSource: scratch.runnerSource
         )
@@ -287,8 +307,8 @@ struct HookInstallTests {
         #expect(answer.verdict.isQualified)
         #expect(answer.text.contains("statusline: not registered"))
         #expect(answer.text.contains("hook: not registered"))
-        #expect(answer.text.contains("mcp: registered at user scope"))
-        #expect(FileManager.default.fileExists(atPath: scratch.guide.fileURL.path))
+        #expect(answer.text.contains("mcp: registered simwalk"))
+        #expect(FileManager.default.fileExists(atPath: scratch.guide.path))
     }
 
     /// The backup of somebody's `settings.json` is made once per run, from the file as it stood before this run touched it — not from what an earlier step in the same run already edited, which would overwrite the pristine copy with a half-edited one.
@@ -304,7 +324,7 @@ struct HookInstallTests {
         _ = try InstallHookCommand.answer(
             locations: scratch.locations(sift: false),
             executable: Self.executable,
-            claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: ShellRecorder().run),
+            claude: scratch.claude(),
             guide: .found(scratch.guideSource),
             runnerSource: scratch.runnerSource
         )
@@ -331,7 +351,7 @@ struct HookInstallTests {
         let uninstalled = try UninstallHookCommand.answer(
             locations: scratch.locations(),
             executable: Self.executable,
-            claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: ShellRecorder().run)
+            claude: scratch.claude()
         )
         let restored = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: scratch.settings)) as? [String: Any])
 
@@ -356,7 +376,7 @@ struct HookInstallTests {
 
         #expect(scratch.runner.binding(forBinary: Self.binaryHash) != nil)
         #expect(!FileManager.default.fileExists(atPath: scratch.segments.fileURL.path))
-        #expect(!FileManager.default.fileExists(atPath: scratch.guide.fileURL.path))
+        #expect(!FileManager.default.fileExists(atPath: scratch.guide.path))
         #expect(!FileManager.default.fileExists(atPath: scratch.settings.path))
         guard case let .qualified(qualifications, detail: detail) = answer.verdict else {
             Issue.record("expected a qualified verdict, got \(answer.verdict)")
@@ -544,14 +564,14 @@ struct HookInstallTests {
         let answer = try InstallHookCommand.answer(
             locations: scratch.locations(),
             executable: Self.executable,
-            claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: ShellRecorder().run),
+            claude: scratch.claude(),
             guide: .found(scratch.guideSource),
             runnerSource: notACheckout
         )
 
         #expect(answer.verdict.isQualified)
         #expect(answer.text.contains("the walk runner was not installed"))
-        #expect(answer.text.contains("mcp: registered at user scope"))
+        #expect(answer.text.contains("mcp: registered simwalk"))
     }
 
     /// A packaged binary installs the runner shipped beside it, with no checkout and no git.
@@ -695,17 +715,13 @@ struct HookInstallTests {
     @Test
     func aregistrationFailureStillNamesTheFilesTheInstallHadWritten() throws {
         let scratch = try Scratch()
-        let recorder = ShellRecorder(results: [
-            Shell.Result(status: 1, standardOutput: "", standardError: ""),
-            Shell.Result(status: 1, standardOutput: "", standardError: ""),
-            Shell.Result(status: 1, standardOutput: "", standardError: "already registered under that name"),
-        ])
+        let recorder = scratch.claude(addSucceeds: false)
 
         let thrown = #expect(throws: HookInstallError.self) {
             try InstallHookCommand.answer(
                 locations: scratch.locations(),
                 executable: Self.executable,
-                claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: recorder.run),
+                claude: recorder,
                 guide: .found(scratch.guideSource),
                 runnerSource: scratch.runnerSource
             )
@@ -715,7 +731,7 @@ struct HookInstallTests {
         #expect(reason.contains("already registered under that name"))
         #expect(reason.contains("uninstall-hook"))
         #expect(reason.contains(scratch.segments.fileURL.path.tildedPath))
-        #expect(reason.contains(scratch.guide.fileURL.path.tildedPath))
+        #expect(reason.contains(scratch.guide.path.tildedPath))
         #expect(FileManager.default.fileExists(atPath: scratch.segments.fileURL.path))
     }
 
@@ -747,14 +763,14 @@ struct HookInstallTests {
         try InstallHookCommand.answer(
             locations: scratch.locations(),
             executable: executable,
-            claude: ClaudeCommandLine(executable: "/usr/bin/claude", run: ShellRecorder().run),
+            claude: scratch.claude(),
             guide: .found(scratch.guideSource),
             runnerSource: runnerSource ?? scratch.runnerSource
         )
     }
 }
 
-private extension HookInstallTests {
+extension HookInstallTests {
     /// A throwaway stand-in for the four places an install writes.
     struct Scratch {
         let directory: TemporaryDirectory
@@ -824,8 +840,17 @@ private extension HookInstallTests {
         }
 
         /// Under a directory of its own, because `SimWalk.md` and `simwalk.md` are one file on a case-insensitive filesystem.
-        var guide: AgentGuide {
-            AgentGuide(destination: directory.url.appendingPathComponent("claude/rules/simwalk.md"))
+        var guide: URL {
+            directory.url.appendingPathComponent("claude/rules/simwalk.md")
+        }
+
+        /// Claude Code's `.claude.json`, which the fake `claude` keeps and the install reads back.
+        var config: URL {
+            directory.url.appendingPathComponent("claude.json")
+        }
+
+        func claude(addSucceeds: Bool = true) -> RecordingClaude {
+            RecordingClaude(config: config, addSucceeds: addSucceeds)
         }
 
         var segments: StatuslineSegments {
@@ -836,7 +861,8 @@ private extension HookInstallTests {
         func locations(sift: Bool = true) -> HookLocations {
             HookLocations(
                 settings: settings,
-                guide: guide,
+                config: config,
+                rule: guide,
                 segments: sift ? segments : nil,
                 visibility: StatuslineVisibility(cacheDirectory: directory.url.appendingPathComponent("simwalk/statusline")),
                 runner: runner,

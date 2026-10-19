@@ -3,6 +3,7 @@
 //
 
 import Foundation
+import SimWalkCore
 import SimWalkMCP
 
 /// Where this process's executable lives, as a registration has to spell it.
@@ -48,7 +49,7 @@ struct ExecutablePath {
     }
 
     /// The conventional install location, `~/.local/bin/simwalk` — where a deploy puts the binary, and so the binary whose runner a prune keeps whichever binary runs it (SimWalk#22).
-    static func installed(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+    static func installed(home: URL = HomeDirectories.user()) -> URL {
         home.appendingPathComponent(".local/bin/\(SimWalkPaths.binaryName)")
     }
 }

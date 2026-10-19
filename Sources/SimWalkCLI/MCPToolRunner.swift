@@ -3,6 +3,7 @@
 //
 
 import ArgumentParser
+import Fieldwork
 import Foundation
 import SimWalkCore
 import SimWalkDriver
@@ -13,21 +14,34 @@ import SimWalkMCP
 /// **The two faces share the commands rather than the shape of them.** A second implementation of `walk` behind the MCP server would be a second set of defaults, a second `--settle` guard and a second idea of what an option is called, drifting apart the first time either side is touched. So the MCP face builds a command line, the subcommand parses it with its own definitions, and the answer that comes back is the one the CLI would have printed — including every refusal the command makes of its own arguments.
 struct MCPToolRunner {
     /// `cancellation` is the client's cancel of this call, which ends a walk's progress file `failed` / `cancelled` (SimWalk#83), and a `session start`'s; no other verb writes one.
-    static func answer(tool: SimWalkTool, arguments: [String], cancellation: Cancellation? = nil) throws -> Answer {
-        try answer(tool: tool, arguments: arguments, environment: ProcessInfo.processInfo.environment, cancellation: cancellation)
+    ///
+    /// `started` hears a walk's claimed progress-file stem and the progress as begun, before its target is resolved: what a bounded server forms the walk's handle from.
+    static func answer(tool: SimWalkTool, arguments: [String], cancellation: Cancellation? = nil, started: SimWalkMCPServer.WalkStarted? = nil) throws -> Answer {
+        try answer(tool: tool, arguments: arguments, environment: ProcessInfo.processInfo.environment, cancellation: cancellation, started: started)
     }
 
     /// The same answer with the environment a walk's progress file is placed from named, so a test refused partway through a walk writes beside a log it owns and never into the machine's own `~/.simwalk/progress`.
-    static func answer(tool: SimWalkTool, arguments: [String], environment: [String: String], cancellation: Cancellation? = nil) throws -> Answer {
+    ///
+    /// `animationsLibrary` names the animations-off library a walk and a session start are offered, from the environment: the standard one unless a test hands its own, so no test compiles a library or reads the machine's `~/.simwalk` (SimWalk#154).
+    static func answer(
+        tool: SimWalkTool,
+        arguments: [String],
+        environment: [String: String],
+        cancellation: Cancellation? = nil,
+        started: SimWalkMCPServer.WalkStarted? = nil,
+        walking: WalkSeams = WalkSeams(),
+        animationsLibrary: ([String: String]) -> WalkCommand.AnimationsLibrary = { WalkCommand.standardAnimationsLibrary(environment: $0) }
+    ) throws -> Answer {
         switch tool {
-        case .walk: try parsed(WalkCommand.self, arguments).answer(environment: environment, cancellation: cancellation)
+        case .walk: try parsed(WalkCommand.self, arguments).answer(environment: environment, cancellation: cancellation, started: started, shell: walking.shell, runner: walking.runner, builds: walking.builds, leases: walking.leases, animationsLibrary: animationsLibrary(environment))
         case .validate: try parsed(ValidateCommand.self, arguments).answer()
         case .inspect: try inspectAnswer(arguments)
         case .audit: try parsed(BundleAuditCommand.self, arguments).answer()
         case .diff: try parsed(BundleDiffCommand.self, arguments).answer()
         case .oracle: try parsed(BundleOracleCommand.self, arguments).answer()
-        case .session: try sessionAnswer(arguments, cancellation: cancellation)
+        case .session: try sessionAnswer(arguments, cancellation: cancellation, animationsLibrary: animationsLibrary(environment))
         case .mirror: try mirrorAnswer(arguments)
+        case .walkStatus: throw MCPError(message: "walk_status is answered by the server, not the runner", kind: .toolError)
         }
     }
 
@@ -61,12 +75,18 @@ struct MCPToolRunner {
         processes: any LiveSessionProcesses = LiveSessionSystemProcesses(),
         pause: @escaping (TimeInterval) -> Void = Thread.sleep(forTimeInterval:),
         now: @escaping () -> Date = { Date() },
-        cancellation: Cancellation? = nil
+        cancellation: Cancellation? = nil,
+        shell: Shell = Shell(),
+        runner: (() throws -> RunnerSource)? = nil,
+        builds: RunnerBuilds = .standard(),
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        logFileURL: URL = UsageLog.standard().fileURL,
+        animationsLibrary: WalkCommand.AnimationsLibrary? = nil
     ) throws -> Answer {
         let rest = Array(arguments.dropFirst())
         switch arguments.first {
         case SessionStartCommand.configuration.commandName:
-            return try parsed(SessionStartCommand.self, rest).perform(pause: pause, now: now, builds: .standard(), store: store, processes: processes, cancellation: cancellation)
+            return try parsed(SessionStartCommand.self, rest).perform(shell: shell, pause: pause, now: now, runner: runner, logFileURL: logFileURL, builds: builds, store: store, processes: processes, environment: environment, cancellation: cancellation, animationsLibrary: animationsLibrary)
         case SessionReadCommand.configuration.commandName:
             return try parsed(SessionReadCommand.self, rest).perform(store: store, processes: processes, pause: pause, now: now)
         case SessionStepCommand.configuration.commandName:
@@ -123,5 +143,15 @@ struct MCPToolRunner {
             return false
         }
         return Mirror(reflecting: parserError).children.first?.label == "userValidationError"
+    }
+}
+
+extension MCPToolRunner {
+    /// What a walk touches on the machine, named so a test hands scratch ones: the shell, the runner it resolves, and where it records builds and leases.
+    struct WalkSeams {
+        var shell = Shell()
+        var runner: (() throws -> RunnerSource)?
+        var builds: RunnerBuilds = .standard()
+        var leases: LeaseStore = .standard()
     }
 }

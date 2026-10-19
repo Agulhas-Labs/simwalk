@@ -356,7 +356,7 @@ struct StepPerformer {
             }
             Thread.sleep(forTimeInterval: Self.settleInterval)
         } while Date() < deadline
-        let refusal = search.refusal(bootAge: WalkRunner.deviceBootAge)
+        let refusal = search.refusal(bootAge: WalkRunner.deviceBootAge, slim: WalkRunner.slimDevice)
         return .blocked(reason: refusal.reason, cause: refusal.cause)
     }
 

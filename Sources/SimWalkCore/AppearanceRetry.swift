@@ -89,6 +89,7 @@ public struct AppearanceRetry {
             // reader checks the bundle back against (`WalkCommand.bundleWrittenBy`) must survive it too
             // (SimWalk#41), the way `runnerCommit` already does.
             nonce: first.nonce,
+            animations: first.animations,
             screens: screens
         )
         let problems = CaptureManifestValidator.problems(in: folded)

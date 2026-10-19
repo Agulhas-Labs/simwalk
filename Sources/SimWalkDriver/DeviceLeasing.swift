@@ -2,7 +2,9 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
+import SimulatorServices
 
 /// The `simctl` half of a lease: choosing or cloning the device one is taken on, and deleting the device a lease made when it is released.
 ///
@@ -10,10 +12,12 @@ import Foundation
 public struct DeviceLeasing {
     public let store: LeaseStore
     public let shell: Shell
+    private let overrides: DisabledServicesOverride
 
-    public init(store: LeaseStore, shell: Shell = Shell()) {
+    public init(store: LeaseStore, shell: Shell = Shell(), overrides: DisabledServicesOverride = DisabledServicesOverride()) {
         self.store = store
         self.shell = shell
+        self.overrides = overrides
     }
 
     /// Takes a lease on the device named, on a clone of `source`, or on an unleased shut-down device of the newest iOS runtime.
@@ -45,7 +49,7 @@ public struct DeviceLeasing {
         var refusal: Error?
         for candidate in candidates {
             do {
-                let lease = try store.acquire(udid: candidate.udid, ttl: ttl, holderPID: holderPID, now: now)
+                let lease = try LeaseError.mapping { try store.acquire(udid: candidate.udid, ttl: ttl, holderPID: holderPID, now: now) }
                 return Grant(simulator: candidate, lease: lease)
             } catch let error as LeaseError {
                 refusal = refusal ?? error
@@ -63,7 +67,7 @@ public struct DeviceLeasing {
     public func acquirePhysical(udid: String, ttl: TimeInterval, holderPID: Int32, now: Date) throws -> (device: PhysicalDevice, lease: DeviceLease) {
         let listing = try PhysicalDevicePrerequisites.devicectl(["list", "devices"], command: PhysicalDevice.command, shell: shell)
         let device = try PhysicalDevice.parse(listDevicesJSON: listing, udid: udid)
-        let lease = try store.acquire(udid: udid, ttl: ttl, holderPID: holderPID, now: now, physicalDevice: true)
+        let lease = try LeaseError.mapping { try store.acquire(udid: udid, ttl: ttl, holderPID: holderPID, now: now, physicalDevice: true) }
         return (device, lease)
     }
 
@@ -76,9 +80,9 @@ public struct DeviceLeasing {
             throw LeaseError.noSuchLease
         }
         let released = if entry.lease.createdDevice {
-            try store.retire(udid: entry.udid, token: token) { try deleteDevice($0.udid) }
+            try LeaseError.mapping { try store.retire(udid: entry.udid, token: token) { try deleteDevice($0.udid) } }
         } else {
-            try store.remove(udid: entry.udid, token: token)
+            try LeaseError.mapping { try store.remove(udid: entry.udid, token: token) }
         }
         guard released else {
             throw LeaseError.noSuchLease
@@ -123,8 +127,8 @@ public struct DeviceLeasing {
             throw SimulatorError.simctlFailed(command: "clone \(source)", reason: cloned.failureLine)
         }
         do {
-            let lease = try store.acquire(udid: udid, ttl: ttl, holderPID: holderPID, now: now, createdDevice: true, clonedFrom: source)
-            return Grant(simulator: Simulator(udid: udid, name: name, osVersion: original.osVersion, isBooted: false), lease: lease)
+            let lease = try LeaseError.mapping { try store.acquire(udid: udid, ttl: ttl, holderPID: holderPID, now: now, createdDevice: true, clonedFrom: source) }
+            return Grant(simulator: Simulator(udid: udid, name: name, osVersion: original.osVersion, isBooted: false, runtimeIdentifier: original.runtimeIdentifier), lease: lease)
         } catch {
             try? deleteDevice(udid)
             throw error
@@ -142,6 +146,8 @@ public struct DeviceLeasing {
                 throw LeaseError.deviceNotDeleted(udid: udid, command: "simctl \(step) \(udid)", reason: result.failureLine)
             }
         }
+        // `simctl delete` leaves the launchd override directory behind.
+        try? overrides.remove(for: udid)
     }
 }
 

@@ -117,6 +117,39 @@ struct RunnerInvocationTests {
         #expect(age >= 70 && age <= 70 + Date().timeIntervalSince(before) + 1)
     }
 
+    /// The animations-off library reaches the runner under the key its own read takes back (SimWalk#154), and a walk handed none sets nothing.
+    @Test(arguments: ["/libs/animations-1.dylib", nil])
+    func aWalkHandsTheRunnerTheAnimationsOffLibraryOnlyWhenGivenOne(library: String?) throws {
+        var runnerEnvironments: [[String: String]] = []
+        let shell = Shell(script: { executable, _, environment in
+            if executable.hasSuffix("xcodebuild") {
+                runnerEnvironments.append(environment)
+            }
+            return Shell.Result(status: 0, standardOutput: "", standardError: "")
+        })
+        let runner = RunnerInvocation(projectPath: "/runner/SimWalkRunner.xcodeproj", derivedDataPath: "/runner/dd", shell: shell)
+        let simulator = Simulator(udid: "UDID-1", name: "iPhone 17 Pro", osVersion: "26.5", isBooted: true)
+
+        try runner.walk(walkbookPath: "/book.json", outputPath: "/out.simwalk", buildHash: "a1b2", logFilePath: nil, animationsOffLibrary: library, on: simulator)
+
+        let environment = try #require(runnerEnvironments.first)
+
+        #expect(environment["TEST_RUNNER_SIMWALK_ANIMATIONS_OFF_LIBRARY"] == library)
+        #expect(environment[AnimationsOptIn.hostEnvironmentKey] == library)
+    }
+
+    /// A session tells the runner where the animations-off library is only when it is passed one (SimWalk#154).
+    @Test(arguments: [nil, "/libs/animations-1.dylib"])
+    func aSessionTellsTheRunnerTheAnimationsLibraryOnlyWhenPassedOne(library: String?) {
+        let runner = RunnerInvocation(projectPath: "/runner/SimWalkRunner.xcodeproj", derivedDataPath: "/runner/dd", shell: Shell(script: { _, _, _ in Shell.Result(status: 0, standardOutput: "", standardError: "") }))
+        let simulator = Simulator(udid: "UDID-1", name: "iPhone 17 Pro", osVersion: "26.5", isBooted: true)
+        let layout = LiveSessionStore(directory: URL(fileURLWithPath: "/sessions")).layout(id: "s1")
+
+        let command = runner.session(layout: layout, logFilePath: nil, runnerCommit: nil, idleOverride: nil, deviceAppearance: nil, animationsOffLibrary: library, on: simulator)
+
+        #expect(command.environment[AnimationsOptIn.hostEnvironmentKey] == library)
+    }
+
     /// `--motion` reaches the runner as the key its own read takes back (SimWalk#67): every screen records, a screen asking alone without it, and a walk without the flag sets nothing.
     @Test(arguments: [true, false])
     func aWalkTellsTheRunnerToRecordMotionOnlyWhenAsked(motion: Bool) throws {

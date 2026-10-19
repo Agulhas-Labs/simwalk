@@ -3,6 +3,7 @@
 //
 
 import Darwin
+import Fieldwork
 import Foundation
 
 /// The real ``LiveSessionProcesses``: `posix_spawn`, `waitpid`, `sysctl`, `getpgid`, `killpg`.
@@ -39,7 +40,7 @@ public struct LiveSessionSystemProcesses: LiveSessionProcesses {
             posix_spawn_file_actions_addinherit_np(&actions, inherited)
         }
 
-        let environment = ProcessInfo.processInfo.environment.merging(command.environment) { _, new in new }
+        let environment = GitEnvironment.scrubbed().merging(command.environment) { _, new in new }
         let argv = ([command.executable] + command.arguments).map { strdup($0) } + [nil]
         let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer { (argv + envp).forEach { free($0) } }

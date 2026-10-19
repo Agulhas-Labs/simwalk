@@ -3,6 +3,7 @@
 //
 
 import ArgumentParser
+import Fieldwork
 import Foundation
 @testable import SimWalkCLI
 import SimWalkCore
@@ -566,7 +567,7 @@ extension SessionCommandTests {
             try store.write(LiveSessionRecord(id: id, pid: pid, udid: "UDID-1", app: "com.example.live", startedAt: Date(timeIntervalSince1970: 0), foundAppearance: .light))
         }
 
-        func start(_ arguments: [String], note: (String) -> Void = { _ in }) throws -> Answer {
+        func start(_ arguments: [String], animationsLibrary: WalkCommand.AnimationsLibrary? = nil, note: (String) -> Void = { _ in }) throws -> Answer {
             try SessionStartCommand.parse(arguments).perform(
                 shell: Shell(script: script.run),
                 pause: pause,
@@ -579,6 +580,7 @@ extension SessionCommandTests {
                 store: store,
                 processes: processes,
                 environment: [:],
+                animationsLibrary: animationsLibrary,
                 note: note
             )
         }

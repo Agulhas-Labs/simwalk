@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 @testable import SimWalkCLI
 import SimWalkDriver
@@ -24,7 +25,7 @@ struct LeaseAcquireHolderTests {
 
         let answer = try command.answer(leasing: DeviceLeasing(store: store, shell: shell), holderPID: 500, now: Date(), holderWarning: warning)
 
-        #expect(answer.text.contains("--holder-pid"))
+        #expect(answer.text.contains("may exit with it and free the lease at once — pass --holder-pid <pid> naming the session's long-lived process"))
         #expect(answer.text.contains("udid: SHUT-1"))
     }
 }

@@ -54,9 +54,8 @@ public struct Shell {
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.currentDirectoryURL = workingDirectory
-        if !environment.isEmpty {
-            process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
-        }
+        // Every child, not only `git`: a tool that runs `git` itself (`xcodebuild`, `swift`) would inherit the same `GIT_*` variables.
+        process.environment = GitEnvironment.scrubbed().merging(environment) { _, new in new }
 
         let out = Pipe()
         let error = Pipe()

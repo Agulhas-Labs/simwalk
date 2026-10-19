@@ -21,6 +21,8 @@ This file lists every command, every walkbook key and what each answer means. Re
 - [Notes for writing walkbooks](#notes-for-writing-walkbooks)
 - [Driving a real iPhone with `simwalk mirror`](#driving-a-real-iphone-with-simwalk-mirror)
 - [Using SimWalk from a coding agent (MCP)](#using-simwalk-from-a-coding-agent-mcp)
+- [Installing with `simwalk install`](#installing-with-simwalk-install)
+- [Checking an install with `simwalk doctor`](#checking-an-install-with-simwalk-doctor)
 - [Installing with `simwalk install-hook`](#installing-with-simwalk-install-hook)
 - [The status line](#the-status-line)
 - [Building](#building)
@@ -279,6 +281,43 @@ A shift is a matched element whose box moved by at least 1 pt while, in the same
 A screen may state `"budgets": { "settleMs": 1500, "layoutShifts": 0 }` (SimWalk#67): the most milliseconds its tree may take to settle and the most layout shifts it may show. Four more keys bound a physical-device walk's performance: `launchMs`, `transitionHitches`, `cpuMs` and `memoryPeakMB`. Each key is optional, but an empty object, a negative figure and an unknown key are refused by `validate`. A screen with budgets records motion without `"motion": true`. `bundle audit --walkbook` holds the recorded motion to them (the `motionBudget` and `performanceBudget` rules, under `bundle audit`); the walk itself checks nothing.
 
 `--motion` beside `--dry-run` is refused: a dry run captures nothing. The `session` verb records none.
+
+### Animations
+
+A simulator walk launches the app with UIKit animations off, so screens settle sooner and a capture does not
+depend on an animation's phase. `--animations` (the MCP `walk` tool's `animations`) keeps them on, and so does a
+walk that records motion: `--motion`, or any executed screen that says `"motion": true` or states a motion
+budget (`settleMs`, `layoutShifts`), because motion and settle time must match what users see. A screen left out
+by `--screens` does not count. SwiftUI `withAnimation` is not affected. A walk has one animation state, so a walkbook state's `environment`
+cannot set `SIMWALK_ANIMATIONS` (`validate` and `session start --state` refuse it: `a state's environment cannot
+set SIMWALK_ANIMATIONS: a walk has one animation state; run it with --animations to keep animations on`). A
+physical-device walk is unchanged, and
+`--animations` there changes nothing. The answer says which applied: `animations: UIKit off in the app under walk
+(SwiftUI animations still run); --animations keeps them`, or `animations: kept on, because this walk records
+motion`. A library that cannot be built fails the walk, naming the reason and `--animations`.
+
+`simwalk session start` does the same for a simulator session (the app the resident runner launches, with or without
+`--state`): UIKit animations are off unless `--animations` (the MCP `session` tool's `animations`, on `start`) is
+passed. A session has no motion recording, so only that flag keeps them. A physical-device session is unchanged and
+`--animations` there changes nothing. The header of the start's answer ends `animations: off` or `animations: on`
+(a device session says `on`). A library that cannot be built fails the start before the device is touched.
+
+The bundle records which applied: the manifest's `animations` (`on` or `off`, written by the runner; absent in a
+bundle written before SimWalk recorded it, which ran with animations on, and a device walk records `on`). The
+header of every bundle answer shows it between `device:` and `settled:` as `animations: off`, and shows nothing
+for a bundle that does not record it. `bundle diff` refuses a reference and a run captured in different states,
+because their motion and settle figures differ for that reason alone: `bundle diff refused: the reference was
+captured with animations on and the run with animations off, …; capture both in one state (--animations keeps
+animations on, and a walk that records motion or runs on a device keeps them on regardless)`. An unrecorded bundle counts as on, and the refusal says so. The field sits inside format 8:
+the manifest's top level decodes leniently, so no bump is taken.
+
+### Slim devices
+
+A device `simwalk lease acquire --clone-from` created boots slim when the walk runs under that lease (`--lease`) and names the app with `--app-path`: the launchd services the app does not need are switched off, which makes the boot and the walk cheaper. What the app needs is read from the entitlements and `Info.plist` of the `.app` (HealthKit, push notifications and the like keep their services); an app that declares something no rule maps, a runtime with no measured service profile, or a bundle that cannot be read boots stock, and the answer says why. Animations are not touched; only launchd services are.
+
+The walk's answer carries one line: `device: slim: 94 of 338 services off (iOS 27.0, profile v1), kept for the app: healthKit 5`, checked by reading the switched-off services back from the booted device (`device: not slim: …` when the runtime did not apply the switch-off, `device: slim, unverified: …` when the read-back itself failed; neither fails the walk), or `device: stock: <why>`. A walk with neither `--app-path` nor `--stock` decides nothing and boots a device as it is, so a slim device stays slim across walks. A device SimWalk did not create is never slimmed.
+
+`--stock` (the MCP `walk` tool's `stock`) boots such a device with every service on, shutting it down first if it is booted with services off. On a device SimWalk did not create that has services off it is refused, because only its creator can switch them back on; with none off it changes nothing. It is refused for a physical device. Releasing a device SimWalk created removes its override along with the device.
 
 ### Checking the screen with `expect` and `expectMenu`
 
@@ -689,13 +728,15 @@ simwalk usage                      # what has been called, how long it took, wha
 simwalk usage --since 3d           # the same over the last three days (or 12h); --unredact prints failure reasons
 simwalk mcp                        # the MCP stdio server (JSON-RPC on stdin/stdout)
 simwalk statusline                 # this session's segment, fed the status-line JSON on stdin
+simwalk install                    # set SimWalk up in each agent found (Claude Code, Cursor), asking once per agent
+simwalk doctor                     # prove each agent simwalk install sets up is wired end to end
 simwalk install-hook               # install the walk runner; with Claude Code, register the server, status line, PreToolUse hook and agent guide
 ```
 
 More options, for the verbs that have many:
 
 ```sh
-simwalk walk <walkbook.json> --output <dir.simwalk> [--screens <id>] [--dry-run] [--motion] [--device <udid|name>] [--app-path <x.app>] [--lease <token>] [--team <TEAM> --runner-bundle-id <id>  (physical device only)]
+simwalk walk <walkbook.json> --output <dir.simwalk> [--screens <id>] [--dry-run] [--motion] [--animations] [--stock] [--device <udid|name>] [--app-path <x.app>] [--lease <token>] [--team <TEAM> --runner-bundle-id <id>  (physical device only)]
 simwalk bundle audit <dir.simwalk> [--only <rule>]... [--walkbook <walkbook.json>]
 simwalk bundle coverage <dir.simwalk>                  # controls no route step reaches, as the steps to add; exit 2
 simwalk prune                                          # reclaims old runners and expired leases; install-hook runs it
@@ -730,7 +771,7 @@ accessibility: the XCUITest session switched com.apple.Accessibility Accessibili
 ~64k tokens saved — 9 screenshots (~4.1k each at the 2576 px cap) and 114 kB of accessibility trees at 4 bytes a token, against 1.4 kB served. A floor: only what this answer stood in for is counted.
 ```
 
-`--screens <id>` walks only the screens you name, in walkbook order. The bundle records the subset as the plan it ran, so it does not stand in for a full walk. `--settle <ms>` sets how long a screen must hold still before each capture (250 ms by default, and a screen's own `settle` wins). `--motion` records motion on every screen.
+`--animations` keeps UIKit animations on in the app under walk (see "Animations"). `--screens <id>` walks only the screens you name, in walkbook order. The bundle records the subset as the plan it ran, so it does not stand in for a full walk. `--settle <ms>` sets how long a screen must hold still before each capture (250 ms by default, and a screen's own `settle` wins). `--motion` records motion on every screen.
 
 **`--dry-run` checks that every screen's route still resolves, in seconds per screen, without
 capturing anything** — the cheap check to run after app changes, before spending a full walk. It
@@ -961,7 +1002,7 @@ accessibility: the XCUITest session switched com.apple.Accessibility Accessibili
 
 **Live sessions** (`simwalk session start|read|step|save|end|list`, and the MCP `session` tool) keep one runner resident on an owned device —
 named by UDID or taken by lease — so reading the running app's screen costs about 0.4 s instead of a runner
-launch per `inspect`. `start --app <bundle id> [--state <json>]` launches the app under a capture state and
+launch per `inspect`. `start --app <bundle id> [--state <json>] [--animations]` launches the app under a capture state and
 prints an id; `read <id> [--match <text>]` answers in `inspect`'s form; `end <id>` stops the runner, puts back
 what it changed on the device (the appearance it was found in, accessibility) and removes the session;
 `list` shows each session and whether its runner is still running, and switches the device's accessibility back
@@ -1021,8 +1062,16 @@ the log holds overall.
 **`SIMWALK_USAGE_LOG` moves the log** to the file it names, and the state kept beside the log — the
 status line's scan cache, the redaction salt — moves with it. Anything that drives the binary and is not
 a real use of it (a test, a review, a mutation run) sets it, so the report stays a record of real use.
-`HOME` cannot do that job: the binary finds its home through `homeDirectoryForCurrentUser`, which
-ignores `HOME` (and honours `CFFIXED_USER_HOME`).
+`HOME` moves the directory the log lives in, so it does not do that job.
+
+**`HOME` and `SIMWALK_HOME` move everything else.** Every path built from the user's home (`~/.simwalk`,
+`~/.claude`, `~/.local/bin/simwalk`) follows `HOME` when it is absolute. `SIMWALK_HOME` moves `~/.simwalk`
+alone, and `SIFT_HOME` moves the `~/.sift` the status-line shim goes under, as it moves sift's own. A relative
+or empty value is ignored. A harness sets `HOME` to a scratch directory to run `install-hook` and
+`uninstall-hook` entirely inside it. `CFFIXED_USER_HOME` beats `HOME` when both are absolute. **Coordination
+state never follows these:** device leases (`~/.simwalk/leases`), live sessions and the Mirroring lock stay
+under the account's own home for every process, so a scratch-`HOME` session still sees the user's leases;
+only per-user state (usage log, runner, config, hook files) follows the overrides.
 
 ## Notes for writing walkbooks
 
@@ -1092,10 +1141,10 @@ is refused by name.
 ## Using SimWalk from a coding agent (MCP)
 
 `simwalk mcp` is the same tool over JSON-RPC 2.0 on stdin/stdout, for a coding agent rather than a
-person. Eight tools — `walk`, `validate`, `inspect`, `audit`, `diff`, `session`, `oracle`, `mirror` — each answering **word for word what the
+person. Eight tools (nine for a bounded client, below) — `walk`, `validate`, `inspect`, `audit`, `diff`, `session`, `oracle`, `mirror` — each answering **word for word what the
 matching CLI verb prints**, because the MCP server has no options of its own: it translates a tool call
 into the subcommand's own command line and lets the subcommand parse it. An option added to `walk` is
-therefore an option both have, and a refusal the command makes of its own arguments (`--settle 0`
+therefore an option both have (the one exception is `walk_status`, below, which has no CLI verb), and a refusal the command makes of its own arguments (`--settle 0`
 would be silently discarded, so it is refused) reads the same over either.
 
 A refusal comes back as a tool result marked `isError`, reading `refused — <reason>` — not as a
@@ -1124,6 +1173,180 @@ session is `CLAUDE_CODE_SESSION_ID`, `default` without one; the directory is the
 named on the answer's last residue line, `result: <path>`; an answer with no result file is unchanged.
 `verbose` (`--verbose`) lifts the cap and adds each step's states and route taken; it is refused beside
 `dryRun`, which writes progress but no result. The schemas are in `Docs/SIMWALK-PROGRESS.md`.
+
+### Bounded walks
+
+A walk takes minutes, and some clients cut a tool call off long before that (Cursor, at 60 s). A server
+therefore answers a `walk` in one of two modes, chosen from the client's name.
+
+- **Blocking.** The server records `params.clientInfo.name` from `initialize`. A client named `claude-code`
+  gets what `walk` has always done: one call, answered when the walk ends. For it `tools/list` is
+  byte-identical to today's and `walk_status` is not listed. Renaming that client would switch it into
+  bounded mode, which is why a test pins the bytes.
+- **Bounded.** Every other client, including one that sends no `clientInfo`, gets the rest of this section.
+  `SIMWALK_MCP_CLIENT`, when set, replaces the recorded name (for tests).
+  A bounded client's `initialize` result also carries a short `instructions` string (about 1 KB: dry run first, the
+  verdict lines, `walk_status` handles, `inspect` with `step`), because Cursor's model reads it. Claude Code's result has no
+  `instructions` key and so costs nothing idle; it has the full guide as a rule file.
+
+`SIMWALK_MCP_CALL_BUDGET` is the longest a bounded call waits, in seconds; fractions are accepted. The
+default is 50, under a 60 s cut-off with margin. A value that is unparsable or not positive falls back to 50,
+with one line on stderr when the server starts. Waits suspend on an injected clock rather than block, so tests
+do not sleep.
+
+**The handle.** `<stem>@<pid>-<startedAtMs>`: the progress-file stem (`<session>` or `<session>.<slot>`), the
+walk's `pid`, and the file's `startedAt` in epoch milliseconds (both are schema v1 keys). The stem alone is
+re-claimed by the next walk on the machine, so a handle carries the two keys that tell walks apart. A handle
+is accepted only if it matches `^[A-Za-z0-9_-]+(\.[0-9]+)?@[0-9]+-[0-9]+$`; it is used as a file name, so
+anything else is refused (row 1) before the filesystem is touched.
+
+**`walk` (bounded).** The walk starts off the server's actor and the call waits up to the budget; `dryRun`
+walks are treated the same way.
+
+- The walk ended within the budget (re-checked at expiry, so a walk that ended just then is returned):
+  exactly the text the blocking call returns, with the same `isError`.
+- Otherwise the `running` line (grammar below), `isError: false`.
+
+**`walk_status`** (bounded mode only). Input `{ "handle": string }`, required. The server keeps one
+in-process state per walk it started, `running` then `ended(answer)`, behind one lock. For such a handle
+`walk_status` consults that state and never the file's phase: ended returns the held answer, verbatim and
+byte-for-byte on every poll; running waits up to the budget from the start of this call, then returns the
+`running` line. A held answer is kept per full handle for the server's lifetime; a poll whose response a
+cancel suppressed consumes nothing. For any other handle the file is read, by this precedence, first match
+wins:
+
+| # | Case (handle this server did not run) | Answer | `isError` |
+| --- | --- | --- | --- |
+| 1 | handle does not match the regex | `refused — <value> is not a walk handle` | true |
+| 2 | no progress file | `refused — no walk <handle>` | true |
+| 3 | unreadable, or not schema 1 | `refused — the progress file for <handle> is unreadable` / `… is schema <n>, and this server reads 1` | true |
+| 4 | file `pid` or `startedAt` differs from the handle | `refused — the walk <handle> was replaced by a later run under <stem>` | true |
+| 5 | `tool` is `session` | `refused — <handle> is a live session, not a walk` | true |
+| 6 | phase not final, process gone | `refused — the walk <handle> ended without finishing: the process running it exited` | true |
+| 7 | phase not final, process alive | wait up to the budget, reading the file once a second; each read re-applies rows 2–11 and the first row other than 7 that matches answers at once; at the budget, the `running` line | false |
+| 8 | final, `resultPath` set (even with `error` set) | the ended answer | by verdict |
+| 9 | final, no `resultPath`, `error` set | `refused — the walk <handle> ended: <error>` | true |
+| 10 | final, no `resultPath`, no `error`, `tool` is `walk --dry-run` | `ok — the dry run <handle> finished; a dry run keeps no result file` | false |
+| 11 | final, no `resultPath`, no `error`, any other `tool` | `refused — the walk <handle> ended but its result file was not written` | true |
+
+Rows 1–6 and 8–11 answer at once; only row 7 waits. "Process gone" is the reader rule in
+`Docs/SIMWALK-PROGRESS.md` (the dead-process rule there). Apart from held answers, `walk_status` reads files only, so a poll
+works from any server process, and after a crash it answers instead of hanging.
+
+**Answer shapes.** `isError` is true only for a refusal, everywhere in this section: a `qualified` answer and
+the `running` line are `false`.
+
+```
+refusal  := refused — <reason>                            (AnswerVerdict.refused; isError true)
+running  := running — <handle>: <phase>[, step <i>/<n>[ <screen>]][, <failed> failed, <passed> of <planned> passed]; call walk_status with this handle
+ended    := <header: walk name, app, device, from result.json>
+            ok — … | qualified — … | refused — …          (verdict passed | failed | refused)
+            result: <path>
+dryrun   := ok — the dry run <handle> finished; a dry run keeps no result file
+```
+
+The ended answer's verdict line carries the result's `counts` as `<failed> failed, <passed> of <planned>
+matched`; a `refused` verdict carries the first failure's reason instead.
+
+`running` is the one documented exception to the verdict-word rule: a status line with nothing measured.
+Its pieces come from the progress file, for this server's own walk too; a final phase there (the file goes
+final before the walk returns, and at once on a cancel) is printed as `finishing`. The step piece appears only
+when `currentStep.index` is at least 1 and `total` is non-null, `<screen>` only when non-null, and the counts
+piece only when `matches.planned` is above 0, failures first. A client tells the shapes apart by line 1: if it
+begins `running —`, `refused —` or `ok — the dry run`, that line is the whole answer; otherwise line 1 is the
+header and the verdict is on line 2. Only `running` means poll again.
+
+**One device-touching walk at a time.** While a bounded walk runs (judged from the in-process state, never
+the file), `walk`, `session` and `mirror` are refused with `refused — a walk is running (<handle>); poll it with walk_status, then retry` (`isError: true`).
+The refusal names the handle, so a client whose `walk` call was cancelled before it answered can still poll.
+Every other tool, `walk_status` included, is answered, because the actor is free.
+
+**Concurrency (for the implementer).** In bounded mode the read loop hands each `tools/call` to its own task;
+for `claude-code`, calls are still answered one at a time, in arrival order, exactly as today. The walk runs on
+a dedicated `Thread`, not the cooperative pool, calling the existing synchronous answering path. The actor awaits a continuation and stays free. Waits
+suspend on the injected clock. `InFlightRequest` becomes a map keyed by request id, so overlapping calls each
+keep their own cancellation. The answering path reports the claimed stem, `pid` and `startedAt` through a
+callback. The claim and the progress file's `begin` happen before target and device resolution, so the
+callback fires within milliseconds of the call and the handle always exists before the budget runs out; the
+builder moves them earlier if they do not.
+
+**Cancel.** `notifications/cancelled` for a `walk` call that has already answered with a handle changes
+nothing. Before that, the answer is suppressed and the walk ends its progress file `failed` with
+`error: "cancelled"` (`ProgressWriter.cancel`) and runs on; the in-process state is unaffected, so the walk is
+polled by the handle the busy refusal names. A bounded walk nobody polls runs to its end. There is no
+`walk_cancel`: a deliberate limit.
+
+**Server exit (for the implementer).** On stdin EOF the server stops reading and exits only after the walk
+thread has returned, as the blocking path does today. No signal handling is added: SIGTERM, like SIGKILL, ends
+the process mid-walk, as today, leaving a stale progress file that the dead-process rule answers. A runner
+child (`xcodebuild`) can outlive a killed server, as it can today.
+
+**Usage log.** A bounded walk logs its one usage line when it ends, with its true duration, saving and
+failure kind, not when the first call returns. Each poll logs as `walk_status`: a `SimWalkTool` case and a
+`defaultFailureKind` arm. `walk_status` has no CLI verb, the one exception to "each tool answers what the
+matching CLI verb prints"; a bounded client lists nine tools, the eight above and `walk_status`. For
+`claude-code`, a call to `walk_status` is refused as an unknown tool, and that refusal lists the eight; the test
+pinning the catalog's size against `SimWalkTool.allCases` becomes per-client. `README.md` and `SimWalkTool`'s
+doc comment, which say eight, are updated with the code.
+
+**Tool catalog.** `MCPToolCatalog` becomes per-client. For `claude-code` the `tools/list` bytes are identical
+to today's. The bounded `walk` description is today's with "A walk takes minutes and nothing is served until
+it finishes; the answer names" replaced by "A walk takes minutes, and a call answers within the budget with
+either the answer or a handle to poll with walk_status; the answer names". `walk_status`'s description: "Poll
+a walk that 'walk' answered with a handle: waits up to the budget, then returns the walk's answer if it has
+ended, else one running line with its progress." Its schema: `handle` (string, required), described as "the
+handle that 'walk' returned on its running line"
+
+**Acceptance (tests).**
+
+- With an injected clock and a fake walk lasting 2.5 budgets: call 1 returns the `running` line, poll 1
+  returns progress, poll 2 returns the answer; with the budget cut-off set aside, call 1 blocks to the end.
+- Handle reuse: a later run under the same stem, then a poll of the old handle: the replaced refusal.
+- A second poll returns the same held answer.
+- A cancel before the handle, then the busy refusal naming it, then a poll that works.
+- Another server's ended walk: its header, verdict word and `isError`.
+- The ended-before-returned race: the file final, the in-process answer not yet returned, then a poll gets the held answer,
+  never the file's.
+- A dry run; a session handle; a malformed handle.
+- `claude-code`: one call returns the answer, `walk_status` is absent, and `tools/list` bytes equal the
+  recorded fixture, with the real Claude Code 2.1.302 `initialize` line as a fixture.
+- A server killed mid-walk, then a poll from a new server: the `exited` refusal, not a hang.
+- A second `walk` during a bounded walk: the busy refusal.
+- EOF mid-walk: the process exits only after the walk ends.
+- A `validate` sent while a bounded `walk` call is waiting is answered before the budget runs out.
+- `claude-code`: a second call sent during a walk is answered after the walk's answer.
+- A walk that ends without a result file, and is not a dry run: row 11.
+
+## Installing with `simwalk install`
+
+`simwalk install` finds Claude Code, Cursor and Codex on this machine and sets SimWalk up in each one chosen, then prints one summary. It is safe to re-run; a second run changes nothing and says so.
+
+```sh
+simwalk install --yes                           # every agent found, without asking
+simwalk install --agent cursor --cursor-dir DIR # Cursor only, into DIR instead of ~/.cursor
+```
+
+- `--agent claude|cursor|codex` (repeatable) installs into that agent whether or not it was found; `--all` names all three; `--yes` takes every agent found. With none of them it asks once per agent on a terminal, and installs nothing without one.
+- `--cursor-dir` is the directory holding Cursor's `mcp.json` and `hooks.json` (default `~/.cursor`). `--guide` is passed to the Claude Code step as `install-hook --guide` takes it.
+- Claude Code's step is `install-hook`'s own answer (runner snapshot, server, status line, `PreToolUse` hook, guide). Cursor's step registers `simwalk mcp` and the `preToolUse` hook `simwalk hook pre-tool-use --agent cursor`, leaving other tools' entries alone; Cursor support is experimental, and it has no status line or machine-wide rule.
+- Codex is not supported yet: `codex: not supported by simwalk yet — skipped`, never a failure.
+- Exit 1 when any agent's step failed; the others still run. `install-hook` and `uninstall-hook` stay, for Claude Code alone.
+- After its own step and summary, `simwalk install` runs the other Fieldwork tools' installs once (`sift install --agent <a>… --yes`, for the agents SimWalk ran a step for, Codex included) from `PATH` or beside the `simwalk` binary, printing `family: running sift install --agent <a>… --yes` before each; a member that is not found prints nothing, one that fails adds `family: <member> install exited <status>`, one that cannot be started adds `family: <member> install could not be started: <reason>`, both make the exit 1, and nothing runs where `FIELDWORK_FAMILY_INSTALL` is set (a member started by the step has it set, so it never loops). The step runs whenever any agent was picked, Codex included (SimWalk skips Codex, but `sift install --agent codex` still runs), even when SimWalk's own step failed; nothing runs when no agent was picked.
+- `--dry-run` writes nothing and runs no `claude`: it names, per agent, what the step would do, then passes `--dry-run` to the other tools' installs. For Claude Code it follows the step's own decisions: the runner snapshot and prune always; then, where `claude` is on PATH, the `PreToolUse` hook in `settings.json`, the status line (in sift's segment file where sift is installed, in `settings.json` otherwise), the guide and `claude mcp add`, each worded "would install or update" since nothing is compared with what is there; where `claude` is not on PATH, one line saying those four would be skipped. Cursor's lines name `mcp.json` and `hooks.json`.
+
+## Checking an install with `simwalk doctor`
+
+`simwalk doctor` proves each agent `simwalk install` would set up is wired end to end, for Claude Code and Cursor. One line per check, led by a verdict line:
+
+```sh
+simwalk doctor                                   # every agent found on this machine
+simwalk doctor --agent cursor --cursor-dir DIR   # Cursor only, from DIR instead of ~/.cursor
+simwalk doctor --json                            # the same answer as one JSON object
+```
+
+- Per agent it checks the registration (the hooks, the MCP server, for Claude Code the rule), then that the registered binary runs and reports this version, then each registered hook fed a payload of that agent's shape, then that the registered server starts and lists SimWalk's tools. Everything it runs runs in a scratch home, removed before it answers, so the checks never write to your usage log.
+- With no `--agent`, an agent not found is named and skipped, and an agent found with nothing of SimWalk's in it is named and not counted. `--agent claude|cursor` (repeatable) checks that agent whether or not it was found; `--cursor-dir` names Cursor's directory and checks Cursor. Codex is not checked, since SimWalk does not support it, and `--agent codex` is a usage error.
+- Exit 1 when any check failed, or when agents were found and none has SimWalk installed.
 
 ## Installing with `simwalk install-hook`
 
@@ -1163,29 +1386,36 @@ between commits is an incremental build, not a new one.
 
 With Claude Code (`claude` on your PATH) it also makes four registrations:
 
-- **the MCP server**, at user scope, via `claude mcp add --transport stdio --scope user simwalk -- <path> mcp`,
-  removing any existing registration first (`claude mcp add` fails outright on a name already present,
-  and without the removal an upgrade leaves the *old* binary registered while reporting success).
+- **the MCP server**, at user scope. The install first reads `~/.claude.json` (`CLAUDE_CONFIG_DIR` is
+  respected) and decides: a registration that is already current is left alone; a stale one is removed and
+  added again (`claude mcp add` fails outright on a name already present, and without the removal an
+  upgrade leaves the *old* binary registered while reporting success); a server of another kind holding
+  the name `simwalk` is refused rather than overwritten. It registers with
+  `claude mcp add --transport stdio --scope user simwalk -- <path> mcp`, then reads the file back to
+  confirm the registration is there.
 - **the status line** (see [The status line](#the-status-line)).
-- **the `PreToolUse` hook**, written into `~/.claude/settings.json`. It runs `simwalk hook pre-tool-use` before each shell call an agent makes. It tags a command-line `simwalk` call with its session, so the status line counts it. In a repo with walkbooks it also refuses some of an agent's own simulator driving, namely `xcrun simctl io … screenshot`, `simctl ui … appearance` and `axe tap`, and points at the SimWalk tool instead. The refusal comes once per 30 minutes, and the same command run again goes through (see Hand-driving the simulator in [Notes for writing walkbooks](#notes-for-writing-walkbooks)). Other tools' hooks in the same list stay as they were.
+- **the `PreToolUse` hook**, written into `~/.claude/settings.json`. It runs `simwalk hook pre-tool-use` before each shell call an agent makes. It tags a command-line `simwalk` call with its session, so the status line counts it. In a repo with walkbooks it also refuses some of an agent's own simulator driving, namely `xcrun simctl io … screenshot`, `simctl ui … appearance` and `axe tap`, and points at the SimWalk tool instead. The refusal comes once per 30 minutes, and the same command run again goes through (see Hand-driving the simulator in [Notes for writing walkbooks](#notes-for-writing-walkbooks)). Other tools' hooks in the same list stay as they were. `simwalk hook pre-tool-use --agent cursor` is the same hook for Cursor: it reads Cursor's `preToolUse` payload (its `Shell` tool as `Bash`), judges it the same way, and writes a refusal in Cursor's response schema; a call it lets through prints nothing. Without `--agent`, or with `--agent claude`, it answers Claude Code as before.
 - **the agent guide**, `SimWalk.md`, copied to `~/.claude/rules/simwalk.md`, where its `paths:`
   frontmatter keeps it out of sessions that never touch a walkbook, a capture bundle or a UI-test
   target. It is looked for beside the binary, then in the `share/simwalk` tree a packaged release ships beside it, then in the working directory, which is why a checkout install is run from the repo root — a
   named `--guide` that cannot be read is reported rather than quietly replaced by another candidate.
-  The copy is **stamped** with a marker line: that path is also the obvious name for somebody's own
-  notes about this tool, and an uninstall that deleted whatever sat there would take their writing
-  with it. A `~/.claude/rules/simwalk.md` that is a *symlink* into a checkout is left alone in both
-  directions.
+  A `~/.claude/rules/simwalk.md` that is a *symlink* into a checkout is left alone in both directions;
+  a file already identical to the guide is left; a file that differs is kept as `simwalk.md.bak-simwalk`
+  before it is replaced, so somebody's own notes at that path are not lost (there is no stamp marker).
 
 Without Claude Code it installs the runner, skips the four registrations and answers qualified (exit 2), saying so. To use SimWalk from another MCP client, have that client run `simwalk mcp`.
 
 `--settings`, `--guide` and `--rule` move the destinations, which is what makes the whole install
 checkable against a scratch directory rather than only against the machine it is run on. The file
-writes happen **before** the call out to `claude`, so a refusal from the last step leaves nothing
-half-done. `simwalk uninstall-hook` removes all four Claude Code registrations and nothing else: the
-runner's snapshots and builds stay under `~/.simwalk` beside the usage log, and a status line somebody
-else configured, a segment file this tool did not write, and an unstamped guide are all reported and
-left. Both verbs answer in the usual shape: the verdict is the exit code, and a step that could not be taken (a
+writes happen **before** the call out to `claude`, so a refusal from the last step is never half-done
+unannounced: it names every step already taken. That includes a `claude` that is on PATH but cannot
+launch, which `install-hook` refuses (exit as a setup failure) with those steps listed. `simwalk
+uninstall-hook` removes all four Claude Code registrations and nothing else: the runner's snapshots
+and builds stay under `~/.simwalk` beside the usage log, and a status line somebody else configured and
+a segment file this tool did not write are reported and left. It removes the rule file and its
+`simwalk.md.bak-simwalk` backup (a symlink at either path is left alone). For the server it reads
+`~/.claude.json` first: with nothing registered it answers `mcp: nothing registered` without calling
+`claude`; otherwise it runs `claude mcp remove simwalk --scope user` and then `claude mcp remove simwalk`. Both verbs answer in the usual shape: the verdict is the exit code, and a step that could not be taken (a
 status-line slot somebody else filled, a guide that was not found) is a named qualification rather
 than a silent skip.
 

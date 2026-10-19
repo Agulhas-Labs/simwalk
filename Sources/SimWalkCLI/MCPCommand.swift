@@ -16,7 +16,7 @@ struct MCPCommand: AsyncParsableCommand {
             commandName: "mcp",
             abstract: "Run the MCP stdio server (JSON-RPC on stdin/stdout; diagnostics on stderr).",
             discussion: """
-            Serves walk, validate, inspect, audit, diff, oracle, session and mirror as MCP tools, each answering exactly what the \
+            Serves walk, validate, inspect, audit, diff, oracle, session and mirror as MCP tools (and walk_status to a bounded client), each answering exactly what the \
             matching CLI verb prints. Register it with `simwalk install-hook`, or by hand with \
             `claude mcp add --transport stdio --scope user simwalk -- <path to simwalk> mcp`.
             """
@@ -36,7 +36,8 @@ struct MCPCommand: AsyncParsableCommand {
             // line price this session's calls and nobody else's. Absent when the server is run by hand,
             // and a call recorded with no session is simply a call no status line claims.
             session: ProcessInfo.processInfo.environment["CLAUDE_CODE_SESSION_ID"],
-            answering: { try MCPToolRunner.answer(tool: $0, arguments: $1, cancellation: $2) }
+            answering: { try MCPToolRunner.answer(tool: $0, arguments: $1, cancellation: $2, started: $3) },
+            environment: ProcessInfo.processInfo.environment
         )
         await server.run()
     }

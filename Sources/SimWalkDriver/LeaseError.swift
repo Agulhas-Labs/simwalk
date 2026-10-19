@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 import SimWalkCore
 
@@ -54,6 +55,28 @@ public enum LeaseError: Error, Equatable, CustomStringConvertible {
             "the lease store at \(path) could not be written: \(reason)"
         case let .notPhysicalLease(udid):
             "that lease is on \(udid), which is not a physical device — `device walk` walks a phone leased with `simwalk lease acquire --physical <udid>`; a simulator lease is walked with `simwalk walk --lease`; nothing was touched"
+        }
+    }
+
+    /// The same refusal, as SimWalk words it, for a failure the Fieldwork lease store reports.
+    init(_ error: LeaseStoreError) {
+        switch error {
+        case let .storeFailed(path, reason): self = .storeFailed(path: path, reason: reason)
+        case let .awaitingDeletion(udid): self = .awaitingDeletion(udid: udid)
+        case let .held(udid, holderPID, expiresAt): self = .held(udid: udid, holderPID: holderPID, expiresAt: expiresAt)
+        case let .unreadable(path): self = .unreadable(path: path)
+        case .noSuchLease: self = .noSuchLease
+        case let .expired(udid, expiresAt): self = .expired(udid: udid, expiresAt: expiresAt)
+        case let .holderExited(udid, holderPID): self = .holderExited(udid: udid, holderPID: holderPID)
+        }
+    }
+
+    /// Runs a call into the lease store, rethrowing what the store refuses as a `LeaseError` and letting every other error through.
+    public static func mapping<T>(_ body: () throws -> T) throws -> T {
+        do {
+            return try body()
+        } catch let error as LeaseStoreError {
+            throw LeaseError(error)
         }
     }
 

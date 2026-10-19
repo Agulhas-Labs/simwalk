@@ -17,9 +17,9 @@ public struct MirrorCallLock: Sendable {
         file = root.appendingPathComponent("mirror", isDirectory: true).appendingPathComponent(".lock")
     }
 
-    /// The machine's own lock, under `~/.simwalk` as the lease store is — never moved by an environment variable, since a lock a second caller could not see would not keep its events apart.
+    /// The machine's own lock, under the account home's `.simwalk` (``HomeDirectories/account()``) as the lease store is — never moved by `HOME` or any other environment variable, since a lock a second caller could not see would not keep its events apart.
     public static func standard() -> MirrorCallLock {
-        MirrorCallLock(root: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".simwalk", isDirectory: true))
+        MirrorCallLock(root: HomeDirectories.account())
     }
 
     /// Runs `body` holding the lock, waiting for a call already holding it to finish; the directory is made first, since the lock file's own create does not make it.

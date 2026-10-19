@@ -339,6 +339,9 @@ public struct WalkbookLoader {
         if screen.states.contains(where: { $0.resetPermissions?.isEmpty == true }) {
             found.append(.emptyLaunchCondition(screenID: screenID, index: index, key: "resetPermissions"))
         }
+        if screen.states.contains(where: { $0.environment?.keys.contains(AnimationsOptIn.libraryEnvironmentKey) == true }) {
+            found.append(.animationsInStateEnvironment(screenID: screenID, index: index))
+        }
         return found
     }
 

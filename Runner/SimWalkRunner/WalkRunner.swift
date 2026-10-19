@@ -59,7 +59,7 @@ final class WalkRunner: XCTestCase {
         // `WalkbookProblem.emptyRoute` refuses at authoring time, reintroduced by the runner.
         // Taken once, before any state has touched it: every state's environment is laid over this, never
         // over the one the state before it left on the shared `app`.
-        let baseEnvironment = app.launchEnvironment
+        let baseEnvironment = AnimationsOptIn.inserting(AnimationsOptIn.library(in: ProcessInfo.processInfo.environment), into: app.launchEnvironment)
         // The location the device was simulating before any state set one, read only when a state will: each
         // state without its own is walked under this, and the walk hands it back at the end.
         setsLocation = walkbook.screens.contains { $0.states.contains { $0.location != nil } }
@@ -108,6 +108,8 @@ final class WalkRunner: XCTestCase {
             nonce: environment[Input.nonce],
             // How the host knew the build hash (`installed` for a device walk that installed the app itself); absent means read back.
             appBuildProvenance: environment[Input.buildProvenance].flatMap(CaptureManifest.AppBuildProvenance.init(rawValue:)),
+            // What this runner did, from the key the host sets only when it launches the app with the library inserted.
+            animations: AnimationsOptIn.recorded(in: environment),
             screens: records
         )
         // `finalise` is the confirmation: it refuses a manifest whose claims the directory does not
@@ -188,7 +190,7 @@ final class WalkRunner: XCTestCase {
         let screen = try XCTUnwrap(walkbook.screens.first { $0.id == run.screenID }, "measure \(run.subject): the walkbook has no screen '\(run.screenID)'")
         let state = try XCTUnwrap(screen.states.first { $0.slug == run.stateSlug }, "measure \(run.subject): screen '\(screen.id)' has no state '\(run.stateSlug)'")
         let app = XCUIApplication(bundleIdentifier: walkbook.appBundleID)
-        let baseEnvironment = app.launchEnvironment
+        let baseEnvironment = AnimationsOptIn.inserting(AnimationsOptIn.library(in: ProcessInfo.processInfo.environment), into: app.launchEnvironment)
         let quiet = SettleWindow.quiet(forScreenMilliseconds: screen.settle, default: Self.settleQuiet)
         let budget = SettleWindow.budget(forQuiet: quiet)
         let options = XCTMeasureOptions()
@@ -490,7 +492,7 @@ final class WalkRunner: XCTestCase {
     private func probeRoutes(of walkbook: Walkbook, to url: URL) throws {
         let started = Date()
         let app = XCUIApplication(bundleIdentifier: walkbook.appBundleID)
-        let baseEnvironment = app.launchEnvironment
+        let baseEnvironment = AnimationsOptIn.inserting(AnimationsOptIn.library(in: ProcessInfo.processInfo.environment), into: app.launchEnvironment)
         let probes = walkbook.screens.map { screen in
             app.terminate()
             app.launchArguments = screen.states.first?.launchArguments ?? []
@@ -627,6 +629,11 @@ final class WalkRunner: XCTestCase {
     /// Host and runner share the Mac's clock, so the age is read against the runner's own; the parse is `DeviceBootTime.age`, pinned in `SimWalkCore`, and this call is not (SimWalk#90).
     static var deviceBootAge: TimeInterval? {
         DeviceBootTime.age(in: ProcessInfo.processInfo.environment, now: Date())
+    }
+
+    /// The slim boot the host named, or `nil` on a stock device or when the host could not tell — which leaves a `systemTap` refusal without the clause. The parse is `SlimDevice.read`, pinned in `SimWalkCore`.
+    static var slimDevice: SlimDevice? {
+        SlimDevice.read(in: ProcessInfo.processInfo.environment)
     }
 
     /// The locale the device was already in as the host read it, or `nil` when it could not — which the state check answers by treating a locale state and its base as different conditions, as it always did.

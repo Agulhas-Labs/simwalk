@@ -40,14 +40,17 @@ struct MCPServerTests {
 
     @Test
     func toolsListNamesTheSevenToolsAndTheArgumentsEachRequires() async throws {
-        let responses = try await MCPExchange.send([["jsonrpc": "2.0", "id": 2, "method": "tools/list"]])
+        let responses = try await MCPExchange.send([
+            ["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": ["clientInfo": ["name": "claude-code"]]],
+            ["jsonrpc": "2.0", "id": 2, "method": "tools/list"],
+        ])
 
-        let result = try #require(responses.first?["result"] as? [String: Any])
+        let result = try #require(responses.last?["result"] as? [String: Any])
         let tools = try #require(result["tools"] as? [[String: Any]])
         let names = tools.compactMap { $0["name"] as? String }
 
         #expect(names == ["walk", "validate", "inspect", "audit", "diff", "oracle", "session", "mirror"])
-        #expect(names == SimWalkTool.allCases.map(\.rawValue))
+        #expect(names == SimWalkTool.allCases.filter { $0 != .walkStatus }.map(\.rawValue))
         for tool in tools {
             let schema = try #require(tool["inputSchema"] as? [String: Any])
             let properties = try #require(schema["properties"] as? [String: Any])
@@ -80,7 +83,7 @@ struct MCPServerTests {
 
         let responses = try await MCPExchange.send([
             MCPExchange.call(id: 3, tool: "validate", arguments: ["walkbook": "book.json"]),
-        ], answering: { _, _, _ in answer })
+        ], answering: { _, _, _, _ in answer })
 
         let response = try #require(responses.first)
 
@@ -115,7 +118,7 @@ struct MCPServerTests {
             log: { _ in },
             usage: nil,
             session: nil,
-            answering: { _, _, _ in MCPExchange.answer }
+            answering: { _, _, _, _ in MCPExchange.answer }
         )
         try input.fileHandleForWriting.write(contentsOf: Data("[1, 2, 3]\n".utf8))
         try input.fileHandleForWriting.close()
@@ -172,7 +175,7 @@ struct MCPServerTests {
             log: { _ in },
             usage: nil,
             session: nil,
-            answering: { _, _, cancellation in
+            answering: { _, _, cancellation, _ in
                 let heard = DispatchSemaphore(value: 0)
                 cancellation.onCancel { heard.signal() }
                 started.continuation.yield()
@@ -210,7 +213,7 @@ struct MCPServerTests {
             log: { _ in },
             usage: nil,
             session: nil,
-            answering: { _, _, _ in
+            answering: { _, _, _, _ in
                 ran.mark()
                 return MCPExchange.answer
             }
@@ -241,7 +244,7 @@ struct MCPServerTests {
             log: diagnostics.record,
             usage: nil,
             session: nil,
-            answering: { _, _, _ in MCPExchange.answer }
+            answering: { _, _, _, _ in MCPExchange.answer }
         )
         var request = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": 1, "method": "tools/list"])
         request.append(0x0A)
@@ -274,7 +277,7 @@ struct MCPServerTests {
             log: { _ in },
             usage: nil,
             session: nil,
-            answering: { _, _, _ in MCPExchange.answer }
+            answering: { _, _, _, _ in MCPExchange.answer }
         )
         try input.fileHandleForWriting.write(contentsOf: Data("not json\n".utf8))
         try input.fileHandleForWriting.close()
@@ -331,7 +334,7 @@ struct MCPServerTests {
 
         _ = try await MCPExchange.send([
             MCPExchange.call(id: 1, tool: "walk", arguments: ["walkbook": "book.json", "output": "x.simwalk"]),
-        ], usage: log, session: "session-1", answering: { _, _, _ in throw Unmapped() })
+        ], usage: log, session: "session-1", answering: { _, _, _, _ in throw Unmapped() })
 
         let entry = try #require(try Self.entries(in: directory).first)
 
@@ -349,7 +352,7 @@ struct MCPServerTests {
             MCPExchange.call(id: 1, tool: "validate", arguments: ["walkbook": "book.json"]),
             MCPExchange.call(id: 2, tool: "inspect", arguments: ["bundle": "x.simwalk"]),
             MCPExchange.call(id: 3, tool: "audit", arguments: ["bundle": "x.simwalk"]),
-        ], usage: log, session: "session-1", answering: { _, _, _ in throw Unmapped() })
+        ], usage: log, session: "session-1", answering: { _, _, _, _ in throw Unmapped() })
 
         let entries = try Self.entries(in: directory)
 
@@ -366,16 +369,17 @@ struct MCPServerTests {
         _ = try await MCPExchange.send([
             MCPExchange.call(id: 1, tool: "walk", arguments: ["walkbook": "book.json", "output": "x.simwalk"]),
             MCPExchange.call(id: 2, tool: "audit", arguments: ["bundle": "x.simwalk"]),
-        ], usage: log, session: "session-1", answering: { tool, _, _ in
+        ], usage: log, session: "session-1", answering: { tool, _, _, _ in
             switch tool {
             case .walk: throw WalkbookLoadError.unreadable(source: "book.json", reason: "no such file")
             default: throw CaptureBundleError.artefactUnreadable(path: "x.simwalk/tree.json", reason: "torn")
             }
         })
 
+        // A client sending no `initialize` is bounded, and a bounded walk logs when it ends, so the two lines may land in either order.
         let entries = try Self.entries(in: directory)
 
-        #expect(entries.map(\.kind) == [.inputRefused, .runnerFailed])
+        #expect(Dictionary(uniqueKeysWithValues: entries.map { ($0.tool, $0.kind) }) == ["walk": .inputRefused, "bundle audit": .runnerFailed])
     }
 
     /// A saving measured by the answer is what the log records, so the status line and `usage` price the same call the same way.
@@ -391,7 +395,7 @@ struct MCPServerTests {
 
         _ = try await MCPExchange.send([
             MCPExchange.call(id: 1, tool: "walk", arguments: ["walkbook": "book.json", "output": "x.simwalk"]),
-        ], usage: log, session: "session-1", answering: { _, _, _ in measured })
+        ], usage: log, session: "session-1", answering: { _, _, _, _ in measured })
 
         let entry = try #require(try Self.entries(in: directory).first)
 

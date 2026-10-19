@@ -106,16 +106,19 @@ public struct SystemSheetScope: Sendable {
     ///
     /// **Where no sheet showed at all on a device that booted under ``freshBoot`` ago, the boot is named instead of an answered sheet** (SimWalk#88). HealthKit raised no sheet on a freshly booted simulator for its first minutes — twice on devices walked about 70 s after they were created, once on one the walk itself cold-booted — and the same walk passed on the same device two minutes later. "Already answered" sends an agent to erase the device, which restarts the wait. `bootAge` is the seconds since the device booted, `nil` where that is unknown, which keeps the answered-sheet hint; the ambiguous refusal keeps it whatever the age, since a match was there.
     ///
+    /// **A device that booted slim says so after the no-sheet hint** (`slim`): a sheet whose service is off never appears, so the refusal names the count, the capabilities and `--stock`. Never on the ambiguous refusal, where a match was there; `nil` leaves every refusal as it was.
+    ///
     /// **Not "none" where SpringBoard showed an alert** (SimWalk#91). `springBoardShowedAlert` is that the step saw one, whether or not it held the label: the refusal then says so, and drops the boot age, since a device that raised an alert is not one that raised nothing. And an `atLaunch` refusal, fresh boot or not, never claims the app's window showed no sheet, for the reason above: the tree cannot back it.
-    public func refusal(for label: String, passedOverAppOwn: Bool, bootAge: TimeInterval? = nil, springBoardShowedAlert: Bool = false, appWindowShowedSheet: Bool = false) -> String {
+    public func refusal(for label: String, passedOverAppOwn: Bool, bootAge: TimeInterval? = nil, springBoardShowedAlert: Bool = false, appWindowShowedSheet: Bool = false, slim: SlimDevice? = nil) -> String {
         let bootAge = springBoardShowedAlert ? nil : bootAge
-        let noSheet = Self.noSheetHint(bootAge: bootAge)
+        let slimClause = slim?.clause ?? ""
+        let noSheet = Self.noSheetHint(bootAge: bootAge) + slimClause
         if declaredAtLaunch {
             let launch = "no enabled control '\(label)' on the launch's screen, which the walkbook declares a system sheet's — "
             let springBoard = springBoardShowedAlert ? "SpringBoard showed an alert with no enabled '\(label)'" : "SpringBoard showed no alert SimWalk could read"
             let appWindow = ", and the tree cannot say whether one showed in the app's window at launch; "
             if let age = Self.freshBootAge(bootAge) {
-                return launch + springBoard + appWindow + "\(Self.freshBootAdvice(age)), or the label may not match the sheet's control: check it"
+                return launch + springBoard + appWindow + "\(Self.freshBootAdvice(age)), or the label may not match the sheet's control: check it" + slimClause
             }
             return launch + springBoard + appWindow + noSheet
         }
@@ -177,9 +180,9 @@ public struct SystemSheetScope: Sendable {
     /// Why a `systemTap` for `label` found nothing it could take, from everything its polls passed over.
     ///
     /// **A live match the tree read does not hold is a fact about the read, not the sheet** (SimWalk#48). A remote sheet's content — HealthKit's, hosted by `com.apple.HealthPrivacyService` — is in `app.snapshot()` only on the first app launch after its host process starts; on every later launch the snapshot stops where the remote view is hosted, while the live query still finds the control, enabled and hittable. Nothing judged from the tree can admit it then, and the plain refusal would say no control was there. So where the last poll that found a live match found the tree holding none of it, the refusal says the snapshot cannot see it and what clears it, ahead of anything the tree would have said.
-    func refusal(for label: String, passedOver: PassedOver, bootAge: TimeInterval?, springBoardShowedAlert: Bool = false, appWindowShowedSheet: Bool = false) -> String {
+    func refusal(for label: String, passedOver: PassedOver, bootAge: TimeInterval?, springBoardShowedAlert: Bool = false, appWindowShowedSheet: Bool = false, slim: SlimDevice? = nil) -> String {
         guard passedOver.unseenByTree else {
-            return refusal(for: label, passedOverAppOwn: passedOver.appOwn, bootAge: bootAge, springBoardShowedAlert: springBoardShowedAlert, appWindowShowedSheet: appWindowShowedSheet)
+            return refusal(for: label, passedOverAppOwn: passedOver.appOwn, bootAge: bootAge, springBoardShowedAlert: springBoardShowedAlert, appWindowShowedSheet: appWindowShowedSheet, slim: slim)
         }
         return "a '\(label)' is on screen and reachable, and the app's snapshot does not hold it — most likely a remote sheet the snapshot cannot see (HealthKit's is hosted by com.apple.HealthPrivacyService); terminate the sheet's host process (xcrun simctl terminate <udid> <host bundle id>) or reboot, and walk again"
     }

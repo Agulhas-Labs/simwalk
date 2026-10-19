@@ -19,7 +19,7 @@ public struct DeviceSetup {
     public static func apply(_ setup: Walkbook.Setup, udid: String, bundleID: String, journal: DeviceSetupJournal, run: (String, [String]) throws -> Shell.Result) throws -> Made {
         var applied = Applied()
         var leftover: DeviceSetupJournal.Leftover?
-        /// What is about to have been made, recorded before the step that makes it; `applied` only once the step ran.
+        // What is about to have been made, recorded before the step that makes it; `applied` only once the step ran.
         func make(_ intent: Applied, by arguments: [String]) throws {
             try journal.record(intent, udid: udid, bundleID: bundleID)
             try step(arguments, run: run)

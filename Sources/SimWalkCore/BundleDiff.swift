@@ -27,6 +27,17 @@ public struct BundleDiff: Codable, Equatable, Sendable {
     /// The rules a diff applies unless told otherwise, in the order their flags are listed.
     public static let standardRules: [any FormRule] = [PresenceRule(), OrderRule(), BoxRule(), RowTemplateRule(), OverlapRule(), DegenerateChartRule()]
 
+    /// Why `run` and `reference` cannot be compared, or `nil` when they were captured with animations in the same state (SimWalk#154).
+    ///
+    /// Motion and settle figures differ between the two states for that reason alone, so a diff across them would report the difference as the app's. A bundle that does not record its state was captured with animations on, and the text says so.
+    public static func animationsRefusal(run: CaptureManifest, reference: CaptureManifest) -> String? {
+        guard run.recordedAnimations != reference.recordedAnimations else { return nil }
+        let unrecorded = " (recorded before SimWalk recorded it)"
+        let referenceState = "with animations \(reference.recordedAnimations.rawValue)\(reference.animations == nil ? unrecorded : "")"
+        let runState = "with animations \(run.recordedAnimations.rawValue)\(run.animations == nil ? unrecorded : "")"
+        return "bundle diff refused: the reference was captured \(referenceState) and the run \(runState), so their motion and settle figures differ for that reason alone; capture both in one state (--animations keeps animations on, and a walk that records motion or runs on a device keeps them on regardless)"
+    }
+
     /// Compares `run` against `reference`.
     ///
     /// Reads each paired capture's tree from its bundle; a tree that cannot be read is recorded on its state as unreadable rather than thrown, so one bad artefact costs the state it belongs to and no more.

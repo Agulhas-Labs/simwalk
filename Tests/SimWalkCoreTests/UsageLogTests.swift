@@ -220,7 +220,7 @@ struct UsageLogTests {
     /// Unset, or set to nothing, the log is where it has always been: a variable emptied to switch it off must not name the working directory as a file.
     @Test
     func noOverrideOrABlankOneLeavesTheLogInHome() {
-        let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".simwalk").appendingPathComponent("usage.jsonl")
+        let home = HomeDirectories.simwalk(environment: [:]).appendingPathComponent("usage.jsonl")
 
         #expect(UsageLog.standard(environment: [:]).fileURL == home)
         #expect(UsageLog.standard(environment: [UsageLog.overrideVariable: "  "]).fileURL == home)

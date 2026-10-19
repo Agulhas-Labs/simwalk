@@ -30,7 +30,7 @@ public enum ShellError: Error, Equatable, CustomStringConvertible {
 extension ShellError: UsageFailureClassifiable {
     /// Most callers of `Shell.run` in this package are spawning something a walk needs to run at all — `simctl`, `xcodebuild`, `git` while snapshotting the runner — so a process this tool could not even launch is that machinery failing, not an argument a caller of `walk` gave it.
     ///
-    /// `runner-failed` is the default for that reason, even though it is not the only caller: `SimWalkCLI`'s `ClaudeCommandLine` also runs `claude` through it during `install-hook`, and a launch failure there means Claude Code's own CLI is missing or broken, not the walk runner — that one site catches its own `ShellError` and rewraps it as `HookInstallError` (`.setupFailed`) before it can reach a usage log under this default.
+    /// `runner-failed` is the default for that reason, and every caller of `Shell.run` is that machinery: `claude` is run by the shared library, not through this.
     public var usageFailureKind: UsageFailureKind {
         .runnerFailed
     }

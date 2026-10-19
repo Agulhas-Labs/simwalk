@@ -15,10 +15,9 @@ public struct LiveSessionStore: Sendable {
         self.directory = directory
     }
 
-    /// `~/.simwalk/sessions` — like leases, never moved by `SIMWALK_USAGE_LOG`, since a session another process could not see would not keep a second one off its device.
+    /// `~/.simwalk/sessions` — like leases, never moved by `SIMWALK_USAGE_LOG`, since a session another process could not see would not keep a second one off its device. Under the account home (``HomeDirectories/account()``), not `HOME`, for the same reason.
     public static func standard() -> LiveSessionStore {
-        LiveSessionStore(directory: FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".simwalk", isDirectory: true)
+        LiveSessionStore(directory: HomeDirectories.account()
             .appendingPathComponent("sessions", isDirectory: true))
     }
 

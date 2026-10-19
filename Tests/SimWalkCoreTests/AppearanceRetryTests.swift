@@ -69,6 +69,20 @@ struct AppearanceRetryTests {
         #expect(FileManager.default.fileExists(atPath: reread.screenshotURL(for: dark).path))
     }
 
+    /// The fold keeps the first attempt's recorded animation state (SimWalk#154), as it keeps the nonce.
+    @Test
+    func aFoldKeepsTheFirstAttemptsAnimationState() throws {
+        let (firstDirectory, secondDirectory) = try (TemporaryDirectory(), TemporaryDirectory())
+        var first = try Self.firstAttempt(in: firstDirectory).manifest
+        first.animations = .disabled
+        let second = try Self.secondAttempt(in: secondDirectory).manifest
+        let settle = AppearanceRetry.settle(found: .light, milliseconds: 31200, retrying: AppearanceRetry.screens(toRetryIn: first))
+
+        let folded = try AppearanceRetry.foldedManifest(first: first, retry: second, settle: settle)
+
+        #expect(folded.animations == .disabled)
+    }
+
     /// A second attempt that cannot be the same walk — another device — or that recorded other screens than it was sent for is refused before anything is touched: the first attempt's bundle reads exactly as the runner wrote it.
     @Test
     func asecondAttemptThatIsNotTheSameWalkIsRefusedAndTheFirstBundleLeftAsItWas() throws {

@@ -3,6 +3,7 @@
 //
 
 import ArgumentParser
+import Fieldwork
 import Foundation
 import SimWalkCore
 import SimWalkDriver
@@ -53,6 +54,18 @@ struct WalkCommand: ParsableCommand {
     )
     var motion = false
 
+    @Flag(
+        name: .long,
+        help: "Keep UIKit animations on in the app under walk. A simulator walk switches them off by default so screens settle sooner; a walk that records motion keeps them on."
+    )
+    var animations = false
+
+    @Flag(
+        name: .long,
+        help: "Boot a device SimWalk created with every launchd service on. Without it, a device a `simwalk lease acquire --clone-from` lease created boots with the services the app at --app-path does not need switched off."
+    )
+    var stock = false
+
     @Option(name: .long, help: "Physical device only: the Apple signing team ID the runner is built under. Required with a physical --device or a lease on one; refused on a simulator walk.")
     var team: String?
 
@@ -100,11 +113,11 @@ struct WalkCommand: ParsableCommand {
         defer { withExtendedLifetime(signals) {} }
         let telemetry = telemetry(cancellation: cancellation)
         guard dryRun else {
-            try runServing(log: .standard(), emit: StandardStreams.emit, emitError: StandardStreams.emitError, isStdoutPiped: StandardStreams.isStdoutPiped, answering: { try walked(builds: .standard(), leases: .standard(), telemetry: telemetry, note: StandardStreams.emitError) })
+            try runServing(log: .standard(), emit: StandardStreams.emit, emitError: StandardStreams.emitError, isStdoutPiped: StandardStreams.isStdoutPiped, answering: { try walked(builds: .standard(), leases: .standard(), telemetry: telemetry, animationsLibrary: Self.standardAnimationsLibrary(), note: StandardStreams.emitError) })
             return
         }
         try runDryRun(log: .standard(), emit: StandardStreams.emit, emitError: StandardStreams.emitError, isStdoutPiped: StandardStreams.isStdoutPiped) {
-            try probed(builds: .standard(), leases: .standard(), telemetry: telemetry, note: StandardStreams.emitError)
+            try probed(builds: .standard(), leases: .standard(), telemetry: telemetry, animationsLibrary: Self.standardAnimationsLibrary(), note: StandardStreams.emitError)
         }
     }
 
@@ -113,9 +126,9 @@ struct WalkCommand: ParsableCommand {
     /// Shared by the CLI's `run()` and the MCP face's ``answer(environment:cancellation:shell:builds:leases:)`` so a test can drive the refusal through the entry both take.
     ///
     /// `firstLaunch` is the dry run's one preflight, made before its first `simctl` call (SimWalk#136).
-    func probed(shell: Shell = Shell(), builds: RunnerBuilds, leases: LeaseStore, telemetry: WalkTelemetry? = nil, firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(), note: (String) -> Void = { _ in }) throws -> WalkDryRun.Outcome {
+    func probed(shell: Shell = Shell(), runner resolveRunner: (() throws -> RunnerSource)? = nil, builds: RunnerBuilds, leases: LeaseStore, telemetry: WalkTelemetry? = nil, firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(), animationsLibrary: AnimationsLibrary? = nil, note: (String) -> Void = { _ in }) throws -> WalkDryRun.Outcome {
         _ = try target(shell: shell, leases: leases, firstLaunch: firstLaunch)
-        return try WalkDryRun.perform(self, shell: shell, builds: builds, leases: leases, telemetry: telemetry, firstLaunch: firstLaunch, note: note)
+        return try WalkDryRun.perform(self, shell: shell, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, firstLaunch: firstLaunch, animationsLibrary: animationsLibrary, note: note)
     }
 
     /// What this run writes about itself: the progress file `<session>.json` beside the usage log, and a walk's result file beside that — a dry run writes none (`Docs/SIMWALK-PROGRESS.md` §1).
@@ -165,13 +178,22 @@ struct WalkCommand: ParsableCommand {
     ///
     /// `cancellation` is the MCP client's cancel of this call: it ends the progress file `failed` / `cancelled`, and the walk carries on to its end with the file kept that way.
     ///
+    /// `started` hears the claimed progress-file stem and the progress as begun. The claim and the `begin` come first, before the target and the device are resolved, so a bounded MCP server has the walk's handle within milliseconds of the call (`Docs/Reference.md`, "Bounded walks"). A run that nothing else ended — a physical device's, which writes no result, or one refused while its target was resolved — is ended here, by its answer or its refusal.
+    ///
     /// `shell`, `builds` and `leases` are the seams a test uses to drive this entry against a fake `devicectl`.
-    func answer(environment: [String: String] = ProcessInfo.processInfo.environment, cancellation: Cancellation? = nil, shell: Shell = Shell(), builds: RunnerBuilds = .standard(), leases: LeaseStore = .standard()) throws -> Answer {
-        let telemetry = telemetry(environment: environment, cancellation: cancellation)
-        guard dryRun else {
-            return try walked(shell: shell, builds: builds, leases: leases, telemetry: telemetry)
+    func answer(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        cancellation: Cancellation? = nil,
+        started: SimWalkMCPServer.WalkStarted? = nil,
+        shell: Shell = Shell(),
+        runner resolveRunner: (() throws -> RunnerSource)? = nil,
+        builds: RunnerBuilds = .standard(),
+        leases: LeaseStore = .standard(),
+        animationsLibrary: AnimationsLibrary? = nil
+    ) throws -> Answer {
+        try WalkStart(telemetry: telemetry(environment: environment, cancellation: cancellation), tool: dryRun ? Self.dryRunLogName : "walk", logPath: UsageLog.standard().fileURL.path, started: started).run { telemetry in
+            try dryRun ? probed(shell: shell, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, animationsLibrary: animationsLibrary).answer() : walked(shell: shell, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, animationsLibrary: animationsLibrary)
         }
-        return try probed(shell: shell, builds: builds, leases: leases, telemetry: telemetry).answer()
     }
 
     /// Boots what the walk needs, runs the runner, hands the device back, and reads back the bundle it wrote.
@@ -183,6 +205,8 @@ struct WalkCommand: ParsableCommand {
     /// `logFileURL` is resolved here, at the face, rather than inside the runner: `UsageLog.standard()` is what honours `SIMWALK_USAGE_LOG`, and resolving it once and handing the runner the *file* it names is what keeps the two processes' lines in the same place. A runner computing its own path from a bare `.simwalk` directory would agree with the driver only when nobody had moved the log — which a test always does.
     ///
     /// `builds` is where the runner is built, and a walk writes its record there before the build starts — so a test hands it a scratch directory, never the machine's own.
+    ///
+    /// `provisioning` makes the slim-boot step for the shell in use: the live one writes the machine's override directory, so a test hands one rooted in its own.
     ///
     /// `firstLaunch` is the walk's one preflight (SimWalk#136): a caller that has already asked it hands it on, so it is not asked twice.
     func performWalk(
@@ -196,10 +220,12 @@ struct WalkCommand: ParsableCommand {
         leases: LeaseStore,
         telemetry: WalkTelemetry? = nil,
         firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
+        provisioning: (Shell) -> SlimWalkProvisioning = { SlimWalkProvisioning(shell: $0) },
+        animationsLibrary: AnimationsLibrary? = nil,
         note: (String) -> Void = { _ in }
     ) throws -> Outcome {
         try WalkTelemetry.recording(on: telemetry) {
-            let prepared = try prepare(shell: shell, runner: resolveRunner, builds: builds, leases: leases, now: now(), logPath: logFileURL.path, telemetry: telemetry, firstLaunch: firstLaunch, note: note)
+            let prepared = try prepare(shell: shell, runner: resolveRunner, builds: builds, leases: leases, now: now(), logPath: logFileURL.path, telemetry: telemetry, firstLaunch: firstLaunch, provisioning: provisioning, animationsLibrary: animationsLibrary, note: note)
             defer { Self.discardTemporary(prepared.temporaryWalkbook) }
             // Released once the device is handed back, whichever way the walk went; a `--lease` lease is left to its holder.
             defer {
@@ -272,6 +298,7 @@ struct WalkCommand: ParsableCommand {
                         logFilePath: logFileURL.path,
                         settleMilliseconds: settle,
                         motion: motion,
+                        animationsOffLibrary: prepared.animationsOffLibrary,
                         deviceAppearance: foundAppearance,
                         deviceLocale: foundLocale,
                         runnerCommit: source.commit,
@@ -321,6 +348,7 @@ struct WalkCommand: ParsableCommand {
                                 logFilePath: logFileURL.path,
                                 settleMilliseconds: settle,
                                 motion: motion,
+                                animationsOffLibrary: prepared.animationsOffLibrary,
                                 deviceAppearance: found,
                                 deviceLocale: foundLocale,
                                 runnerCommit: source.commit,
@@ -375,6 +403,8 @@ struct WalkCommand: ParsableCommand {
             if let measureNote = MeasureOptIn.walkNote(for: book, screens: screens) {
                 outcome.measureNote = measureNote
             }
+            outcome.animationsNote = Self.animationsNote(for: prepared.animations)
+            outcome.deviceNote = prepared.deviceNote
             if prepared.outputSuffixAdded {
                 outcome.bundle = outcome.bundle.noting("output: \(outputURL.path) (suffix added)")
             }
@@ -399,6 +429,8 @@ struct WalkCommand: ParsableCommand {
         logPath: String? = nil,
         telemetry: WalkTelemetry? = nil,
         firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
+        provisioning: (Shell) -> SlimWalkProvisioning = { SlimWalkProvisioning(shell: $0) },
+        animationsLibrary: AnimationsLibrary? = nil,
         note: (String) -> Void = { _ in }
     ) throws -> Prepared {
         telemetry?.begin(tool: dryRun ? Self.dryRunLogName : "walk", logPath: logPath)
@@ -420,6 +452,11 @@ struct WalkCommand: ParsableCommand {
             try CaptureBundleWriter.requireFresh(outputURL)
         }
 
+        // A `--screens` id the walkbook lacks is knowable now, so it is refused before the library is built or the runner resolved (SimWalk#154).
+        if !screens.isEmpty {
+            _ = try WalkbookSubset.narrow(book, to: screens)
+        }
+
         let run: (String, [String]) throws -> Shell.Result = { try shell.run($0, $1) }
         // The runner installed with this binary, never the live checkout (SimWalk#16), built in a directory
         // keyed to what it builds so no other source's walk can share or overwrite its products. Resolved
@@ -431,6 +468,9 @@ struct WalkCommand: ParsableCommand {
         // and the install still to come, which take tens of seconds. A build directory's name is a hash nothing
         // can read back (SimWalk#22).
         try builds.recordUse(of: source)
+
+        // The animations-off library, built after the cheaper refusals above and before anything is booted: a walk that cannot have it is refused while that is cheap (SimWalk#154).
+        let animations = try animationsPlan(for: book, library: animationsLibrary)
 
         // The device, a lease on it and the walk's claim, taken before anything touches the device: a walk that names no lease
         // takes one of its own on the device it resolves, so no other simwalk session can take that device for the length of the walk.
@@ -448,7 +488,9 @@ struct WalkCommand: ParsableCommand {
             if book.setup?.changesDevice == true, !DeviceSettle.mayReboot(simulator, requested: device, leased: lease != nil) {
                 throw DeviceSetupError.notOwned(udid: simulator.udid)
             }
-            try WalkTelemetry.segment(telemetry, .booting, \.bootMs) { try simulator.boot(shell: shell) }
+            let deviceNote = try provisioning(shell).boot(simulator, createdByWalk: held.lease.createdDevice, stockRequested: stock, appPath: appPath) { device in
+                try WalkTelemetry.segment(telemetry, .booting, \.bootMs) { try device.boot(shell: shell) }
+            }
             if let appPath {
                 try WalkTelemetry.segment(telemetry, .installing, \.installMs) { try simulator.install(appPath: appPath, shell: shell) }
             }
@@ -483,7 +525,10 @@ struct WalkCommand: ParsableCommand {
                 temporaryWalkbook: executed.temporaryURL,
                 runner: runner,
                 lease: held.lease,
-                claim: held.claim
+                claim: held.claim,
+                deviceNote: deviceNote,
+                animations: animations?.decision,
+                animationsOffLibrary: animations?.path
             )
         } catch {
             held.release()
@@ -613,6 +658,10 @@ extension WalkCommand {
         var resultPath: String?
         /// That a simulator walk measured nothing for the screens that ask (`MeasureOptIn.deviceOnlyNote`); `nil` when none did.
         var measureNote: String?
+        /// What a simulator walk did about UIKit animations (``WalkCommand/animationsNote(for:)``); `nil` when they were asked for or nothing was decided.
+        var animationsNote: String?
+        /// Whether SimWalk slimmed the device it booted, and how that was read back; `nil` when it decided nothing.
+        var deviceNote: String?
         /// The runner's own failure, when a readable bundle was on disk in spite of it.
         let survivedRunnerFailure: String?
         /// What the walk put back on the device — every walk has one; `nil` only where a caller supplied a bundle without a walk.
@@ -696,6 +745,12 @@ extension WalkCommand {
             if let measureNote {
                 lines += (lines.isEmpty ? [] : [""]) + [measureNote]
             }
+            if let animationsNote {
+                lines += (lines.isEmpty ? [] : [""]) + [animationsNote]
+            }
+            if let deviceNote {
+                lines += (lines.isEmpty ? [] : [""]) + [deviceNote]
+            }
             // The manifest's record prints with the bundle's own residue; only a record that could not be written is said here.
             if let setup, bundle.manifest.deviceSetup == nil {
                 lines += (lines.isEmpty ? [] : [""]) + setup.lines + ["⚠ the setup above is not recorded in the bundle's manifest — rewriting it failed"]
@@ -726,6 +781,12 @@ extension WalkCommand {
         let lease: WalkLease
         /// The walk's mark on the device, which no lease token exempts from a handback (SimWalk#128); the caller releases it with the lease.
         let claim: WalkClaim
+        /// The line the answer carries about how the device was booted; `nil` when nothing was decided.
+        let deviceNote: String?
+        /// What the walk decided about UIKit animations (SimWalk#154); `nil` when no library was offered, which launches the app untouched.
+        let animations: AnimationsOptIn.Decision?
+        /// The library to insert into the app's launch, when the decision is `.off`.
+        let animationsOffLibrary: String?
     }
 }
 

@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 import SimWalkCore
 
@@ -17,12 +18,15 @@ public struct Simulator: Equatable, Sendable {
     public let osVersion: String
     /// Whether it was booted when it was resolved.
     public let isBooted: Bool
+    /// The runtime `simctl` lists the device under, such as `com.apple.CoreSimulator.SimRuntime.iOS-27-0`; nil where the device was not read from a device list.
+    public let runtimeIdentifier: String?
 
-    public init(udid: String, name: String, osVersion: String, isBooted: Bool) {
+    public init(udid: String, name: String, osVersion: String, isBooted: Bool, runtimeIdentifier: String? = nil) {
         self.udid = udid
         self.name = name
         self.osVersion = osVersion
         self.isBooted = isBooted
+        self.runtimeIdentifier = runtimeIdentifier
     }
 }
 
@@ -188,7 +192,8 @@ public extension Simulator {
                     udid: udid,
                     name: name,
                     osVersion: Self.version(fromRuntime: runtime),
-                    isBooted: (device["state"] as? String) == "Booted"
+                    isBooted: (device["state"] as? String) == "Booted",
+                    runtimeIdentifier: runtime
                 )
             }
         }

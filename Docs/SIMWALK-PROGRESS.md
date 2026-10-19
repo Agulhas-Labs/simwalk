@@ -81,6 +81,19 @@ A session is one run that spans many calls (SimWalk#83).
 - From the moment the runner starts, `pid` is the `xcodebuild` process that hosts it. If that process dies, the session is over, and the 30-second rule in section 2 reads it as dead.
 - Cancelling `start` ends the file `failed` with `error: "cancelled"`, even if the session still comes up. Cancelling `step`, `read` or `end` changes nothing.
 
+### Reading a walk by handle (`walk_status`)
+
+In bounded mode (`Docs/Reference.md`, "Bounded walks") the MCP tool `walk_status` reads these files by
+handle: `<stem>@<pid>-<startedAtMs>`, where the stem is the progress-file stem (`<session>` or
+`<session>.<slot>`), `pid` is the file's `pid` and `startedAtMs` its `startedAt` in epoch milliseconds. A
+reader checks both against the file, because the stem is re-claimed by the next walk. The answer for each
+case, in precedence order (rows 1–11), is in `Docs/Reference.md`; it is not restated here.
+
+- Dead process: "process alive" means the `pid` exists and its process start time is not later than
+  the file's `startedAt`, so a reused pid is not taken for the walk's process. The 30-second rule above
+  applies as written otherwise.
+- The file is not rewritten by a reader.
+
 ## 4. Result schema (`schemaVersion` 1)
 
 `<session>.result.json` is a compact summary of a finished walk, built for rendering a list of its steps. It is capped at 16 KiB.

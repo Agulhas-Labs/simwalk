@@ -16,7 +16,11 @@ public extension String {
     ///
     /// Shared rather than private to the one report that first needed it: every face that names a path under `$HOME` owes a reader the same spelling, and a second copy is where one of them starts printing `/Users/…`.
     var tildedPath: String {
+        #if os(macOS)
+        let home = HomeDirectories.user().path
+        #else
         let home = NSHomeDirectory()
+        #endif
         return hasPrefix(home) ? "~" + dropFirst(home.count) : self
     }
 

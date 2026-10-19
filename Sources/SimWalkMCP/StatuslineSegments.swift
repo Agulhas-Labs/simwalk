@@ -3,6 +3,7 @@
 //
 
 import Foundation
+import SimWalkCore
 
 /// The segment file this tool contributes to sift's status line.
 ///
@@ -72,7 +73,7 @@ public struct StatuslineSegments {
 private extension StatuslineSegments {
     /// sift's per-user directory, which is where its segment directory lives.
     static var siftHome: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".sift", isDirectory: true)
+        HomeDirectories.sift()
     }
 
     static func script(executable: String) -> String {

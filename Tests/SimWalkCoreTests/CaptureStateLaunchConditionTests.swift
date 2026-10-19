@@ -57,6 +57,15 @@ struct CaptureStateLaunchConditionTests {
         ])
     }
 
+    /// A walk has one animation state, so no state's environment may set the variable the animations library reads (SimWalk#154).
+    @Test
+    func aStateCannotSetTheAnimationsVariable() throws {
+        let problems = try Self.problems(loading: #"{"theme":"light","environment":{"SIMWALK_ANIMATIONS":"on"}}"#)
+
+        #expect(problems == [.animationsInStateEnvironment(screenID: "today", index: 0)])
+        #expect(problems.first?.description.contains("a state's environment cannot set SIMWALK_ANIMATIONS: a walk has one animation state; run it with --animations to keep animations on") == true)
+    }
+
     /// Two states of one screen under the same theme and the same arguments are one state to the bundle, and the existing slug rule refuses the second.
     @Test
     func twoStatesWithTheSameThemeAndArgumentsAreRefusedAsOneSlug() throws {

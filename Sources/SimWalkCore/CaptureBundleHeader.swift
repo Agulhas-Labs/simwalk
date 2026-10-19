@@ -6,7 +6,7 @@ import Foundation
 
 /// The line every answer about a capture bundle opens with: what the answer was measured against.
 ///
-/// One generator for `inspect`, `walk` and `audit` alike, because they answer three questions about the same artefact and a reader comparing two of them is comparing the runs, not the renderings. Six facts, in the order a reader disambiguates by: the plan by name, the app it was run against, the binary of that app, the plan's content hash, the device, and how much of what came back was recorded after the accessibility tree had stopped moving.
+/// One generator for `inspect`, `walk` and `audit` alike, because they answer three questions about the same artefact and a reader comparing two of them is comparing the runs, not the renderings. Six facts, in the order a reader disambiguates by: the plan by name, the app it was run against, the binary of that app, the plan's content hash, the device (and the animation state when the bundle records it, SimWalk#154), and how much of what came back was recorded after the accessibility tree had stopped moving.
 ///
 /// **The name and the app id are load-bearing, not decoration.** They were briefly dropped as provenance, which left two bundles of different apps answering identically but for a hash nobody can read as a name — the compression had gone one field too far. A hash tells two runs apart; it does not tell a reader *what they are looking at*, and the header's job is both. The walk name lives here rather than in the verdict, and `validate` puts its walkbook's name in the same position, so one rule covers every face.
 ///
@@ -28,6 +28,7 @@ public struct CaptureBundleHeader {
             "walkbook: \(ShortHash.of(manifest.walkbookHash))",
             manifest.runnerCommit.map { "runner: \(ShortHash.of($0))\($0.contains("-dirty") ? "-dirty" : "")" },
             "device: \(manifest.device.name) (\(manifest.device.osVersion))",
+            manifest.animations.map { "animations: \($0.rawValue)" },
             "settled: \(settled(manifest))",
         ].compactMap(\.self).joined(separator: "  ")
     }

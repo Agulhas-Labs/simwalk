@@ -28,9 +28,11 @@ public struct MCPToolInvocation: Equatable, Sendable {
     /// Resolves a raw `tools/call`, refusing a tool this server does not serve and any argument it cannot use.
     ///
     /// Every refusal is made here rather than downstream so the failure names the *call* — an unknown tool never reaches an exhaustive switch that would have to invent a case for it, and a missing path never reaches `URL(fileURLWithPath: "")`, which is a directory rather than an error.
-    public init(tool name: String, arguments: [String: Any]) throws {
-        guard let tool = SimWalkTool(rawValue: name) else {
-            throw MCPError(message: "unknown tool '\(name)' — this server serves \(SimWalkTool.allCases.map(\.rawValue).joined(separator: ", "))", kind: .inputRefused)
+    ///
+    /// `mode` is the client's: a blocking client is not offered `walk_status`, so a call to it is an unknown tool, and the refusal lists the tools that client was offered.
+    public init(tool name: String, arguments: [String: Any], mode: MCPClientMode = .blocking) throws {
+        guard let tool = SimWalkTool(rawValue: name), mode == .bounded || tool != .walkStatus else {
+            throw MCPError(message: "unknown tool '\(name)' — this server serves \(MCPToolCatalog.toolNames(for: mode).joined(separator: ", "))", kind: .inputRefused)
         }
         self.tool = tool
         switch tool {
@@ -46,6 +48,8 @@ public struct MCPToolInvocation: Equatable, Sendable {
                 + Self.option("--runner-bundle-id", "runnerBundleId", arguments["runnerBundleId"], of: tool)
                 + Self.settle(arguments["settle"], of: tool)
                 + Self.flag("--motion", "motion", arguments["motion"], of: tool)
+                + Self.flag("--animations", "animations", arguments["animations"], of: tool)
+                + Self.flag("--stock", "stock", arguments["stock"], of: tool)
                 + Self.screenIDs(arguments["screenIDs"], of: tool)
                 + dryRun
                 + Self.flag("--verbose", "verbose", arguments["verbose"], of: tool)
@@ -82,6 +86,13 @@ public struct MCPToolInvocation: Equatable, Sendable {
             (argumentVector, target) = try Self.sessionVector(arguments)
             // Logged as `session <action>`, what the CLI logs; the action leads the vector.
             logName = ([tool.logName] + argumentVector.prefix(1)).joined(separator: " ")
+        case .walkStatus:
+            guard let handle = arguments["handle"] as? String else {
+                throw MCPError(message: "walk_status needs a 'handle' string", kind: .inputRefused)
+            }
+            target = handle
+            argumentVector = []
+            logName = tool.logName
         case .mirror:
             (argumentVector, target) = try Self.mirrorVector(arguments)
             // Logged as `mirror <action>`, what the CLI logs; the action leads the vector.
@@ -93,7 +104,7 @@ public struct MCPToolInvocation: Equatable, Sendable {
 private extension MCPToolInvocation {
     /// The arguments each `session` action takes; anything else beside `action` is refused by name rather than dropped.
     static let sessionArguments: [String: Set<String>] = [
-        "start": ["app", "device", "lease", "state", "team", "runnerBundleId"],
+        "start": ["app", "device", "lease", "state", "team", "runnerBundleId", "animations"],
         "read": ["id", "match"],
         "step": ["id", "step", "guard"],
         "save": ["id", "screen", "into", "expect", "since"],
@@ -124,6 +135,7 @@ private extension MCPToolInvocation {
                 + object("--state", "state", arguments["state"], of: tool)
                 + option("--team", "team", arguments["team"], of: tool)
                 + option("--runner-bundle-id", "runnerBundleId", arguments["runnerBundleId"], of: tool)
+                + flag("--animations", "animations", arguments["animations"], of: tool)
             return (vector, app)
         }
         let id = try path("id", of: tool, in: arguments)

@@ -218,7 +218,7 @@ public struct BundleScreenQuery {
         var result: [(node: AXNode, onScreen: Bool)] = []
         let isOnScreen = onScreenTest(for: tree)
 
-        /// Lists `node`, or points at the line an exact repeat of it already has — which is on the same side of the edge, having the same frame.
+        // Lists `node`, or points at the line an exact repeat of it already has — which is on the same side of the edge, having the same frame.
         func list(_ node: AXNode) -> Int {
             let key = Key(node)
             if let index = listedAt[key] {
@@ -229,7 +229,7 @@ public struct BundleScreenQuery {
             return result.count - 1
         }
 
-        /// `listed` is the line that stands for each ancestor — its own, or the one it collapsed into — and `nil` for one with no text.
+        // `listed` is the line that stands for each ancestor — its own, or the one it collapsed into — and `nil` for one with no text.
         func visit(_ node: AXNode, ancestors: [(node: AXNode, listed: Int?)]) {
             let onScreen = isOnScreen(node)
             var listed: Int?

@@ -3,7 +3,9 @@
 //
 
 import ArgumentParser
+import Fieldwork
 import Foundation
+import SimulatorServices
 @testable import SimWalkCLI
 import SimWalkCore
 import SimWalkDriver
@@ -373,6 +375,30 @@ struct WalkCommandTests {
             try command.performWalk(shell: Shell(script: script.run), pause: { _ in }, now: script.now, runner: { throw unpaired }, builds: Self.builds(in: directory), leases: Self.leases(in: directory))
         }
         #expect(script.calls.isEmpty)
+    }
+
+    /// A walk's slim boot touches only a device SimWalk created: on a device it did not (a lease on an existing one) with `--app-path`, nothing is written to the override directory and the answer says nothing of a slim decision.
+    @Test
+    func aWalkOnADeviceItDidNotCreateWritesNoOverrideAndSaysNothingOfIt() throws {
+        let directory = try TemporaryDirectory()
+        let overrideRoot = directory.url.appendingPathComponent("override-root", isDirectory: true)
+        try FileManager.default.createDirectory(at: overrideRoot, withIntermediateDirectories: true)
+        let writes = try Self.runnerWrites(in: directory)
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 0, writes: writes, booted: false)
+        let command = try WalkCommand.parse([
+            Self.walkbook(in: directory), "--output", writes.to.path,
+            "--device", "UDID-1", "--app-path", Self.fakeApp(in: directory),
+        ])
+        let shell = Shell(script: script.run)
+
+        let outcome = try command.performWalk(
+            shell: shell, pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory),
+            provisioning: { SlimWalkProvisioning(shell: $0, overrides: DisabledServicesOverride(root: overrideRoot)) }
+        )
+
+        #expect(try FileManager.default.contentsOfDirectory(atPath: overrideRoot.path).isEmpty)
+        #expect(outcome.deviceNote == nil)
+        #expect(script.calls.contains { $0.arguments.starts(with: ["simctl", "boot"]) })
     }
 
     /// A device handed back as it was found is printed under the summary and qualifies nothing: it is a fact about the machine, and a bundle is not less trustworthy for it (SimWalk#5).
@@ -1971,17 +1997,17 @@ struct WalkCommandTests {
     }
 
     /// The leases these walks see — the test's own scratch store, with every holder alive, so a lease is held until it expires.
-    private static func leases(in directory: TemporaryDirectory) -> LeaseStore {
+    static func leases(in directory: TemporaryDirectory) -> LeaseStore {
         LeaseStore(directory: directory.url.appendingPathComponent("leases", isDirectory: true), isAlive: { _ in true })
     }
 
     /// Where these walks build, and record that they did — scratch, never the machine's own `~/.simwalk`.
-    private static func builds(in directory: TemporaryDirectory) -> RunnerBuilds {
+    static func builds(in directory: TemporaryDirectory) -> RunnerBuilds {
         RunnerBuilds(directory: directory.url.appendingPathComponent("runner-builds", isDirectory: true))
     }
 
     /// The runner these walks build: a snapshot paired with the binary, as an installed walk resolves one.
-    private static var runner: RunnerSource {
+    static var runner: RunnerSource {
         RunnerSource(
             projectPath: "/Users/x/.simwalk/runner/snapshots/c0ffee/Runner/SimWalkRunner.xcodeproj",
             commit: "c0ffee0000000000000000000000000000000000",
@@ -2011,7 +2037,7 @@ struct WalkCommandTests {
     }
 
     /// A two-screen walkbook on disk — `progress` in light and dark, `browse` in light — returning its path.
-    private static func lightAndDarkWalkbook(in directory: TemporaryDirectory, setup: Bool = false) throws -> String {
+    static func lightAndDarkWalkbook(in directory: TemporaryDirectory, setup: Bool = false) throws -> String {
         let url = directory.url.appendingPathComponent("book.json")
         let json = #"{"name":"probe","appBundleID":"com.example.probe","# + (setup ? Self.setupJSON : "") + #""screens":[{"id":"progress","route":[{"tab":{"label":"Progress"}}],"states":[{"theme":"light"},{"theme":"dark"}]},{"id":"browse","route":[{"tab":{"label":"Browse"}}],"states":[{"theme":"light"}]}]}"#
         try Data(json.utf8).write(to: url)
@@ -2019,7 +2045,7 @@ struct WalkCommandTests {
     }
 
     /// The first pass on a device that reported `dark` and drew light: `progress` kept its light capture and refused its dark one, `browse` captured.
-    private static func refusingDark(in directory: TemporaryDirectory) throws -> CaptureBundle {
+    static func refusingDark(in directory: TemporaryDirectory) throws -> CaptureBundle {
         try CaptureBundleFixture.writeWalk(in: directory, screens: [
             progressScreen(refusingDark: true),
             CaptureBundleFixture.ScreenSpec(id: "browse", captures: [capture("browse", .light)]),
@@ -2049,7 +2075,7 @@ struct WalkCommandTests {
     }
 
     /// The second pass, over `progress` alone — both states captured, or the dark one refused again.
-    private static func progressAgain(in directory: TemporaryDirectory, refusingDark: Bool, nonce: String? = nil) throws -> CaptureBundle {
+    static func progressAgain(in directory: TemporaryDirectory, refusingDark: Bool, nonce: String? = nil) throws -> CaptureBundle {
         try CaptureBundleFixture.writeWalk(in: directory, screens: [progressScreen(refusingDark: refusingDark)], nonce: nonce)
     }
 
@@ -2079,7 +2105,7 @@ struct WalkCommandTests {
     }
 
     /// An installed app as far as `AppBuildIdentity` is concerned: an `Info.plist` naming an executable that is there.
-    private static func fakeApp(in directory: TemporaryDirectory) throws -> String {
+    static func fakeApp(in directory: TemporaryDirectory) throws -> String {
         let url = directory.url.appendingPathComponent("Probe.app")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let plist = try PropertyListSerialization.data(fromPropertyList: ["CFBundleExecutable": "Probe"], format: .xml, options: 0)
