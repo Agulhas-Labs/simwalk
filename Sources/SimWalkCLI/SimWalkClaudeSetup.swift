@@ -16,7 +16,7 @@ struct SimWalkClaudeSetup {
 
     /// The `PreToolUse` hook that tags a command-line call's usage line with its session (SimWalk#14).
     ///
-    /// Only shell calls can start this tool's process, and they and XcodeBuildMCP's tools are the ways to drive a simulator by hand (SimWalk#12), so only they are worth a process launch. Five seconds is generous for a hook that does one small write and short enough that a hung one costs a call five seconds rather than the default minute.
+    /// Only shell calls can start this tool's process, and they and the Xcode build MCP server's tools are the ways to drive a simulator by hand (SimWalk#12), so only they are worth a process launch. Five seconds is generous for a hook that does one small write and short enough that a hung one costs a call five seconds rather than the default minute.
     static let preToolUse = HookRegistration.Event(
         name: "PreToolUse",
         subcommand: hookSubcommand,
@@ -30,7 +30,7 @@ struct SimWalkClaudeSetup {
     /// The hooks SimWalk registers in a Claude Code `settings.json`.
     static let hooks = HookRegistration(tool: .simwalk, events: events)
 
-    /// The user-scope MCP server SimWalk registers, with no npm package: the npm launcher puts the binary on PATH and never registers the server through `npx`.
+    /// The user-scope MCP server SimWalk registers, with no npm package: SimWalk does not ship on npm, so the server is never registered through `npx`.
     ///
     /// Removed at user scope and with no scope, since an earlier `claude mcp add` by hand leaves a scopeless entry that would shadow the new one.
     static let server = ClaudeMcpServer(tool: .simwalk, arguments: ["mcp"], removal: .userScopeAndUnscoped)

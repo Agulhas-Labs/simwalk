@@ -2,7 +2,9 @@
 // Copyright © Agulhas Labs
 //
 
+import CoreGraphics
 import Foundation
+import ImageIO
 import SimWalkCore
 
 /// Writes a real capture bundle to a scratch directory: the manifest, the directories, and both artefacts per state.
@@ -32,8 +34,10 @@ public struct CaptureBundleFixture {
                 screenID: capture.screenID,
                 state: capture.state,
                 axTreeSettled: capture.settled,
-                axTreeHasContent: capture.hasContent
+                axTreeHasContent: capture.hasContent,
+                appleAudit: capture.appleAudit
             )
+            try Self.writeAppleAudit(capture.appleAudit, for: record, in: url)
             try Self.screenshot(width: capture.width, height: capture.height).write(to: CaptureBundleLayout.url(forRelativePath: record.screenshotPath, in: url))
             let bytes = try rawTreeBytes.map { Data($0.utf8) } ?? JSONEncoder().encode(capture.tree)
             try bytes.write(to: CaptureBundleLayout.url(forRelativePath: record.axTreePath, in: url))
@@ -83,8 +87,10 @@ public struct CaptureBundleFixture {
                     axTreeSettled: capture.settled,
                     axTreeHasContent: capture.hasContent,
                     motion: capture.motion,
-                    performance: capture.performance
+                    performance: capture.performance,
+                    appleAudit: capture.appleAudit
                 )
+                try Self.writeAppleAudit(capture.appleAudit, for: record, in: url)
                 try Self.screenshot(width: capture.width, height: capture.height).write(to: CaptureBundleLayout.url(forRelativePath: record.screenshotPath, in: url))
                 try JSONEncoder().encode(capture.tree).write(to: CaptureBundleLayout.url(forRelativePath: record.axTreePath, in: url))
                 captures.append(record)
@@ -113,6 +119,12 @@ public struct CaptureBundleFixture {
         ))
     }
 
+    /// Files a state's Apple audit record where its manifest entry says it is; nothing for a state that was not audited.
+    private static func writeAppleAudit(_ audit: AppleAuditRecord?, for record: CaptureManifest.StateCapture, in bundleURL: URL) throws {
+        guard let audit, let entry = record.appleAudit else { return }
+        try AppleAuditRecord.encoder().encode(audit).write(to: CaptureBundleLayout.url(forRelativePath: entry.path, in: bundleURL))
+    }
+
     /// A screenshot as far as anything that reads one here is concerned: the PNG signature and an IHDR chunk declaring the size.
     ///
     /// The dimensions are what a saving is priced from (`PNGSize` reads the header and nothing else), so a fixture writing three unreadable bytes would have made every bundle in the suite weigh its screenshots at nothing — the half of the measurement that matters most, silently absent from every test of it. No pixel data and no CRC: nothing in this package decodes one, and a file that has to be a *valid* image is a different fixture for a test that does not exist yet.
@@ -124,6 +136,31 @@ public struct CaptureBundleFixture {
         // length it declares rather than four bytes short of it.
         bytes += [0x08, 0x06, 0x00, 0x00, 0x00]
         return Data(bytes)
+    }
+
+    /// Replaces every screenshot in a written bundle with a small blank image that decodes, for a test that runs a rule reading pixels.
+    ///
+    /// `screenshot(width:height:)` writes a header only, which is enough for a size and not for a text recognizer; a blank image reads no text, so a rule over it finds nothing to flag.
+    public static func decodeScreenshots(of bundle: CaptureBundle, width: Int = 32, height: Int = 64) throws {
+        let image = try Self.blankPNG(width: width, height: height)
+        for screen in bundle.manifest.screens {
+            for capture in screen.captures {
+                try image.write(to: bundle.screenshotURL(for: capture))
+            }
+        }
+    }
+
+    private static func blankPNG(width: Int, height: Int) throws -> Data {
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue), let image = context.makeImage() else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let encoded = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(encoded, "public.png" as CFString, 1, nil) else { throw CocoaError(.fileWriteUnknown) }
+        CGImageDestinationAddImage(destination, context.makeImage() ?? image, nil)
+        guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
+        return encoded as Data
     }
 
     /// Four bytes, most significant first — the byte order a PNG header is written in.
@@ -259,6 +296,8 @@ public extension CaptureBundleFixture {
         public let motion: CaptureManifest.Motion?
         /// The capture's performance record, for a device walk that measured; `nil` as one that did not.
         public let performance: CaptureManifest.Performance?
+        /// Apple's audit record for the state, filed as `apple-audit.json`; `nil` as a walk that did not audit.
+        public let appleAudit: AppleAuditRecord?
 
         public init(
             screenID: String,
@@ -269,8 +308,10 @@ public extension CaptureBundleFixture {
             width: Int = 1206,
             height: Int = 2622,
             motion: CaptureManifest.Motion? = nil,
-            performance: CaptureManifest.Performance? = nil
+            performance: CaptureManifest.Performance? = nil,
+            appleAudit: AppleAuditRecord? = nil
         ) {
+            self.appleAudit = appleAudit
             self.motion = motion
             self.performance = performance
             self.screenID = screenID

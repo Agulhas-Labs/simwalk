@@ -6,7 +6,7 @@ import Foundation
 
 /// Answers a walk handle from the progress files alone, for a walk this server did not run.
 ///
-/// The precedence table, rows 1–11, is in `Docs/Reference.md` ("Bounded walks"); nothing here writes a file. Only row 7 waits: a walk still running is re-read once a second up to the budget, each read re-applying rows 2–11, and the `running` line is the answer at the budget. The wait suspends on the injected `clock` and `sleep`, so a test never sleeps.
+/// The precedence table, rows 1–12, is in `Docs/Reference.md` ("Bounded walks"); nothing here writes a file. Only row 7 waits: a walk still running is re-read once a second up to the budget, each read re-applying rows 2–12, and the `running` line is the answer at the budget. The wait suspends on the injected `clock` and `sleep`, so a test never sleeps.
 public struct WalkStatusReader: Sendable {
     /// The usage log's directory; the files are under `progress/` in it (``ProgressLocation``).
     public let directory: URL
@@ -77,7 +77,7 @@ private extension WalkStatusReader {
         case running(WalkProgress)
     }
 
-    /// Rows 2–11, once.
+    /// Rows 2–12, once.
     func evaluate(_ handle: WalkHandle) -> Evaluation {
         let url = ProgressLocation.progressDirectory(in: directory).appendingPathComponent(handle.stem + ".json")
         guard let data = try? Data(contentsOf: url) else {
@@ -118,7 +118,7 @@ private extension WalkStatusReader {
         return nil
     }
 
-    /// Rows 8–11: the walk is over.
+    /// Rows 8–12: the walk is over.
     func ended(_ handle: WalkHandle, _ progress: WalkProgress) -> WalkStatus {
         if let path = progress.resultPath {
             return endedAnswer(handle, path: path)
@@ -128,6 +128,9 @@ private extension WalkStatusReader {
         }
         if progress.tool == "walk --dry-run" {
             return WalkStatus(text: AnswerVerdict.unqualified("the dry run \(handle.text) finished; a dry run keeps no result file").line, isError: false)
+        }
+        if progress.device?.physical == true {
+            return WalkStatus(text: AnswerVerdict.unqualified("the walk \(handle.text) on a physical device finished; a device walk keeps no result file").line, isError: false)
         }
         return Self.refusal("the walk \(handle.text) ended but its result file was not written")
     }

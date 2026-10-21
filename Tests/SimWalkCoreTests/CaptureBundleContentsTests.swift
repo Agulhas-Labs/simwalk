@@ -26,6 +26,34 @@ struct CaptureBundleContentsTests {
         #expect(contents.totalBytes() > screens[0].bytes)
     }
 
+    @Test
+    func anAuditRecordIsMeasuredAndCountedInTheTotal() throws {
+        var manifest = CaptureBundleTests.manifest()
+        let screen = manifest.screens[0]
+        let audited = CaptureManifest.StateCapture(
+            screenID: screen.id,
+            state: screen.captures[0].state,
+            appleAudit: AppleAuditRecord(milliseconds: 5)
+        )
+        manifest.screens[0] = CaptureManifest.ScreenRecord(
+            id: screen.id,
+            outcome: screen.outcome,
+            routeTaken: screen.routeTaken,
+            captures: [audited] + screen.captures.dropFirst()
+        )
+        let directory = try TemporaryDirectory()
+        let bundle = try CaptureBundleTests.writtenBundle(in: directory, manifest: manifest)
+        let audit = try #require(audited.appleAudit)
+        let withStubRecord = CaptureBundleContents(bundle).totalBytes() // the record is 4 bytes of stub
+        try Data("12345".utf8).write(to: CaptureBundleLayout.url(forRelativePath: audit.path, in: bundle.url))
+
+        let contents = CaptureBundleContents(bundle)
+
+        #expect(contents.screens()[0].artefacts.count == 5)
+        #expect(contents.screens()[0].artefacts.contains { $0.path == audit.path && $0.bytes == 5 })
+        #expect(contents.totalBytes() == withStubRecord + 1)
+    }
+
     /// Presence is guaranteed by `CaptureBundle.read`; size is the claim it cannot make, and a zero-byte screenshot passes every structural check while depicting nothing.
     @Test
     func anArtefactThatIsPresentAndHoldsNothingIsReportedAsEmpty() throws {

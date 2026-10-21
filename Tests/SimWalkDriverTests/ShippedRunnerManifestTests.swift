@@ -122,13 +122,15 @@ struct ShippedRunnerManifestTests {
         }
     }
 
-    /// A line that is not `<64 hex>  <relative path>` — a short hash, an escaped name, an absolute path, a `..` component — refuses.
+    /// A line that is not `<64 hex>  <relative path>` — a short hash, an escaped name, an absolute path, a `..` or `.` component — refuses.
     @Test(arguments: [
         "abc  Package.swift\n",
         "\\\(String(repeating: "a", count: 64))  odd\\nname\n",
         "\(String(repeating: "a", count: 64))  /etc/passwd\n",
         "\(String(repeating: "a", count: 64))  ../outside.swift\n",
         "\(String(repeating: "a", count: 64))  Sources/../../outside.swift\n",
+        "\(String(repeating: "a", count: 64))  ./Package.swift\n",
+        "\(String(repeating: "a", count: 64))  Sources/./Runner.swift\n",
         "\(String(repeating: "a", count: 64)) Package.swift\n",
         "",
     ])
@@ -142,6 +144,72 @@ struct ShippedRunnerManifestTests {
         }
 
         #expect(refusal?.description.contains("RUNNER_FILES line") == true)
+    }
+
+    /// A path listed twice — a second line that could give it another hash — refuses naming the path and the line that repeats it (SimWalk#141 item 3).
+    @Test
+    func aPathListedTwiceRefusesNamingThePathAndTheLine() throws {
+        let directory = try TemporaryDirectory()
+        let fixture = try ShippedTreeFixture(in: directory, commit: Self.commit, stampedFor: Self.binaryHash)
+        let manifest = try String(contentsOf: fixture.tree.appendingPathComponent("RUNNER_FILES"), encoding: .utf8)
+        try fixture.writeStamp("RUNNER_FILES", manifest + "\(String(repeating: "a", count: 64))  Package.swift\n")
+
+        let refusal = #expect(throws: ShippedRunner.Absence.self) {
+            try ShippedRunner.find(besideExecutable: fixture.binary, binaryHash: Self.binaryHash)
+        }
+
+        #expect(refusal?.description.hasSuffix("/RUNNER_FILES lists Package.swift twice (line 4); reinstall the package") == true)
+    }
+
+    /// A tree changed after release, beside a snapshot that already holds the same changed bytes, refuses rather than pairing that snapshot: reuse is judged against the listed hashes, not the tree (SimWalk#141 item 3).
+    @Test
+    func aChangedTreeRefusesEvenWhenASnapshotAlreadyHoldsItsBytes() throws {
+        let directory = try TemporaryDirectory()
+        let fixture = try ShippedTreeFixture(in: directory, commit: Self.commit, stampedFor: Self.binaryHash)
+        let store = RunnerStore(directory: directory.url.appendingPathComponent("runner"))
+        let shipped = try ShippedRunner.find(besideExecutable: fixture.binary, binaryHash: Self.binaryHash)
+        let listed = try #require(shipped.hashes["Package.swift"])
+        try Data("// swapped\n".utf8).write(to: fixture.tree.appendingPathComponent("Package.swift"))
+        let found = ShippedRunner.sha256(of: Data("// swapped\n".utf8))
+        try Self.snapshot(shipped, in: store)
+
+        let refusal = #expect(throws: ShippedRunner.Absence.self) {
+            try store.install(shipped: shipped, binaryHash: Self.binaryHash)
+        }
+
+        #expect(refusal == .fileChanged(root: shipped.root.path, path: "Package.swift", listed: listed, found: found))
+        #expect(store.binding(forBinary: Self.binaryHash) == nil)
+    }
+
+    /// An unchanged tree beside a snapshot that holds its bytes reuses that snapshot rather than copying again: the listed hashes and the snapshot's bytes hash alike.
+    @Test
+    func anUnchangedTreeReusesASnapshotThatHoldsItsBytes() throws {
+        let directory = try TemporaryDirectory()
+        let fixture = try ShippedTreeFixture(in: directory, commit: Self.commit, stampedFor: Self.binaryHash)
+        let store = RunnerStore(directory: directory.url.appendingPathComponent("runner"))
+        let shipped = try ShippedRunner.find(besideExecutable: fixture.binary, binaryHash: Self.binaryHash)
+        let snapshot = try Self.snapshot(shipped, in: store)
+        let before = try FileManager.default.attributesOfItem(atPath: snapshot.path)[.systemFileNumber] as? Int
+
+        let installed = try store.install(shipped: shipped, binaryHash: Self.binaryHash)
+
+        let after = try FileManager.default.attributesOfItem(atPath: snapshot.path)[.systemFileNumber] as? Int
+
+        #expect(installed.outcome == .reusedSnapshot)
+        #expect(before != nil)
+        #expect(after == before)
+    }
+
+    /// Copies the tree's listed files, as they are on disk now, to the snapshot for its commit — what an earlier install of that tree left.
+    @discardableResult
+    private static func snapshot(_ shipped: ShippedRunner, in store: RunnerStore) throws -> URL {
+        let snapshot = store.snapshotsDirectory.appendingPathComponent(shipped.commit, isDirectory: true)
+        for file in shipped.files() {
+            let destination = snapshot.appendingPathComponent(file)
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: shipped.root.appendingPathComponent(file), to: destination)
+        }
+        return snapshot
     }
 
     private static var commit: String {

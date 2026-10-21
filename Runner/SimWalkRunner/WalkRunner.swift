@@ -293,12 +293,15 @@ final class WalkRunner: XCTestCase {
 
         var tree: AXNode?
         var settled: Bool?
+        var systemAlert: LiveScreen.SystemAlert?
         if appState != .notRunning {
             let first = try AXTreeCapture.tree(of: app)
             Thread.sleep(forTimeInterval: StepPerformer.settleInterval)
             let second = try AXTreeCapture.tree(of: app)
             tree = second
             settled = ScreenIdentity.of(first) == ScreenIdentity.of(second)
+            // SpringBoard's alerts are invisible in the app's tree; a SpringBoard that cannot be read says nothing rather than failing the read.
+            systemAlert = (try? AXTreeCapture.tree(of: XCUIApplication(bundleIdentifier: StepPerformer.springboardBundleID))).flatMap(SystemAlertCheck.alert(in:))
         }
         let native = UIScreen.main.nativeBounds
         return LiveScreen(
@@ -310,7 +313,8 @@ final class WalkRunner: XCTestCase {
             appState: appState,
             tree: tree,
             settled: settled,
-            screenPixels: LiveScreen.Pixels(width: Int(native.width), height: Int(native.height))
+            screenPixels: LiveScreen.Pixels(width: Int(native.width), height: Int(native.height)),
+            systemAlert: systemAlert
         )
     }
 
@@ -339,6 +343,8 @@ final class WalkRunner: XCTestCase {
         let budget = SettleWindow.budget(forQuiet: quiet)
         // The screen's own `motion`, or `--motion` for every screen: decided in the core, where a test holds it (SimWalk#67).
         let recordsMotion = MotionOptIn.records(screen, in: ProcessInfo.processInfo.environment)
+        // The walkbook's `appleAudit`, or `--apple-audit`: decided in the core, like motion (E1a).
+        let auditsApple = AppleAuditOptIn.records(walkbook, in: ProcessInfo.processInfo.environment)
 
         for state in screen.states {
             app.terminate()
@@ -403,7 +409,10 @@ final class WalkRunner: XCTestCase {
             do {
                 // What the route did, for the watch's record: `nil` keeps no reads and files no `motion`.
                 let watch = recordsMotion ? MotionWatch(lastStep: followed.resolvedSteps.last, landing: landing) : nil
-                try taken.append(take(state, in: app, quiet: quiet, motion: watch, performance: measured.performance(screenID: screen.id, stateSlug: state.slug)))
+                var read = try take(state, in: app, quiet: quiet, motion: watch, performance: measured.performance(screenID: screen.id, stateSlug: state.slug))
+                // After the capture and never before it: the audit moves the app's scroll position. The next state relaunches the app.
+                read.appleAudit = auditsApple ? Self.appleAudit(of: app) : nil
+                taken.append(read)
             } catch {
                 // Reached and could not be read — a fact about the tool or the device, never about the
                 // app. What was already taken is written and listed, because the bundle states what it
@@ -582,6 +591,57 @@ final class WalkRunner: XCTestCase {
                 boundElements: boundElements
             )
         }
+    }
+
+    /// Apple's accessibility audit of the app as it stands, timed (E1a).
+    ///
+    /// **A call that throws is recorded, not skipped**: the record carries the error and whatever issues were reported before it, so a state that was asked for and could not be audited reads as failed rather than as a state nobody audited.
+    private static func appleAudit(of app: XCUIApplication) -> AppleAuditRecord {
+        // The handler only collects: reading an element's fields there is a live query each, and a query for an element the audit's own scrolling has since dropped records a test failure instead of throwing.
+        var found: [(issue: XCUIAccessibilityAuditIssue, element: XCUIElement?)] = []
+        var failure: String?
+        let start = Date()
+        do {
+            try app.performAccessibilityAudit(for: .all) { issue in
+                found.append((issue, issue.element))
+                return true
+            }
+        } catch {
+            failure = "\(error)"
+        }
+        let milliseconds = Int((Date().timeIntervalSince(start) * 1000).rounded())
+        // One snapshot per element, outside the timed region; one that cannot be taken leaves the issue without an element.
+        let issues = found.map { entry in
+            AppleAuditRecord.Issue(
+                type: auditTypeName(entry.issue.auditType),
+                compactDescription: entry.issue.compactDescription,
+                detailedDescription: entry.issue.detailedDescription,
+                element: entry.element.flatMap { try? $0.snapshot() }.map { snapshot in
+                    let frame = snapshot.frame
+                    return AppleAuditRecord.Element(
+                        type: AXTreeCapture.name(of: snapshot.elementType),
+                        identifier: snapshot.identifier,
+                        label: snapshot.label,
+                        frame: AXNode.Frame(x: frame.origin.x, y: frame.origin.y, width: frame.size.width, height: frame.size.height)
+                    )
+                }
+            )
+        }
+        return AppleAuditRecord(milliseconds: milliseconds, error: failure, issues: issues)
+    }
+
+    /// The stable name of an audit type; a value this list does not know is `unknown(<raw>)` (``AppleAuditRecord/typeName(known:raw:)``).
+    private static func auditTypeName(_ type: XCUIAccessibilityAuditType) -> String {
+        let known: [(XCUIAccessibilityAuditType, String)] = [
+            (.contrast, "contrast"),
+            (.elementDetection, "elementDetection"),
+            (.hitRegion, "hitRegion"),
+            (.sufficientElementDescription, "sufficientElementDescription"),
+            (.dynamicType, "dynamicType"),
+            (.textClipped, "textClipped"),
+            (.trait, "trait"),
+        ]
+        return AppleAuditRecord.typeName(known: known.first { $0.0 == type }?.1, raw: type.rawValue)
     }
 
     /// Reads one state's two artefacts into memory, throwing so the caller can report the honest outcome rather than failing the whole walk.
@@ -895,6 +955,8 @@ extension WalkRunner {
         let motion: CaptureManifest.Motion?
         /// The figures this screen and state's measure run recorded, from launches of their own; `nil` files no `performance` record.
         let performance: CaptureManifest.Performance?
+        /// Apple's accessibility audit of this state, taken after its capture where the walk asked for it; `nil` files no `apple-audit.json`.
+        var appleAudit: AppleAuditRecord?
 
         var screenshot: Data {
             capture.screenshot
@@ -932,7 +994,8 @@ extension WalkRunner {
                 unverifiedAxes: unverifiedAxes,
                 capturedAt: readAt,
                 motion: motion,
-                performance: performance
+                performance: performance,
+                appleAudit: appleAudit
             )
             // Resolved through the layout, never composed here. The runner is the *write* side of the
             // bundle contract, so it is where a second path speller would do the most damage.
@@ -943,6 +1006,9 @@ extension WalkRunner {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             try encoder.encode(tree).write(to: CaptureBundleLayout.url(forRelativePath: capture.axTreePath, in: writer.url))
+            if let appleAudit, let entry = capture.appleAudit {
+                try AppleAuditRecord.encoder().encode(appleAudit).write(to: CaptureBundleLayout.url(forRelativePath: entry.path, in: writer.url))
+            }
             return capture
         }
     }

@@ -302,6 +302,18 @@ struct RunnerProjectTests {
         "Runner/SimWalkRunner.xcodeproj/project.pbxproj"
     }
 
+    /// A packaged binary whose snapshot has gone is told to run `install-hook` again and, failing that, to reinstall the package — not to go back to a checkout it does not have.
+    @Test
+    func aPackagedMissingSnapshotNamesTheShippedTreeAndTheReinstall() {
+        let message = RunnerProjectError.snapshotMissing(path: "/nope", commit: String(repeating: "ab", count: 20), packaged: true).description
+
+        #expect(message.contains("run `simwalk install-hook`"))
+        #expect(message.contains("<prefix>/share/simwalk"))
+        #expect(message.contains("reinstall the package"))
+        #expect(!message.contains("checkout"))
+        #expect(!message.contains("--repoint-runner"))
+    }
+
     /// The binary an install was run from.
     private static var installed: String {
         String(repeating: "1a", count: 32)

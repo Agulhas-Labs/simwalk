@@ -44,7 +44,8 @@ struct BundleAuditTests {
         #expect(text.contains("[smallTarget] clean — 1 control examined across 1 capture"))
         #expect(text.contains("[readingOrder] clean — 1 element examined across 1 capture"))
         #expect(text.contains("[largeTypeOverflow] not applicable — no accessibility type-size state"))
-        #expect(text.contains("by 6 rules, 1 not applicable"))
+        #expect(text.contains("[truncatedText] not applicable — no text recognizer on this face, so the rule did not run"))
+        #expect(text.contains("by 6 rules, 2 not applicable"))
     }
 
     @Test
@@ -198,6 +199,23 @@ struct BundleAuditTests {
     }
 
     @Test
+    func anAnonymousShiftedElementIsNamedWithItsHolderAndNotAsItsOwnLabel() throws {
+        let directory = try TemporaryDirectory()
+        let box = AXNode.Frame(x: 0, y: 0, width: 10, height: 10)
+        let anonymous = CaptureManifest.Motion.Shift(
+            element: CaptureManifest.Motion.Element(type: "Cell", identifier: nil, label: nil, path: [0], within: "Groceries"),
+            before: box,
+            after: box,
+            movedAtMilliseconds: 300,
+            cause: nil
+        )
+        let text = try Self.budgetText(motion: Self.motion(shifts: [anonymous]), budgets: Walkbook.Budgets(layoutShifts: 0), in: directory)
+
+        #expect(text.contains("Cell in 'Groceries' (no cause named)"))
+        #expect(!text.contains("Cell 'Groceries'"))
+    }
+
+    @Test
     func aShiftBudgetOverARecordWithoutShiftsIsUnreachableAndNeverWithin() throws {
         let directory = try TemporaryDirectory()
         let text = try Self.budgetText(motion: Self.motion(shifts: nil), budgets: Walkbook.Budgets(layoutShifts: 0), in: directory)
@@ -237,7 +255,7 @@ struct BundleAuditTests {
         let named = try BundleAuditSummary(BundleAudit(bundle, rules: [.motionBudget]).run(), of: bundle).render()
 
         #expect(everyRule.contains("[motionBudget] not run — no walkbook budgets (pass --walkbook)"))
-        #expect(everyRule.contains("by 6 rules, 1 not applicable"))
+        #expect(everyRule.contains("by 6 rules, 2 not applicable"))
         #expect(named.contains("[motionBudget] not run — no walkbook budgets (pass --walkbook)"))
         #expect(named.contains("by 0 rules"))
     }

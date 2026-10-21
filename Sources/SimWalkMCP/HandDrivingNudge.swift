@@ -8,7 +8,7 @@ import Foundation
 ///
 /// **Going around this tool was silent.** A builder hand-tapped seven screenshots with `xcrun simctl io … screenshot` where one `simwalk walk` of a field walkbook already covering that screen would have captured every screen in every state with a tree each, and the usage log had no line that day to say the tool had been passed over. sift answers the same habit with a refusal that names the index query and lets the identical re-run through; this is that, for a walkbook.
 ///
-/// **Only where a walkbook loads.** A repository with none has nothing better to offer, so the hook is silent there. What counts as driving by hand: `simctl io <device> screenshot` and `simctl ui <device> appearance`, bare or behind `xcrun` (its own flags included), `timeout <duration>`, a loop or conditional's own keyword, or a `bash -c "…"` string; `axe tap`; and XcodeBuildMCP's `screenshot`, `tap`, `swipe`, `touch` and `gesture` tools. `axe describe-ui` is AX probing, which SimWalk#12 names as legitimate — it is never refused. A shell call that also runs this tool is never refused — it is the advice being taken.
+/// **Only where a walkbook loads.** A repository with none has nothing better to offer, so the hook is silent there. What counts as driving by hand: `simctl io <device> screenshot` and `simctl ui <device> appearance`, bare or behind `xcrun` (its own flags included), `timeout <duration>`, a loop or conditional's own keyword, or a `bash -c "…"` string; a third-party simulator CLI's `tap`; and the Xcode build MCP server's `screenshot`, `tap`, `swipe`, `touch` and `gesture` tools. That CLI's UI-describe command is AX probing, which SimWalk#12 names as legitimate — it is never refused. A shell call that also runs this tool is never refused — it is the advice being taken.
 ///
 /// **It never stands in the way twice.** Probing an accessibility tree and a one-off capture are legitimate, so the refusal names the simulator command it is keyed on and says that command goes through when it is run again, alone or beside anything but another simulator command (SimWalk#80), and ``NudgeLedger`` keeps that promise; AX probing is pointed at `simwalk inspect`, which reads the tree without a screenshot. **Nor on a first call** (SimWalk#110): a context's first hand-driving call within the ledger's memory goes through, the next distinct one is refused once, and then the ledger's cap quiets it for a context that has heard it and chosen otherwise. A lone one-off capture was refused on the first try and cost a turn each time; a hand-tapped loop still hears it at its second capture.
 public struct HandDrivingNudge {
@@ -53,7 +53,7 @@ private extension HandDrivingNudge {
         3
     }
 
-    /// The XcodeBuildMCP tools that drive a simulator one gesture or one picture at a time.
+    /// The Xcode build MCP server's tools that drive a simulator one gesture or one picture at a time.
     static var handDrivingTools: Set<String> {
         ["mcp__XcodeBuildMCP__screenshot", "mcp__XcodeBuildMCP__tap", "mcp__XcodeBuildMCP__swipe", "mcp__XcodeBuildMCP__touch", "mcp__XcodeBuildMCP__gesture"]
     }
@@ -68,7 +68,7 @@ private extension HandDrivingNudge {
 
     /// What a refused call is remembered by, or `nil` when `call` does not drive a simulator by hand.
     ///
-    /// A shell call by its simulator commands alone (or, where one still holds an unresolved `$` or backtick, by its whole command line with whitespace collapsed), each from `simctl` or `axe` on, as the shell will split it, and with the `$NAME`s the call itself has set spelled out — so the re-run goes through however it is spelled around them: a different build beside it, or none, a wrapper of `xcrun`, `timeout`, a loop or `bash -c`, other spacing or quoting, the variable or the value it holds (SimWalk#80). The whole command line was the key before, and a re-run that dropped an `ls` from it was refused again. An MCP call by its tool and its input in canonical form.
+    /// A shell call by its simulator commands alone (or, where one still holds an unresolved `$` or backtick, by its whole command line with whitespace collapsed), each from `simctl` or that CLI's name on, as the shell will split it, and with the `$NAME`s the call itself has set spelled out — so the re-run goes through however it is spelled around them: a different build beside it, or none, a wrapper of `xcrun`, `timeout`, a loop or `bash -c`, other spacing or quoting, the variable or the value it holds (SimWalk#80). The whole command line was the key before, and a re-run that dropped an `ls` from it was refused again. An MCP call by its tool and its input in canonical form.
     static func handDriving(_ call: PreToolUseHook.Call, payload: Data) -> Refused? {
         if handDrivingTools.contains(call.toolName) {
             let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any]
@@ -91,7 +91,7 @@ private extension HandDrivingNudge {
         return Refused(key: driving.joined(separator: "\n"), shellCommands: driving)
     }
 
-    /// The simulator-driving commands a shell command line runs, in order, each as its words from `simctl` or `axe` on.
+    /// The simulator-driving commands a shell command line runs, in order, each as its words from `simctl` or that CLI's name on.
     ///
     /// A command made only of `NAME=value` words sets those names for the commands after it, as the shell does, and a `$NAME` or `${NAME}` set that way is spelled out; one the line has not set is kept as written, and a command still holding a `$` or backtick after that is not keyed by its words (``handDriving`` falls back to the whole command line, since a loop variable, `$(…)` or `read` stands for what the call does not spell). `variables` carries the names already set into a `bash -c` string.
     static func drivingCommands(in command: String, variables: [String: String]) -> [String] {
@@ -128,9 +128,9 @@ private extension HandDrivingNudge {
         ["-s", "--signal", "-k", "--kill-after"]
     }
 
-    /// The simulator commands one command's words run, each from `simctl` or `axe` on with `variables` spelled out: `simctl io <device> screenshot`, `simctl ui <device> appearance` (bare, behind `xcrun` with or without its own flags, behind `timeout <duration>`, or inside a `bash -c "…"` string read as a command line of its own), or `axe tap`; empty for anything else.
+    /// The simulator commands one command's words run, each from `simctl` or that CLI's name on with `variables` spelled out: `simctl io <device> screenshot`, `simctl ui <device> appearance` (bare, behind `xcrun` with or without its own flags, behind `timeout <duration>`, or inside a `bash -c "…"` string read as a command line of its own), or that CLI's `tap`; empty for anything else.
     ///
-    /// `axe describe-ui` is AX probing, not driving (SimWalk#37), and is never nudged. A `for`/`while`/`if` body's own words leave its keyword (`do`, `then`, `else`, `elif`) attached to the command that follows it, so that is stripped too.
+    /// That CLI's UI-describe command is AX probing, not driving (SimWalk#37), and is never nudged. A `for`/`while`/`if` body's own words leave its keyword (`do`, `then`, `else`, `elif`) attached to the command that follows it, so that is stripped too.
     static func drivingWords(_ words: [String], variables: [String: String]) -> [String] {
         var words = words[...]
         let key = { (words: ArraySlice<String>) in

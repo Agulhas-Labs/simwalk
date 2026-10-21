@@ -83,16 +83,19 @@ public extension WalkProgress {
         }
     }
 
-    /// The simulator the run is on.
+    /// The device the run is on.
     struct Device: Codable, Equatable, Sendable {
         public var name: String
         public var udid: String
         public var osVersion: String
+        /// `true` for a physical iPhone or iPad, which keeps no result file; left out for a simulator, so a file written before this field existed reads as a simulator's (SimWalk#152).
+        public var physical: Bool?
 
-        public init(name: String, udid: String, osVersion: String) {
+        public init(name: String, udid: String, osVersion: String, physical: Bool? = nil) {
             self.name = name
             self.udid = udid
             self.osVersion = osVersion
+            self.physical = physical
         }
 
         /// The device a manifest records, without the locale the progress file has no use for.

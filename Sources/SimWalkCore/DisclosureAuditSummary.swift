@@ -55,6 +55,11 @@ public struct DisclosureAuditSummary {
         sectionLines(controls: Self.distinct(findings.controlRows), uncontrolled: Self.distinct(findings.uncontrolledRows))
     }
 
+    /// The rows the finding objects to, one per distinct row — empty unless the bundle types its disclosure rows inconsistently, which is when `finding()` states a count.
+    var failingRows: [Row] {
+        findings.isInconsistent ? Self.distinct(findings.uncontrolledRows) : []
+    }
+
     /// The clause the verdict carries for this rule, when there is a finding at all.
     func finding() -> String? {
         Self.finding(controls: Self.distinct(findings.controlRows).count, uncontrolled: Self.distinct(findings.uncontrolledRows).count, in: findings)
@@ -135,7 +140,7 @@ public struct DisclosureAuditSummary {
     }
 }
 
-private extension DisclosureAuditSummary {
+extension DisclosureAuditSummary {
     /// What makes two captures of a row the same row.
     struct Key: Hashable {
         let screenID: String

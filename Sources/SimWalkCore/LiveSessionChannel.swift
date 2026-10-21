@@ -87,8 +87,12 @@ public struct LiveSessionChannel: Sendable {
     }
 
     /// ``route()`` with the request each step answered, from request `first` on — what `session save --since` slices.
+    ///
+    /// **A `relaunch` starts the route over**: it puts the app back at launch, so only steps after the last answered `relaunch` belong to it.
     public func landedSteps(since first: Int = 1) throws -> [LandedStep] {
-        try layout.requestNumbers().filter { $0 >= first }.compactMap { number in
+        let numbers = layout.requestNumbers()
+        let afterRelaunch = try numbers.last { try Self.read(LiveSessionResponse.self, at: layout.response($0))?.action == .relaunch }.map { $0 + 1 } ?? 1
+        return try numbers.filter { $0 >= max(first, afterRelaunch) }.compactMap { number in
             try Self.read(LiveSessionResponse.self, at: layout.response(number))?.step?.landed.map { LandedStep(request: number, step: $0) }
         }
     }

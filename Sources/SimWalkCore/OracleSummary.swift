@@ -62,26 +62,26 @@ public struct OracleSummary {
         return AnswerVerdict.reporting(qualifications: qualifications, detail: "\(counts.matched) of \(checks.count + uncapturedStates + uncaptured) figure checks matched")
     }
 
-    /// One line per figure per walkbook state that a screen with captures holds no capture of — refused by the walk, or not in the bundle at all.
+    /// One entry per figure per walkbook state that a screen with captures holds no capture of — refused by the walk, or not in the bundle at all.
     ///
-    /// Matched by slug, a state's only identity on disk. A screen with no captures at all is `uncapturedLines`' instead, one line per figure rather than one per state.
-    private var uncapturedStateLines: [String] {
+    /// Matched by slug, a state's only identity on disk. A screen with no captures at all is `uncapturedScreenFigures`' instead, one entry per figure rather than one per state.
+    var uncapturedStateFigures: [Unchecked] {
         let held = Dictionary(bundle.manifest.screens.map { ($0.id, $0) }) { first, _ in first }
-        return walkbook.screens.flatMap { screen -> [String] in
+        return walkbook.screens.flatMap { screen -> [Unchecked] in
             guard let record = held[screen.id], !record.captures.isEmpty else { return [] }
             let captured = Set(record.captures.map(\.state.slug))
             let refused = Set((record.refusedStates ?? []).map(\.slug))
             return screen.states.filter { !captured.contains($0.slug) }.flatMap { state in
                 let why = refused.contains(state.slug) ? "refused, state not applied" : "not in the bundle"
-                return (screen.figures ?? []).map { "\(screen.id)/\(state.slug) \($0.id): state not captured (\(why))" }
+                return (screen.figures ?? []).map { Unchecked(screenID: screen.id, stateSlug: state.slug, figureID: $0.id, reason: "state not captured (\(why))") }
             }
         }
     }
 
-    /// One line per figure of a screen the bundle holds no capture of, or does not hold at all.
-    private var uncapturedLines: [String] {
+    /// One entry per figure of a screen the bundle holds no capture of, or does not hold at all.
+    var uncapturedScreenFigures: [Unchecked] {
         let held = Dictionary(bundle.manifest.screens.map { ($0.id, $0) }) { first, _ in first }
-        return walkbook.screens.flatMap { screen -> [String] in
+        return walkbook.screens.flatMap { screen -> [Unchecked] in
             let figures = screen.figures ?? []
             let why: String
             if let record = held[screen.id] {
@@ -90,7 +90,36 @@ public struct OracleSummary {
             } else {
                 why = "not in the bundle"
             }
-            return figures.map { "\(screen.id) \($0.id): screen not captured (\(why))" }
+            return figures.map { Unchecked(screenID: screen.id, stateSlug: nil, figureID: $0.id, reason: "screen not captured (\(why))") }
+        }
+    }
+
+    private var uncapturedStateLines: [String] {
+        uncapturedStateFigures.map(\.line)
+    }
+
+    private var uncapturedLines: [String] {
+        uncapturedScreenFigures.map(\.line)
+    }
+
+    /// The checks' own accessors for a structured report.
+    var allChecks: [FigureCheck] {
+        checks
+    }
+}
+
+extension OracleSummary {
+    /// One figure no check was made of, and why: the line the answer prints, and the pieces a structured report names it by.
+    struct Unchecked {
+        let screenID: String
+        /// The state's slug, or `nil` for a figure of a screen with no capture at all.
+        let stateSlug: String?
+        let figureID: String
+        /// What the line says after the colon: `state not captured (refused, state not applied)`.
+        let reason: String
+
+        var line: String {
+            "\(screenID)\(stateSlug.map { "/\($0)" } ?? "") \(figureID): \(reason)"
         }
     }
 }

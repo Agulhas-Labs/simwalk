@@ -100,7 +100,9 @@ struct WalkCancellationTests {
             let signals = TerminationSignals(cancelling: cancellation)
             WalkCancellationTests.say(TerminationSignals.isIgnored(SIGINT) ? "still ignored" : "taken over")
 
+            // SIGINT first and given time to be (not) handled, so the output cannot depend on which source dispatch serves first.
             kill(getpid(), SIGINT)
+            try? await Task.sleep(for: .milliseconds(200))
             kill(getpid(), SIGTERM)
             _ = await WalkCancellationTests.poll { false }
             withExtendedLifetime(signals) {}

@@ -21,7 +21,7 @@ public struct BundleAuditScope {
         var found: [Capture] = []
         for screen in bundle.manifest.screens where !Self.isWrongScreen(screen) {
             for capture in screen.captures {
-                try found.append(Capture(screenID: screen.id, stateSlug: capture.state.slug, tree: bundle.axTree(for: capture)))
+                try found.append(Capture(screenID: screen.id, stateSlug: capture.state.slug, tree: bundle.axTree(for: capture), screenshotURL: bundle.screenshotURL(for: capture)))
             }
         }
         return found
@@ -76,16 +76,18 @@ public struct BundleAuditScope {
 }
 
 public extension BundleAuditScope {
-    /// One readable capture: where it came from and the tree it recorded.
+    /// One readable capture: where it came from, the tree it recorded, and where its screenshot is, for a rule that needs pixels.
     struct Capture: Sendable {
         public let screenID: String
         public let stateSlug: String
         public let tree: AXNode
+        public let screenshotURL: URL?
 
-        public init(screenID: String, stateSlug: String, tree: AXNode) {
+        public init(screenID: String, stateSlug: String, tree: AXNode, screenshotURL: URL? = nil) {
             self.screenID = screenID
             self.stateSlug = stateSlug
             self.tree = tree
+            self.screenshotURL = screenshotURL
         }
     }
 

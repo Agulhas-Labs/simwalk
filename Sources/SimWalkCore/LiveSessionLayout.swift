@@ -45,6 +45,11 @@ public struct LiveSessionLayout: Equatable, Sendable {
         directory.appendingPathComponent("accessibility.json")
     }
 
+    /// Written by `end` when it kept the session because another holder had its device, naming that holder, so the `end` that later makes the handback says it is completing a deferred one (SimWalk#128).
+    public var deferredHandback: URL {
+        directory.appendingPathComponent("handback-deferred.json")
+    }
+
     /// Where a device's runner learns the address, port and token it listens with (``DeviceSessionBind``), copied by the host into the runner's container, whose directory this layout then names.
     public var bind: URL {
         directory.appendingPathComponent("bind.json")

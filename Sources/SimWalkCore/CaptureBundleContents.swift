@@ -22,10 +22,9 @@ public struct CaptureBundleContents {
     public func screens() -> [ScreenContents] {
         bundle.manifest.screens.map { screen in
             let artefacts = screen.captures.flatMap { capture in
-                [
-                    Artefact(path: capture.screenshotPath, bytes: size(ofRelativePath: capture.screenshotPath)),
-                    Artefact(path: capture.axTreePath, bytes: size(ofRelativePath: capture.axTreePath)),
-                ]
+                ([capture.screenshotPath, capture.axTreePath] + [capture.appleAudit?.path].compactMap(\.self)).map { path in
+                    Artefact(path: path, bytes: size(ofRelativePath: path))
+                }
             }
             return ScreenContents(id: screen.id, captureCount: screen.captures.count, artefacts: artefacts)
         }

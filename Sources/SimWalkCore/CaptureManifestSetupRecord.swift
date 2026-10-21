@@ -22,6 +22,11 @@ public extension CaptureManifest {
         /// What an earlier walk left on the device and never handed back, as this walk settled it before its own setup (SimWalk#72) — `nil` when there was none, so a record without one is byte-for-byte what it was before the field existed.
         public var leftover: [String]?
 
+        /// How every record of Increase Contrast begins, written by the setups and read by `bundle labels`: one spelling, so rewording a record cannot turn its evidence into a gap.
+        public static var increaseContrastPrefix: String {
+            "Increase Contrast enabled"
+        }
+
         public init(made: [String], statusBarNotReapplied: String? = nil, handedBack: [String], unconfirmed: [String] = [], notHandedBack: [String], leftover: [String] = []) {
             self.leftover = leftover.isEmpty ? nil : leftover
             self.made = made

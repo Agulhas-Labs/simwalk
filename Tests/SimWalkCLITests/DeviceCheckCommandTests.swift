@@ -27,12 +27,16 @@ struct DeviceCheckCommandTests {
         #expect(answer.residue.last == "a walk may stop on a prompt on the device asking for its passcode to allow UI automation: keep it unlocked and answer the prompt when the walk starts (SimWalk#124)")
     }
 
-    /// The UDID is passed once, in one of its two forms: neither and both are refused at parse (SimWalk#129).
+    /// The UDID is passed once, in one of its two forms: neither and both are refused at parse, each in its own words (SimWalk#129).
     @Test(arguments: [
-        ["--team", "TEAM"],
-        [DeviceWalkCommandTests.udid, "--udid", DeviceWalkCommandTests.udid],
+        (["--team", "TEAM"], "pass the UDID, positionally (`device check <udid>`) or with --udid <udid>"),
+        ([DeviceWalkCommandTests.udid, "--udid", DeviceWalkCommandTests.udid], "pass the UDID once, positionally or with --udid, not both"),
     ])
-    func aMissingOrDoubledUDIDIsRefused(arguments: [String]) {
-        #expect(throws: (any Error).self) { try DeviceCheckCommand.parse(arguments) }
+    func aMissingOrDoubledUDIDIsRefused(arguments: [String], message: String) {
+        #expect {
+            try DeviceCheckCommand.parse(arguments)
+        } throws: { error in
+            DeviceCheckCommand.message(for: error) == message
+        }
     }
 }

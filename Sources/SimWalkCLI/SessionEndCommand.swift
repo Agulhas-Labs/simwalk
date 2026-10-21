@@ -43,6 +43,8 @@ struct SessionEndCommand: ParsableCommand {
         let report = LiveSessionStop(record: record, store: store, processes: processes, isDeviceBusy: { now in
             // Another holder's walk or start is on the device; this session's own record is not another holder.
             LiveSessionAccessibilityHandback.isHeldByAnother(udid: record.udid, session: (record.id, record.leaseToken), store: store, processes: processes, leases: leases, now: now)
+        }, holder: { now in
+            LiveSessionStop.Holder.on(udid: record.udid, session: (record.id, record.leaseToken), store: store, processes: processes, leases: leases, now: now)
         })
         .perform(run: { try shell.run($0, $1) }, pause: pause, now: now)
         return Answer(

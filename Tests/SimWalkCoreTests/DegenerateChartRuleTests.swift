@@ -101,6 +101,69 @@ struct DegenerateChartRuleTests {
         #expect(DegenerateChartRule.axisRows(in: section).isEmpty)
     }
 
+    /// The demo app's account screen in light (2026-10-20): a settings-style `List` of five cells, each a title on the leading edge and its value on the trailing one, 52 pt apart.
+    ///
+    /// `Plan … Family, 5 members` and `Backups … Daily at 02:00` span the section, sit apart and stand 32 pt under the row above, as an axis does under a collapsed plot; each is the whole text of its cell, which a chart's ticks never are.
+    @Test
+    func aSettingsListRowIsNotAnAxis() {
+        let rows: [(title: (label: String, width: Double), value: (label: String, x: Double))] = [
+            (("Storage", 60), ("12.4 GB of 50 GB", 227)),
+            (("Notifications", 96), ("On, with previews", 223)),
+            (("Language", 75.3), ("English (United Kingdom)", 164)),
+            (("Plan", 33), ("Family, 5 members", 215.7)),
+            (("Backups", 65.7), ("Daily at 02:00", 252)),
+        ]
+        let cells = rows.enumerated().map { index, row in
+            let top = 153 + 52 * Double(index)
+            return AXNode(type: "Cell", frame: AXNode.Frame(x: 16, y: top, width: 358, height: 52), children: [
+                AXNode(type: "Other", frame: AXNode.Frame(x: 16, y: top, width: 358, height: 52), children: [
+                    AXNode(
+                        type: "StaticText",
+                        frame: AXNode.Frame(x: 32, y: top + 15.8, width: row.title.width, height: 20.3),
+                        label: row.title.label,
+                        identifier: "row-title-\(index)"
+                    ),
+                    AXNode(
+                        type: "StaticText",
+                        frame: AXNode.Frame(x: row.value.x, y: top + 15.8, width: 358 - row.value.x, height: 20.3),
+                        label: row.value.label
+                    ),
+                ]),
+            ])
+        }
+        let screen = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 390, height: 844), label: "Demo", children: [
+            AXNode(type: "CollectionView", frame: AXNode.Frame(x: 0, y: 0, width: 390, height: 844), identifier: "account-list", children: cells),
+        ])
+        let capture = SegmentedCapture(tree: screen, screenshotPath: "screens/account/light/screen.png", segmenter: AXSegmenter())
+        let list = capture.contentSections
+
+        #expect(list.map(\.key) == ["row-title-0"])
+        #expect(list.flatMap(DegenerateChartRule.axisRows(in:)).isEmpty)
+        #expect(DegenerateChartRule().flags(reference: capture, run: capture).isEmpty)
+    }
+
+    /// The known gap, kept: a chart alone in a list cell, titled outside it, reads as a list row and is not checked.
+    ///
+    /// The Boat speed card's collapsed chart, flagged as it is, raises nothing once its axis row is the whole text of a cell and its title sits outside. No measured chart sits in a cell; if one does, this changes on purpose.
+    @Test
+    func knownGapAChartAloneInAListCellReadsAsAListRow() throws {
+        let capture = try Self.capture("segmenter-passage-detail")
+        var inCell = capture
+        let index = try #require(inCell.sections.firstIndex { $0.key == "Boat speed" })
+        let section = inCell.sections[index]
+        let axis = section.textRuns.filter { ["depart", "arrive"].contains($0.shape) }
+        let top = try #require(axis.map(\.frame.minY).min())
+        let bottom = try #require(axis.map(\.frame.maxY).max())
+        let cell = AXNode.Frame(x: section.frame.x, y: top, width: section.frame.width, height: bottom - top)
+        for run in inCell.sections[index].textRuns.indices where ["depart", "arrive"].contains(inCell.sections[index].textRuns[run].shape) {
+            inCell.sections[index].textRuns[run].cell = cell
+        }
+
+        #expect(axis.count == 2)
+        #expect(DegenerateChartRule().flags(reference: capture, run: capture).map(\.key) == ["Boat speed"])
+        #expect(DegenerateChartRule().flags(reference: inCell, run: inCell).isEmpty)
+    }
+
     /// A content section holding `runs` in order, framed by their union.
     private static func section(_ runs: [(shape: String, frame: AXNode.Frame)]) -> ScreenSection {
         let minX = runs.map(\.frame.minX).min() ?? 0

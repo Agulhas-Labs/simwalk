@@ -79,6 +79,11 @@ public struct CaptureBundleLayout {
         "ax-tree.json"
     }
 
+    /// Apple's accessibility audit of one state, inside its directory — present only for a state a walk audited (`AppleAuditOptIn`).
+    public static var appleAuditFileName: String {
+        "apple-audit.json"
+    }
+
     private static var screensDirectoryName: String {
         "screens"
     }
@@ -105,6 +110,17 @@ public struct CaptureBundleLayout {
 
     private static var setAsideDirectoryName: String {
         "first-attempt"
+    }
+
+    /// Where a `walk --parallel` shard's own bundle is written: inside the merged bundle's directory, named as a bundle so the shard's runner writer takes it (SimWalk#163).
+    ///
+    /// **Inside, so every move the merge makes is a rename** — the same volume as the bundle it fills. **A reader never sees it**: the merged manifest names nothing here, and the merge removes the directory once it holds nothing but empty directories.
+    public static func shardScratchDirectory(in bundleURL: URL, index: Int) -> URL {
+        bundleURL.appendingPathComponent("\(shardScratchDirectoryPrefix)\(index)").appendingPathExtension(directoryExtension)
+    }
+
+    private static var shardScratchDirectoryPrefix: String {
+        "simwalk-shard-"
     }
 
     /// Reduces one authored component to lowercase alphanumerics and underscores.
@@ -144,6 +160,11 @@ public struct CaptureBundleLayout {
     /// The bundle-relative path of one state's accessibility tree.
     public static func axTreePath(screenID: String, stateSlug: String) -> String {
         "\(stateDirectory(screenID: screenID, stateSlug: stateSlug))/\(axTreeFileName)"
+    }
+
+    /// The bundle-relative path of one state's Apple accessibility audit record.
+    public static func appleAuditPath(screenID: String, stateSlug: String) -> String {
+        "\(stateDirectory(screenID: screenID, stateSlug: stateSlug))/\(appleAuditFileName)"
     }
 
     /// Resolves a bundle-relative path against the bundle's own directory.

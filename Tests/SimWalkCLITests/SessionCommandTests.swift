@@ -217,7 +217,9 @@ struct SessionCommandTests {
         let ended = try SessionEndCommand.parse(["dead"]).perform(store: fixture.store, processes: fixture.processes, shell: Shell(script: fixture.script.run), pause: fixture.pause, now: fixture.now)
 
         #expect(ended.residue.first == "the runner (pid 11) had already exited")
-        #expect(fixture.store.all().map(\.id) == ["alive"])
+        // `alive`'s runner holds UDID-1, so the handback is deferred and `dead` kept for the `end` that makes it (SimWalk#128).
+        #expect(ended.residue.contains { $0.hasPrefix("did not hand UDID-1 back: another session's runner holds it") })
+        #expect(fixture.store.all().map(\.id) == ["alive", "dead"])
     }
 
     /// A session whose runner stopped without `end` — the idle timeout here — has its device's accessibility switched back on by the next `list`, once, and every `list` says so: the XCUITest teardown switched it off after the runner's last line, when nothing on the host was running.
@@ -371,6 +373,27 @@ struct SessionCommandTests {
         #expect(fixture.store.all().isEmpty)
     }
 
+    /// SimWalk#159: the appearance line of a start that could not put the device back names the session, not a walk.
+    @Test
+    func startThatCannotPutTheAppearanceBackNamesTheSession() throws {
+        let fixture = try Fixture(appearance: "light")
+        let write = DeviceAppearance.setArguments(.light, udid: "UDID-1")
+        fixture.processes.spawnError = RunnerError.walkFailed(reason: "could not start xcrun")
+
+        let error = try #require(throws: LiveSessionHostError.self) {
+            try fixture.start(["--device", "UDID-1", "--app", "com.example.live", "--state", #"{"theme":"dark"}"#], refusing: write)
+        }
+
+        guard case let .neverReady(_, lines) = error else {
+            Issue.record("expected neverReady, got \(error)")
+            return
+        }
+        let line = try #require(lines.first { $0.hasPrefix("⚠ appearance:") })
+
+        #expect(line.contains("UDID-1 was light before this session started and could not be put back"))
+        #expect(!line.contains("walk"))
+    }
+
     /// A runner that never becomes ready after a settle is refused with the settle's reboot named, since its launch of the app came straight after it (SimWalk#69), and the stop puts the found appearance back.
     @Test
     func startWhoseRunnerNeverBecomesReadyAfterASettleNamesTheReboot() throws {
@@ -439,6 +462,25 @@ struct SessionCommandTests {
         #expect(try fixture.script.calls.count == #require(plantedAt))
     }
 
+    /// A never-ready start under its own lease hands the device back: the lease it holds is its own, not another holder's (SimWalk#128).
+    @Test
+    func neverReadyStartUnderItsOwnLeaseStillHandsTheDeviceBack() throws {
+        let fixture = try Fixture()
+        _ = try fixture.leases.acquire(udid: "UDID-1", ttl: 1800, holderPID: getpid(), now: Date(timeIntervalSince1970: 0), token: "LEASE-1")
+
+        let error = try #require(throws: LiveSessionHostError.self) {
+            try fixture.start(["--lease", "LEASE-1", "--app", "com.example.live"])
+        }
+
+        guard case let .neverReady(_, lines) = error else {
+            Issue.record("expected neverReady, got \(error)")
+            return
+        }
+
+        #expect(!lines.contains { $0.hasPrefix("did not hand UDID-1 back") })
+        #expect(fixture.script.calls.contains { $0.arguments == AccessibilityPreference.enableArguments(udid: "UDID-1")[0] })
+    }
+
     /// A start whose record cannot be written still hands the device back: its own claim, still held, is not another holder (SimWalk#128).
     @Test
     func neverReadyStartWhoseRecordCannotBeWrittenStillHandsTheDeviceBack() throws {
@@ -461,6 +503,34 @@ struct SessionCommandTests {
         #expect(!reason.hasPrefix("no ready.json"))
         #expect(!lines.contains { $0.hasPrefix("did not hand UDID-1 back") })
         #expect(!fixture.script.calls.isEmpty)
+    }
+
+    /// A never-ready start on a device a walk holds, whose record could not be written, removes its directory rather than keeping it with a deferral: no `session end` could find a session without its record (SimWalk#128 review).
+    ///
+    /// The holder is named as `end` names it.
+    @Test
+    func neverReadyStartWithoutARecordOnABusyDeviceLeavesNoDirectory() throws {
+        let fixture = try Fixture(appearance: "dark")
+        fixture.processes.alive.insert(getpid())
+        fixture.processes.alive.insert(9999)
+        fixture.processes.onSpawn = { _ in
+            try? FileManager.default.createDirectory(at: fixture.store.layout(id: "s1").record, withIntermediateDirectories: true)
+            _ = try? WalkClaim.take(udid: "UDID-1", in: fixture.leases, holder: 9999, isAlive: fixture.processes.isAlive)
+        }
+
+        let error = try #require(throws: LiveSessionHostError.self) {
+            try fixture.start(["--device", "UDID-1", "--app", "com.example.live", "--state", #"{"theme":"dark"}"#])
+        }
+
+        guard case let .neverReady(_, lines) = error else {
+            Issue.record("expected neverReady, got \(error)")
+            return
+        }
+
+        #expect(lines.contains { $0.hasPrefix("did not hand UDID-1 back: a walk holds it") })
+        #expect(!lines.contains { $0.contains("the handback is deferred") })
+        #expect(lines.contains { $0.hasPrefix("removed ") && $0.hasSuffix(": no session record was written, so no later `end` could find it to complete the handback") })
+        #expect(!FileManager.default.fileExists(atPath: fixture.store.layout(id: "s1").directory.path))
     }
 
     /// `end` puts back the appearance `start` found, whatever the session left the device in.
@@ -567,9 +637,15 @@ extension SessionCommandTests {
             try store.write(LiveSessionRecord(id: id, pid: pid, udid: "UDID-1", app: "com.example.live", startedAt: Date(timeIntervalSince1970: 0), foundAppearance: .light))
         }
 
-        func start(_ arguments: [String], animationsLibrary: WalkCommand.AnimationsLibrary? = nil, note: (String) -> Void = { _ in }) throws -> Answer {
+        /// `refusing` is a `simctl` command the device refuses once the settle has rebooted it, as a device that will not take the put-back does.
+        func start(_ arguments: [String], refusing: [String]? = nil, animationsLibrary: WalkCommand.AnimationsLibrary? = nil, note: (String) -> Void = { _ in }) throws -> Answer {
             try SessionStartCommand.parse(arguments).perform(
-                shell: Shell(script: script.run),
+                shell: Shell(script: { [script] executable, arguments, environment in
+                    if let refusing, arguments == refusing, script.calls.contains(where: { $0.arguments.starts(with: ["simctl", "shutdown"]) }) {
+                        return Shell.Result(status: 1, standardOutput: "", standardError: "refused\n")
+                    }
+                    return try script.run(executable, arguments, environment)
+                }),
                 pause: pause,
                 now: now,
                 id: { "s1" },

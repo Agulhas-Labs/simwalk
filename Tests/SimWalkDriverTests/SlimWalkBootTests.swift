@@ -196,6 +196,35 @@ struct SlimWalkBootTests {
         #expect(fixture.calls.isEmpty)
     }
 
+    /// A device's override file that is there and cannot be parsed is a named refusal that says which file and how to clear it, not the property-list error.
+    @Test(arguments: [(createdByWalk: false, booted: false), (createdByWalk: true, booted: true)])
+    func aCorruptOverrideFileUnderStockIsANamedRefusal(createdByWalk: Bool, booted: Bool) throws {
+        let fixture = try Fixture()
+        let directory = try fixture.overrides.directory(for: Self.udid)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("disabled.plist")
+        try Data("not a property list".utf8).write(to: file)
+
+        let refusal = try #require(#expect(throws: SlimWalkError.self) {
+            try fixture.provisioning().beforeBoot(Self.simulator(booted: booted), createdByWalk: createdByWalk, stockRequested: true, appPath: nil)
+        })
+
+        guard case let .overrideUnreadable(path, _, created) = refusal else {
+            Issue.record("expected overrideUnreadable, got \(refusal)")
+            return
+        }
+
+        #expect(path == file.path)
+        #expect(refusal.description.contains(file.path))
+        #expect(created == createdByWalk)
+        #expect(refusal.description.contains("remove the file"))
+        #expect(refusal.description.contains("shut the device down and walk again") == createdByWalk)
+        #expect(refusal.description.contains("walk a device SimWalk creates") == !createdByWalk)
+        #expect(refusal.usageFailureKind == .inputRefused)
+        #expect(FileManager.default.fileExists(atPath: file.path))
+        #expect(fixture.calls.isEmpty)
+    }
+
     /// The read-back says slim when every planned label is off on the device.
     @Test
     func aFullReadBackIsSlim() throws {

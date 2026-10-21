@@ -97,6 +97,8 @@ public struct DeviceSettle {
             .settled
         case let .failed(_, reason), let .unconfirmed(_, reason):
             .failed(.putBack(found), reason: reason)
+        case .leftToAnotherHolder:
+            .failed(.putBack(found), reason: "another holder took the device")
         }
     }
 

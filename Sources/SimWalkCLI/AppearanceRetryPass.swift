@@ -301,6 +301,8 @@ extension AppearanceRetryPass {
                 "\(cause); the host could not put \(udid) back to \(found.rawValue) afterwards (\(reason)), and the walk's own handback tries again next"
             case let .unconfirmed(found, reason):
                 "\(cause); the host set \(udid) back to \(found.rawValue) afterwards but nothing confirmed it held (\(reason)), and the walk's own handback checks it next"
+            case let .leftToAnotherHolder(found):
+                "\(cause); the host left \(udid) as another holder has it rather than putting it back to \(found.rawValue), and the walk's own handback tries again next"
             case .unknown:
                 cause
             }

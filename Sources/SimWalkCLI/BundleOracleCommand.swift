@@ -20,6 +20,13 @@ struct BundleOracleCommand: ParsableCommand {
     @Option(name: .long, help: ArgumentHelp("Path to the walkbook carrying `oracle` and each screen's `figures`.", valueName: "walkbook.json"))
     var walkbook: String
 
+    @Option(name: .long, help: JUnitOutput.help)
+    var junit: String?
+
+    func validate() throws {
+        try JUnitOutput.validate(junit)
+    }
+
     func run() throws {
         try run(log: .standard(), emit: StandardStreams.emit, emitError: StandardStreams.emitError, isStdoutPiped: StandardStreams.isStdoutPiped)
     }
@@ -28,11 +35,14 @@ struct BundleOracleCommand: ParsableCommand {
     ///
     /// A failure nothing classified is this command's own code over a bundle and a walkbook it has already read, so it is `tool-error`.
     func run(log: UsageLog, emit: (String) -> Void, emitError: (String) -> Void, isStdoutPiped: () -> Bool = { false }) throws {
-        try TimedCall.run(tool: "bundle oracle", target: bundle, log: log, emit: emit, emitError: emitError, defaultFailureKind: .toolError, isStdoutPiped: isStdoutPiped) { try answer() }
+        let output = JUnitOutput.make(junit, command: "bundle oracle")
+        try TimedCall.run(tool: "bundle oracle", target: bundle, log: log, emit: emit, emitError: emitError, defaultFailureKind: .toolError, isStdoutPiped: isStdoutPiped, junit: output) { try answer(junit: output) }
     }
 
     /// The answer, without the printing — what the MCP face serves, so one verb cannot come to answer differently depending on which face asked.
-    func answer() throws -> Answer {
+    ///
+    /// `junit` is handed the same checks as test cases, for the CLI's `--junit`; the MCP face passes none.
+    func answer(junit: JUnitOutput? = nil) throws -> Answer {
         let opened = try CaptureBundle.read(at: URL(fileURLWithPath: bundle))
         let walkbookURL = URL(fileURLWithPath: walkbook)
         let book = try WalkbookLoader.load(contentsOf: walkbookURL)
@@ -40,6 +50,8 @@ struct BundleOracleCommand: ParsableCommand {
             throw OracleCheckError.noOracle
         }
         let checks = try OracleCheck.checks(of: opened, against: book, oracle: CommandOracle(oracle, walkbookDirectory: walkbookURL.deletingLastPathComponent()))
-        return try OracleSummary(checks, of: opened, against: book).answer()
+        let summary = try OracleSummary(checks, of: opened, against: book)
+        junit?.report = JUnitOracleCases.report(summary)
+        return summary.answer()
     }
 }

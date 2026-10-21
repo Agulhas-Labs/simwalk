@@ -48,6 +48,7 @@ public struct MCPToolInvocation: Equatable, Sendable {
                 + Self.option("--runner-bundle-id", "runnerBundleId", arguments["runnerBundleId"], of: tool)
                 + Self.settle(arguments["settle"], of: tool)
                 + Self.flag("--motion", "motion", arguments["motion"], of: tool)
+                + Self.flag("--apple-audit", "appleAudit", arguments["appleAudit"], of: tool)
                 + Self.flag("--animations", "animations", arguments["animations"], of: tool)
                 + Self.flag("--stock", "stock", arguments["stock"], of: tool)
                 + Self.screenIDs(arguments["screenIDs"], of: tool)

@@ -1,0 +1,118 @@
+name: SimWalk
+description: Walk an iOS app on a simulator, diff it against the base branch's last walk, audit it, and comment the text answers on the pull request.
+author: Agulhas Labs
+branding:
+  icon: smartphone
+  color: blue
+
+inputs:
+  walkbook:
+    description: Path to the walkbook JSON file, relative to the workspace.
+    required: true
+  app-path:
+    description: The simulator .app to install before walking (walk --app-path). Omit when the app is already installed.
+    required: false
+    default: ''
+  build-command:
+    description: A shell command to run before the walk. Point app-path at the .app it produces.
+    required: false
+    default: ''
+  device:
+    description: Simulator name to lease. Default is the newest unleased device on the newest iOS runtime.
+    required: false
+    default: ''
+  reference-artifact:
+    description: Name of the workflow artifact that holds the reference bundle.
+    required: false
+    default: simwalk-reference
+  fail-on:
+    description: "qualified fails the check on a qualified or refused answer; refused fails it on a refused answer only."
+    required: false
+    default: qualified
+  github-token:
+    description: Token for the artifact lookup and the pull request comment. The comment needs pull-requests write.
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install SimWalk and lease a simulator
+      id: device
+      shell: sh
+      env:
+        SIMWALK_DEVICE: ${{ inputs.device }}
+      run: 'sh "$GITHUB_ACTION_PATH/Action/install.sh"'
+
+    - name: Build
+      shell: sh
+      env:
+        SIMWALK_BUILD_COMMAND: ${{ inputs.build-command }}
+      run: 'sh "$GITHUB_ACTION_PATH/Action/build.sh"'
+
+    - name: Find the reference bundle
+      shell: sh
+      env:
+        SIMWALK_OUT: ${{ runner.temp }}/simwalk
+        SIMWALK_REFERENCE_ARTIFACT: ${{ inputs.reference-artifact }}
+        SIMWALK_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: 'sh "$GITHUB_ACTION_PATH/Action/reference.sh"'
+
+    - name: Walk, diff and audit
+      id: walk
+      shell: sh
+      env:
+        SIMWALK_OUT: ${{ runner.temp }}/simwalk
+        SIMWALK_WALKBOOK: ${{ inputs.walkbook }}
+        SIMWALK_APP_PATH: ${{ inputs.app-path }}
+        SIMWALK_LEASE_TOKEN: ${{ steps.device.outputs.token }}
+      run: 'sh "$GITHUB_ACTION_PATH/Action/walk.sh"'
+
+    - name: Release the simulator
+      if: always()
+      shell: sh
+      env:
+        SIMWALK_LEASE_TOKEN: ${{ steps.device.outputs.token }}
+      run: 'sh "$GITHUB_ACTION_PATH/Action/release.sh"'
+
+    - name: Upload the bundle
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: simwalk-bundle
+        path: ${{ runner.temp }}/simwalk/run.simwalk
+        if-no-files-found: ignore
+
+    - name: Upload the crops
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: simwalk-crops
+        path: ${{ runner.temp }}/simwalk/crops
+        if-no-files-found: ignore
+
+    - name: Upload the run as the next reference
+      if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && steps.walk.outputs.bundle == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.reference-artifact }}
+        path: ${{ runner.temp }}/simwalk/run.simwalk
+
+    - name: Comment the answers
+      if: always() && github.event_name == 'pull_request'
+      continue-on-error: true
+      shell: sh
+      env:
+        SIMWALK_OUT: ${{ runner.temp }}/simwalk
+        SIMWALK_PR_NUMBER: ${{ github.event.pull_request.number }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: 'sh "$GITHUB_ACTION_PATH/Action/comment.sh"'
+
+    - name: Set the check
+      if: always()
+      shell: sh
+      env:
+        SIMWALK_OUT: ${{ runner.temp }}/simwalk
+        SIMWALK_FAIL_ON: ${{ inputs.fail-on }}
+      run: 'sh "$GITHUB_ACTION_PATH/Action/verdict.sh"'

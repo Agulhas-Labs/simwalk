@@ -33,6 +33,6 @@ exactly as Sift serves resolved answers instead of raw source.
 - **The model stays the adjudicator.** SimWalk decides what is *there*, never what *matters*.
 - **Non-goals.** Not a golden-image CI gate, not a test framework, not an autonomous bug-finder.
 - **Orchestrates, never re-implements.** Build/boot/install belong to xcodebuild/simctl (or
-  XcodeBuildMCP); SimWalk owns only walk/capture/diff/oracle.
+  the Xcode build MCP server); SimWalk owns only walk/capture/diff/oracle.
 
 Every verb and walkbook key is in [../Docs/Reference.md](../Docs/Reference.md).

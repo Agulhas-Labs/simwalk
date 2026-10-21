@@ -1,0 +1,17 @@
+{
+  "name": "demo-app",
+  "appBundleID": "dev.simwalk.demo",
+  "screens": [
+    {
+      "id": "account",
+      "expect": "account-screen",
+      "route": [{ "scrollTo": { "label": "row-title-0" } }],
+      "states": [
+        { "theme": "light" },
+        { "theme": "dark" },
+        { "theme": "light", "dynamicTypeSize": "UICTContentSizeCategoryAccessibilityXL" },
+        { "theme": "light", "locale": "ar", "layoutDirection": "rtl" }
+      ]
+    }
+  ]
+}

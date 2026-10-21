@@ -168,6 +168,56 @@ struct InspectCommandTests {
         #expect(WalkClaim.walkedDevices(in: leases, isAlive: HolderProcess.isAlive).isEmpty)
     }
 
+    /// A claim that cannot be written is the lease store failing, so the usage log records `tool-error`, not the call site's default `runner-failed` (SimWalk#128).
+    @Test
+    func anInspectWhoseClaimCannotBeWrittenIsLoggedAsAToolError() throws {
+        let directory = try TemporaryDirectory()
+        let leases = Self.leases(in: directory)
+        try FileManager.default.createDirectory(at: leases.directory, withIntermediateDirectories: true)
+        try Data().write(to: leases.directory.appendingPathComponent(".walks"))
+        let log = UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 1_786_867_200) })
+        let script = WalkCommandTests.WalkScript(appPath: directory.url.path, runnerStatus: 0)
+        let command = try InspectCommand.parse(["--device", "UDID-1", "--app", "com.example.live"])
+
+        #expect(throws: ExitCode.self) {
+            try command.run(log: log, emit: { _ in }, emitError: { _ in }, read: {
+                try command.perform(shell: Shell(script: script.run), pause: { _ in }, now: script.now, nonce: { Self.nonce }, runner: { Self.runner }, builds: Self.builds(in: directory), leases: leases, scratch: directory.url)
+            })
+        }
+
+        let entry = try #require(UsageReport.entries(at: log.fileURL).entries.first)
+
+        #expect(entry.kind == .toolError)
+    }
+
+    /// The accessibility line on an inspect names the inspect, not a walk.
+    @Test
+    func theAccessibilityLineOnAnInspectNamesTheInspect() throws {
+        let handback = DeviceHandback(
+            accessibility: AccessibilityPreference.Restoration(udid: "UDID-1", state: .restored),
+            appearance: .restored(.light)
+        )
+
+        let answer = try InspectCommand.outcome(runnerFailure: nil, handback: handback, readingScreen: { Self.screen() }, match: nil)
+
+        #expect(answer.text.contains("this inspect switched it back on"))
+        #expect(!answer.text.contains("this walk"))
+    }
+
+    /// SimWalk#159: the appearance line on an inspect names the inspect too, not a walk.
+    @Test
+    func theAppearanceLineOnAnInspectNamesTheInspect() throws {
+        let handback = DeviceHandback(
+            accessibility: AccessibilityPreference.Restoration(udid: "UDID-1", state: .restored),
+            appearance: .failed(found: .light, reason: "boom")
+        )
+
+        let answer = try InspectCommand.outcome(runnerFailure: nil, handback: handback, readingScreen: { Self.screen() }, match: nil)
+
+        #expect(answer.text.contains("UDID-1 was light before this inspect started and could not be put back"))
+        #expect(!answer.text.contains("before this walk"))
+    }
+
     /// A live read of `screen`, which the scripted runner leaves where the command told it to write.
     private static func inspect(leaving screen: LiveScreen, in directory: TemporaryDirectory) throws -> Inspection {
         let staged = directory.url.appendingPathComponent("staged-live.json")

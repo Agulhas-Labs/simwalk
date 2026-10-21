@@ -11,7 +11,7 @@ import Foundation
 /// **Two calibrations, both from real bundles.**
 /// - **Distinct means a different frame.** Apple's Settings lists its `Dictate` button twice in one hierarchy at the same frame and identifier — one element reached by two paths, not two controls, and the search field's dictation button is not a defect. Controls sharing a label *and* a frame are counted once.
 /// - **Controls inside a `TabBar` or `NavigationBar` are left out.** A tab named `Browse` and a back button named `Browse` on a detail screen are how a navigation stack reads, and a tab bar repeats on every screen by construction; including them fired on every detail screen of a real app's walks. Two same-named buttons in the bar of one screen would be missed, which is the price of not flagging every push.
-public struct DuplicateLabelAudit: LabelAuditRule {
+public struct DuplicateLabelAudit: PerTreeLabelAuditRule {
     public static let name = AuditRuleName.duplicateLabel
     public static var findingNoun: String {
         "label"

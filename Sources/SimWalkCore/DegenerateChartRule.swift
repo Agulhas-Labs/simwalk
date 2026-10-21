@@ -14,7 +14,8 @@ import Foundation
 /// - stands alone: no run of the section within ``pairGap`` directly above or below any of its runs, which is what a stat grid's value over its label does;
 /// - spans at least ``minimumSpan`` of the section's text width, since ticks mark the ends of a plot;
 /// - with three runs or more, is evenly spaced: every step between tick centres within ``spacingTolerance`` of their mean;
-/// - reads as ticks rather than a row of labels: its runs sit apart, every gap between neighbours at least ``tickSeparation`` of their mean width, or every run leads with a number (a time, a count of days) — a stack's `First Second Third`, a row of filter chips, sits packed at its spacing and names things rather than values.
+/// - reads as ticks rather than a row of labels: its runs sit apart, every gap between neighbours at least ``tickSeparation`` of their mean width, or every run leads with a number (a time, a count of days) — a stack's `First Second Third`, a row of filter chips, sits packed at its spacing and names things rather than values;
+/// - is not a list row: its runs are not the whole text of one list cell (``ScreenSection/TextRun/cell``). A settings-style list's row — a title on the leading edge, its value on the trailing one — spans its section, stands apart from the rows above and below, and sits one row pitch under the last, so it passes every test above; but the tree holds each such row as a `Cell` whose text is exactly that line, which a chart's ticks never are: no measured chart sits in a cell at all, and one drawn in a list row would share the cell with its title. A chart alone in a cell, titled outside it, would read as a list row; none has been seen.
 ///
 /// **The plot** is the gap from the nearest run above the axis row that shares its horizontal extent — the chart's heading or summary, never a y-axis label beside the plot — to the axis row's top. It is degenerate below ``plotLines`` times the axis row's own height: no room for two lines of its labels.
 public struct DegenerateChartRule: FormRule {
@@ -97,7 +98,7 @@ public struct DegenerateChartRule: FormRule {
     /// Whether `line` reads as a chart's axis row (see the type's documentation).
     static func isAxis(_ line: [ScreenSection.TextRun], in section: ScreenSection, headingHeight: Double, sectionWidth: Double) -> Bool {
         let span = TextRunLines.span(of: line)
-        guard line.count >= 2,
+        guard line.count >= 2, !isListRow(line, in: section),
               line.allSatisfy({ $0.frame.height <= headingHeight + BoxRule.defaultTolerance }),
               sectionWidth > 0, (span.maxX - span.minX) / sectionWidth >= minimumSpan else { return false }
         let paired = line.contains { tick in
@@ -107,6 +108,12 @@ public struct DegenerateChartRule: FormRule {
             }
         }
         return !paired && isEvenlySpaced(line) && readsAsTicks(line)
+    }
+
+    /// Whether `line` is one list row: every run sits in the same list cell, and nothing else in `section` does.
+    static func isListRow(_ line: [ScreenSection.TextRun], in section: ScreenSection) -> Bool {
+        guard let cell = line.first?.cell, line.allSatisfy({ $0.cell == cell }) else { return false }
+        return section.textRuns.count { $0.cell == cell } == line.count
     }
 
     /// Whether the runs read as a chart's ticks rather than a row of labels: they sit at least ``tickSeparation`` of their mean width apart, or each leads with a number.

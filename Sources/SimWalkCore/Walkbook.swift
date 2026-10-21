@@ -19,20 +19,25 @@ public struct Walkbook: Codable, Equatable, Sendable {
     public var oracle: Oracle?
     /// Device preparation the host makes before the runner starts and hands back after it; `nil` makes none.
     public var setup: Setup?
+    /// `true` records Apple's accessibility audit on every state's capture (E1a); `nil` leaves it to `walk --apple-audit` (`AppleAuditOptIn`).
+    ///
+    /// `false` is the same as absent: it decodes to `nil`, so the walkbook hashes the same either way.
+    public var appleAudit: Bool?
 
-    public init(name: String, appBundleID: String, screens: [Screen], oracle: Oracle? = nil, setup: Setup? = nil) {
+    public init(name: String, appBundleID: String, screens: [Screen], oracle: Oracle? = nil, setup: Setup? = nil, appleAudit: Bool? = nil) {
         self.name = name
         self.appBundleID = appBundleID
         self.screens = screens
         self.oracle = oracle
         self.setup = setup
+        self.appleAudit = appleAudit
     }
 }
 
 extension Walkbook {
     /// A `CodingKey` naming each field by its case rather than a string literal — `DerivedBundlePathRule` flags any literal spelling "screens" outside `CaptureBundleLayout`, and this field name collides with the bundle's own path component of the same word by coincidence, not by relation.
     private enum FieldName: String, CodingKey, CaseIterable {
-        case name, appBundleID, screens, oracle, setup
+        case name, appBundleID, screens, oracle, setup, appleAudit
     }
 
     /// Decodes strictly rather than relying on synthesis (round 2, finding 2): the top-level object gets the same treatment `Screen`, `CaptureState` and `RouteStep` already do, so `{"nam": "…"}` or a stray top-level key is a decode failure instead of a silently ignored field.
@@ -45,6 +50,7 @@ extension Walkbook {
         screens = try StrictKeyDecoding.required([Screen].self, forKey: .screens, in: container, decoder: decoder, placeholder: [])
         oracle = try container.decodeIfPresent(Oracle.self, forKey: .oracle)
         setup = try container.decodeIfPresent(Setup.self, forKey: .setup)
+        appleAudit = try container.decodeIfPresent(Bool.self, forKey: .appleAudit) == true ? true : nil
     }
 }
 

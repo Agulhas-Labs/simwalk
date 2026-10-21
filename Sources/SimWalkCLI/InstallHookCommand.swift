@@ -239,7 +239,7 @@ private extension InstallHookCommand {
                 // Kept, and said on the verdict: the checkout has moved since this binary was built from it, and
                 // pairing the two would put a runner from one commit beside a CLI from another (SimWalk#16).
                 qualifications.append("the runner this binary was installed with was kept, not repointed")
-                return "runner: kept — \(binary) is already paired with runner \(commit), and \(fromShippedTree ? "the shipped runner beside it is" : "the checkout now holds") \(describe(checkoutCommit)); a binary keeps the runner it was installed with. Rebuild and install to pair a new binary, or pass --repoint-runner to replace this one's"
+                return "runner: kept — \(binary) is already paired with runner \(commit), and \(fromShippedTree ? "the shipped runner beside it is" : "the checkout now holds") \(describe(checkoutCommit)); a binary keeps the runner it was installed with. \(fromShippedTree ? "Pass --repoint-runner to pair it with the shipped runner" : "Rebuild and install to pair a new binary, or pass --repoint-runner to replace this one's")"
             case let .repointed(previous):
                 return "runner: repointed — \(binary) now goes with \(commit), snapshotted at \(installed.binding.snapshot.tildedPath) (was \(describe(previous.commit))), as --repoint-runner asked"
             }

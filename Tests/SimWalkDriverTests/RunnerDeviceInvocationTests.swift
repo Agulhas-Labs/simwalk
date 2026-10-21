@@ -102,6 +102,28 @@ struct RunnerDeviceInvocationTests {
         #expect(RunnerInvocation.deviceOutputSource(outputName: "w.simwalk") == "Documents/SimWalkOut/w.simwalk")
     }
 
+    /// The project has one `PRODUCT_BUNDLE_IDENTIFIER`, the SimWalkRunner UI-test target's, and `<it>.xctrunner` is the container the driver reads (SimWalk#117).
+    @Test
+    func theDefaultRunnerBundleIDIsTheOneRunnerProjectDeclares() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let project = try String(contentsOf: root.appendingPathComponent("Runner/project.yml"), encoding: .utf8)
+        let declared = project.split(separator: "\n").compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("PRODUCT_BUNDLE_IDENTIFIER:") else { return nil }
+            return trimmed.dropFirst("PRODUCT_BUNDLE_IDENTIFIER:".count).trimmingCharacters(in: .whitespaces)
+        }
+        // xcodebuild builds the committed project, not project.yml, so a hand edit there or a missed regeneration is caught too.
+        let pbxproj = try String(contentsOf: root.appendingPathComponent("Runner/SimWalkRunner.xcodeproj/project.pbxproj"), encoding: .utf8)
+        let built = Set(pbxproj.split(separator: "\n").compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("PRODUCT_BUNDLE_IDENTIFIER = "), trimmed.hasSuffix(";") else { return nil }
+            return String(trimmed.dropFirst("PRODUCT_BUNDLE_IDENTIFIER = ".count).dropLast())
+        })
+
+        #expect(declared == [RunnerInvocation.defaultRunnerBundleID])
+        #expect(built == [RunnerInvocation.defaultRunnerBundleID])
+    }
+
     /// A device session's runner is told its id, launch, device, appearance, commit and idle override — and never its token, which reaches it only through `bind.json` (SimWalk#116, Brief ruling 2).
     @Test
     func aDeviceSessionNamesTheDeviceAndTheSessionTestAndCarriesNoToken() throws {

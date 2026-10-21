@@ -26,11 +26,12 @@ struct WalkDryRun {
         leases: LeaseStore,
         telemetry: WalkTelemetry? = nil,
         firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
+        provisioning: (Shell) -> SlimWalkProvisioning = { SlimWalkProvisioning(shell: $0) },
         animationsLibrary: WalkCommand.AnimationsLibrary? = nil,
         note: (String) -> Void = { _ in }
     ) throws -> Outcome {
         try WalkTelemetry.recording(on: telemetry) {
-            let prepared = try command.prepare(shell: shell, runner: resolveRunner, builds: builds, leases: leases, now: now(), logPath: logFileURL.path, telemetry: telemetry, firstLaunch: firstLaunch, animationsLibrary: animationsLibrary, note: note)
+            let prepared = try command.prepare(shell: shell, runner: resolveRunner, builds: builds, leases: leases, now: now(), logPath: logFileURL.path, telemetry: telemetry, firstLaunch: firstLaunch, provisioning: provisioning, animationsLibrary: animationsLibrary, note: note)
             defer { WalkCommand.discardTemporary(prepared.temporaryWalkbook) }
             // Released once the device is handed back, as a walk's is; a `--lease` lease is left to its holder.
             defer {
@@ -112,7 +113,7 @@ struct WalkDryRun {
             )
             let setup = made.map { DeviceSetup.Report(applied: $0.applied, leftover: $0.leftover, handback: DeviceSetup.handBack($0.applied, udid: prepared.simulator.udid, bundleID: prepared.book.appBundleID, journal: journal, run: run)) }
             let launchConditionGaps = (try? executed.get()).map(RouteProbeSummary.LaunchConditionGap.all(in:)) ?? []
-            let answered = try outcome(
+            var answered = try outcome(
                 runnerFailure: runnerFailure,
                 handback: handback,
                 launchConditionGaps: launchConditionGaps,
@@ -121,6 +122,8 @@ struct WalkDryRun {
                 diagnosingRunnerFailure: { RunnerFailureDiagnosis.read(resultBundlePath: resultBundlePath, shell: shell) },
                 readingReport: { try read.get() }
             )
+            // `prepare` slimmed or stocked the device for a dry run as for a walk, so the answer says so as a walk's does.
+            answered.deviceNote = prepared.deviceNote
             telemetry?.finish(dryRun: answered.report)
             return answered
         }
@@ -171,6 +174,8 @@ extension WalkDryRun {
         let setup: DeviceSetup.Report?
         /// Why the walkbook's setup was not made, or a setup an earlier walk left was not handed back — the lease could not be renewed before it; `nil` when it was made or handed back, or there was none.
         let setupNotMade: String?
+        /// What the run did about the device's launchd services (``SlimWalkProvisioning/afterBoot(_:)``); `nil` when nothing was decided.
+        var deviceNote: String?
 
         init(
             report: RouteProbeReport,
@@ -209,6 +214,9 @@ extension WalkDryRun {
             }
             if let handback, !handback.notes.isEmpty {
                 lines += (lines.isEmpty ? [] : [""]) + handback.notes
+            }
+            if let deviceNote {
+                lines += (lines.isEmpty ? [] : [""]) + [deviceNote]
             }
             if let setup {
                 lines += (lines.isEmpty ? [] : [""]) + setup.lines

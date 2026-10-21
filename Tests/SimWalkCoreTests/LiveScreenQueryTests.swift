@@ -62,7 +62,22 @@ struct LiveScreenQueryTests {
         #expect(throws: LiveScreenError.fromAnotherRun(path: url.path)) { try LiveScreen.read(at: url, appBundleID: "com.example.live", nonce: "nonce-2") }
     }
 
-    private static func screen(state: LiveScreen.AppState = .foreground, tree: AXNode? = tree, settled: Bool? = true) -> LiveScreen {
+    @Test
+    func aSystemAlertSurvivesTheRoundTripAndIsAbsentWhenThereIsNone() throws {
+        let alert = LiveScreen.SystemAlert(title: "Allow?", buttons: [LiveScreen.SystemAlert.Button(label: "Allow", frame: AXNode.Frame(x: 0, y: 1, width: 2, height: 3))])
+        let encoder = CaptureBundle.encoder()
+        let decoder = CaptureBundle.decoder()
+
+        let with = try decoder.decode(LiveScreen.self, from: encoder.encode(Self.screen(systemAlert: alert)))
+        let withoutData = try encoder.encode(Self.screen())
+        let without = try decoder.decode(LiveScreen.self, from: withoutData)
+
+        #expect(with.systemAlert == alert)
+        #expect(without.systemAlert == nil)
+        #expect(try !#require(String(data: withoutData, encoding: .utf8)).contains("systemAlert"))
+    }
+
+    private static func screen(state: LiveScreen.AppState = .foreground, tree: AXNode? = tree, settled: Bool? = true, systemAlert: LiveScreen.SystemAlert? = nil) -> LiveScreen {
         LiveScreen(
             appBundleID: "com.example.live",
             device: CaptureManifest.Device(name: "iPhone 18 Pro", udid: "UDID-1", osVersion: "26.0"),
@@ -72,7 +87,8 @@ struct LiveScreenQueryTests {
             appState: state,
             tree: tree,
             settled: tree == nil ? nil : settled,
-            screenPixels: LiveScreen.Pixels(width: 1206, height: 2622)
+            screenPixels: LiveScreen.Pixels(width: 1206, height: 2622),
+            systemAlert: systemAlert
         )
     }
 

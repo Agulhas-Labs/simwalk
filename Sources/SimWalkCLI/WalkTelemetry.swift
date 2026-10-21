@@ -64,6 +64,13 @@ final class WalkTelemetry {
         }
     }
 
+    /// The physical device a device walk runs on, recorded as one so a poll knows the walk keeps no result file (SimWalk#152).
+    func resolved(_ device: PhysicalDevice) {
+        writer.commit { progress in
+            progress.device = WalkProgress.Device(name: device.name, udid: device.udid, osVersion: device.osVersion, physical: true)
+        }
+    }
+
     /// The device the run resolved and the app it walks.
     func resolved(_ simulator: Simulator, app: String) {
         writer.commit { progress in

@@ -6,7 +6,7 @@ import Foundation
 
 /// A ``BundleDiff`` in the contract's shape: what was compared and what the diff measures, one verdict, then the flags and everything not compared.
 ///
-/// **Clean means nothing was left out.** A diff with no flag but a screen on one side only, a screen not compared or a tree that could not be read has not said the two walks agree, so each of those qualifies the verdict as a flag does — and is named in it.
+/// **Clean means nothing was left out.** A diff with no flag but a screen on one side only, a screen not compared or a tree that could not be read, or an Apple audit asked for and lost has not said the two walks agree, so each of those qualifies the verdict as a flag does — and is named in it.
 ///
 /// The saving is both bundles' screenshots and trees: the material a reader would otherwise have opened to see the two side by side.
 public struct BundleDiffSummary {
@@ -26,7 +26,7 @@ public struct BundleDiffSummary {
         Answer(
             header: (identityLines + BundleDiffRendering.cropsLines(crops)).joined(separator: "\n"),
             verdict: AnswerVerdict.reporting(qualifications: qualifications, detail: BundleDiffRendering.comparedTally(diff) + BundleDiffRendering.inheritedClause(diff)),
-            residue: BundleDiffRendering.unpairedLines(diff) + diff.screens.flatMap { BundleDiffRendering.screenLines($0, crops: crops) } + BundleDiffRendering.cleanLine(diff),
+            residue: BundleDiffRendering.unpairedLines(diff) + diff.screens.flatMap { BundleDiffRendering.screenLines($0, crops: crops) } + BundleDiffRendering.appleBundleLine(diff) + BundleDiffRendering.cleanLine(diff),
             weighing: weighing
         )
     }
@@ -49,8 +49,15 @@ public struct BundleDiffSummary {
             AnswerVerdict.qualification(diff.screens.reduce(0) { $0 + $1.unpairedStates.count }, "state", "on one side only"),
             AnswerVerdict.qualification(diff.screens.filter { !$0.isCompared }.count, "screen", "not compared"),
             AnswerVerdict.qualification(unreadable, "state", "not compared for an unreadable tree"),
+            appleQualification,
             AnswerVerdict.qualification(crops?.failedCount ?? 0, "crop", "not written"),
         ].compactMap(\.self)
+    }
+
+    /// `3 states' Apple audits not compared` (`1 state's …`): an audit asked for and lost must not read as a pass.
+    private var appleQualification: String? {
+        let count = diff.appleNotCompared.count
+        return count > 0 ? "\(count) state\(count == 1 ? "'s" : "s'") Apple audits not compared" : nil
     }
 
     private var weighing: ContextSaving? {

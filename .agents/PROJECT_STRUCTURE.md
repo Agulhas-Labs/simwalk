@@ -32,6 +32,7 @@ SimWalk/
 ├── Fixtures/                            apps and walkbooks real walks run against
 │   ├── PermissionFixture/, RouteFixture/ XcodeGen fixture apps, each with its walkbooks
 │   ├── SegmenterFixture/                XcodeGen fixture app and walkbook for the scroll segmenter
+│   ├── DemoApp/                         XcodeGen fixture app for the README demo: a layout regression behind a user default
 │   └── Settings/                        walkbook for Apple's Settings (no app of ours): regenerates
 │                                        the local `Captures/settings.simwalk` calibration bundle
 ├── githooks/                            pre-commit (format + lint staged files) and pre-push (tests + runner build on main); `sh setup.sh` activates them
@@ -133,6 +134,12 @@ the MCP `session` tool reaches the same answers through `MCPToolRunner.sessionAn
 trees expose that no route step covers) and `ControlCoverageSummary.swift` (its answer), and
 `Sources/SimWalkCLI/BundleCoverageCommand.swift`, tested by `Tests/SimWalkCoreTests/ControlCoverageTests.swift`
 and `Tests/SimWalkCLITests/BundleCoverageCommandTests.swift` — the same split as `bundle audit`.
+
+`bundle labels` (SimWalk#163) adds `Sources/SimWalkCore/AccessibilityLabelClaim.swift` (the claim names),
+`BundleLabels.swift` (what a bundle holds, fails and lacks for each claim, reusing the audit's rules) and
+`BundleLabelsSummary.swift` (its answer), and `Sources/SimWalkCLI/BundleLabelsCommand.swift`, tested by
+`Tests/SimWalkCoreTests/BundleLabelsTests.swift` and `Tests/SimWalkCLITests/BundleLabelsCommandTests.swift`.
+It has no MCP twin.
 
 `bundle audit` runs several rules (SimWalk#57 follow-up). `Sources/SimWalkCore/BundleAudit.swift` reads a
 bundle once through `BundleAuditScope.swift` (which skips `unexpectedScreen` screens and states the

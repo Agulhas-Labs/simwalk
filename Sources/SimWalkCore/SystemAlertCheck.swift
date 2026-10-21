@@ -18,4 +18,16 @@ public struct SystemAlertCheck {
         let title = alert.label ?? alert.flattened.first { $0.type == "StaticText" && $0.label != nil }?.label
         return title.map { "a system alert '\($0)' covers the app" } ?? "an untitled system alert covers the app"
     }
+
+    /// The alert covering the app in `springboard`, with its title and labelled buttons, or `nil` when none is there.
+    public static func alert(in springboard: AXNode) -> LiveScreen.SystemAlert? {
+        guard let alert = springboard.flattened.first(where: { $0.type == "Alert" }) else {
+            return nil
+        }
+        let title = alert.label ?? alert.flattened.first { $0.type == "StaticText" && $0.label != nil }?.label
+        let buttons = alert.flattened.filter { $0.type == "Button" }.compactMap { button in
+            button.label.map { LiveScreen.SystemAlert.Button(label: $0, frame: button.frame) }
+        }
+        return LiveScreen.SystemAlert(title: title, buttons: buttons)
+    }
 }

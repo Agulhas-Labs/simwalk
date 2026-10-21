@@ -37,8 +37,9 @@ three the same way every time, so only the part that needs judging reaches a per
   file, a walkbook. `simwalk walk` runs it through XCUITest and writes a capture bundle to disk: stitched
   full-scroll screenshots, the accessibility tree with text-run frames, and a manifest.
 - **Compare two runs by structure.** `simwalk bundle diff` compares a capture against a reference and
-  reports *form, never value*: sections present or absent, order, layout boxes, truncation, wrapping,
-  overlap, degenerate charts. Each flag names the crop that shows it, so you open only the flagged crops.
+  reports *form, never value*: sections present or absent, order, layout boxes (a box that moved, grew
+  or shrank past the tolerance), new kinds of list row, overlap, degenerate charts. Each flag names the crop
+  that shows it, so you open only the flagged crops.
 - **Check figures against your own program.** `simwalk bundle oracle` matches every figure on screen
   against a value computed outside the app, under window rules you state. The program that computes the
   values is any command you name in the walkbook.
@@ -260,6 +261,17 @@ triple a thirteen-screen walk. Omit it and the screen is timed by `--settle`, or
 `validate` refuses a non-positive one rather than falling back in silence. Every screen that states its
 own prints it on its line in the summary.
 
+Two more optional screen keys:
+
+- `measure` times the screen's route from a cold launch on a physical device. Write `"measure": true` (3
+  iterations) or `{"iterations": N}` with N from 1 to 10; `false` is the same as leaving it out. Each
+  iteration is a cold launch of the app, and every state of the screen is measured. A screen that states a
+  performance budget (`launchMs`, `transitionHitches`, `cpuMs` or `memoryPeakMB`) is measured over 3
+  iterations without it. Only a device walk runs it; a simulator walk captures as usual and says the
+  measure was not run. `validate` refuses an iteration count outside 1 to 10.
+- `notes` is free text kept with the screen in the walkbook, for hints and known quirks. Nothing in a
+  walk, audit or diff reads it.
+
 ### Recording motion
 
 Use motion when you want to know how long a screen takes to settle, or whether it shifts while it loads.
@@ -281,6 +293,30 @@ A shift is a matched element whose box moved by at least 1 pt while, in the same
 A screen may state `"budgets": { "settleMs": 1500, "layoutShifts": 0 }` (SimWalk#67): the most milliseconds its tree may take to settle and the most layout shifts it may show. Four more keys bound a physical-device walk's performance: `launchMs`, `transitionHitches`, `cpuMs` and `memoryPeakMB`. Each key is optional, but an empty object, a negative figure and an unknown key are refused by `validate`. A screen with budgets records motion without `"motion": true`. `bundle audit --walkbook` holds the recorded motion to them (the `motionBudget` and `performanceBudget` rules, under `bundle audit`); the walk itself checks nothing.
 
 `--motion` beside `--dry-run` is refused: a dry run captures nothing. The `session` verb records none.
+
+### Apple's accessibility audit
+
+A walkbook may say `"appleAudit": true` at its top level (a boolean; `validate` refuses anything else), or a
+walk may be run with `--apple-audit` (the MCP `walk`'s `appleAudit`); either turns it on for every state of the
+walk. After each state's capture the runner calls Apple's `performAccessibilityAudit(for: .all)` and files the
+result as `apple-audit.json` beside that state's `screen.png` and `ax-tree.json`: `milliseconds`, an `error`
+when the call threw (recorded and counted as failed, never skipped), and the `issues`, each with a `type`
+(`contrast`, `elementDetection`, `hitRegion`, `sufficientElementDescription`, `dynamicType`, `textClipped`,
+`trait`, or `unknown(<raw>)`), `compactDescription`, `detailedDescription` and, where Apple names an element,
+its `type`, `identifier`, `label` and `frame`. The manifest's capture carries `appleAudit` (`path`,
+`milliseconds`, `issueCount`, `failed`); a capture without it was not audited, which is not the same as clean.
+The answer gains one line after `settle:` when any state was audited:
+
+```
+apple audit: 9 states, p50 4.0 s, max 5.7 s — opt-in (appleAudit / --apple-audit); 58 issues recorded
+```
+
+(`, <n> failed` follows when any call threw.) **It costs**: measured on an iPhone Air simulator (iOS 27.0) over
+29 states, p50 1,982 ms and max 6,582 ms a state, with a floor of about 1.7 s; the Settings walkbook on an iPad
+simulator took p50 4.0 s. **It moves scroll position** (the tree differed after the audit in 12 of 29 states),
+so it runs after the capture and never mid-route; each state relaunches the app, so no capture sees it. Not
+measured on a physical device. `--apple-audit` beside `--dry-run` is refused. Rules over these records are not
+built yet.
 
 ### Animations
 
@@ -718,6 +754,7 @@ simwalk walk <walkbook.json> --output <report.json> --dry-run   # follows every 
 simwalk bundle inspect <path>      # summarises a bundle: screens, outcomes, refusals, what is on disk
 simwalk bundle screen <path> <step>   # one screen's identifier and the text on screen, by the number inspect lists
 simwalk bundle audit <path>        # every rule (chevron rows, unlabelled controls, symbol-name labels, shared labels, targets under 44 pt, reading order, overflow at accessibility type); --only <rule>, repeatable, picks some; --walkbook <walkbook.json> adds the motionBudget and performanceBudget rules over the screens' `budgets`
+simwalk discover --app <bundle id> --lease <token> --output <draft.walkbook.json>   # crawls tabs and disclosure rows into a draft walkbook; --depth, --max-screens
 simwalk lease acquire [--device <udid|name>] [--clone-from <udid>] [--physical <udid>] [--ttl 30m]   # a device of your own, and its token
 simwalk lease list                 # what is leased, to which pid, until when — never the tokens
 simwalk lease renew <token> [--ttl 30m]   # extend a lease; never shortens it
@@ -736,8 +773,9 @@ simwalk install-hook               # install the walk runner; with Claude Code, 
 More options, for the verbs that have many:
 
 ```sh
-simwalk walk <walkbook.json> --output <dir.simwalk> [--screens <id>] [--dry-run] [--motion] [--animations] [--stock] [--device <udid|name>] [--app-path <x.app>] [--lease <token>] [--team <TEAM> --runner-bundle-id <id>  (physical device only)]
+simwalk walk <walkbook.json> --output <dir.simwalk> [--screens <id>] [--dry-run] [--motion] [--apple-audit] [--animations] [--stock] [--device <udid|name>] [--app-path <x.app>] [--lease <token>] [--parallel <N>] [--team <TEAM> --runner-bundle-id <id>  (physical device only)]
 simwalk bundle audit <dir.simwalk> [--only <rule>]... [--walkbook <walkbook.json>]
+simwalk bundle labels <dir.simwalk> [--claim <names>]    # what a bundle holds, fails and lacks for each Accessibility Nutrition Label claim; exit 2 on anything failing or missing
 simwalk bundle coverage <dir.simwalk>                  # controls no route step reaches, as the steps to add; exit 2
 simwalk prune                                          # reclaims old runners and expired leases; install-hook runs it
 simwalk uninstall-hook                                 # run before deleting the binary
@@ -771,7 +809,11 @@ accessibility: the XCUITest session switched com.apple.Accessibility Accessibili
 ~64k tokens saved — 9 screenshots (~4.1k each at the 2576 px cap) and 114 kB of accessibility trees at 4 bytes a token, against 1.4 kB served. A floor: only what this answer stood in for is counted.
 ```
 
-`--animations` keeps UIKit animations on in the app under walk (see "Animations"). `--screens <id>` walks only the screens you name, in walkbook order. The bundle records the subset as the plan it ran, so it does not stand in for a full walk. `--settle <ms>` sets how long a screen must hold still before each capture (250 ms by default, and a screen's own `settle` wins). `--motion` records motion on every screen.
+`--apple-audit` records Apple's accessibility audit on every state (see "Apple's accessibility audit"). `--animations` keeps UIKit animations on in the app under walk (see "Animations"). `--screens <id>` walks only the screens you name, in walkbook order. The bundle records the subset as the plan it ran, so it does not stand in for a full walk. `--settle <ms>` sets how long a screen must hold still before each capture (250 ms by default, and a screen's own `settle` wins). `--motion` records motion on every screen.
+
+`--junit <file>` also writes the result as JUnit XML for a CI test reporter: one test case per screen × state (classname the screen id, name the state's slug). A captured state passes; a refused state, and a screen that was not captured (as one `(screen)` case when its record names no refused state), fail with the line the answer prints for the screen. A screen whose outcome is `unexpectedScreen` or `buildMismatch` was the wrong screen or build, so every case of it fails, filed captures included. See "JUnit output" below.
+
+`--parallel N` walks on N simulators at once. Each screen goes to one device with all its states, to the shard with the fewest captures so far, ties to the lowest, so the same walkbook and count always split the same way; the other devices are leased or cloned from the walk's device (a clone is a device the walk created, so the walk deletes it) and the answer is one capture bundle, its screens in walkbook order, each record naming the device that captured it. `N` is clamped to the number of screens the walk covers, and the answer says so (`parallel: 1 device (asked for 3; the plan has 1 screen)`); clamped to one device, it is the serial walk. It is refused, before anything boots, for a count below one, beside `--dry-run` (a dry run captures nothing to shard), and on a physical device (simulators only). When one shard fails, the other shards' runners are stopped rather than waited out, and the refusal names the first failed shard's device, its screens and its cause, then one line per other shard (`finished:`, `stopped:` or `failed:` with its device, screens and cause, followed by what its handback and setup put back); a refusal after an interruption says first that the walk was interrupted. Anything the walk could not give back is named (`not given back:`). Every extra device is given back whichever way the walk ends: success, a refusal, a failure before the shards run, or an interruption (SIGTERM, Ctrl-C), which stops the runners first; on the command line the process ends as soon as that is done, so an interruption names on stderr whatever it could not give back (`⚠ interrupted — not given back: …`) rather than in a refusal. An extra the walk may not reboot is never rebooted: a walkbook whose setup changes the device passes over existing simulators found booted (it takes shut-down ones, or clones), and an existing extra found booted without a setup is left as it is by the appearance retry, which prints the command that settles it instead. The MCP face hands the walk no interruption, so a cancel there lets the walk run on to its end and give its devices back then.
 
 **`--dry-run` checks that every screen's route still resolves, in seconds per screen, without
 capturing anything** — the cheap check to run after app changes, before spending a full walk. It
@@ -919,12 +961,18 @@ script over `ax-tree.json`. Overlays with no presentation type
 
 `simwalk bundle audit <bundle>` checks accessibility and layout rules over every capture in a bundle.
 
-`bundle audit` runs its seven default rules, one verdict over all of them, the coverage stated once, and a
+`bundle audit` runs its default rules (the eight tree rules, and the seven `apple*` rules below where the bundle has Apple's audit record), one verdict over all of them, the coverage stated once, and a
 `[rule]` heading per rule. **A rule that found nothing keeps its heading and its arithmetic**
 (`[unlabelledControl] clean — 22 controls examined across 2 captures`), so a rule that ran clean is not
 mistaken for one that was never asked for. `--only <rule>` (repeatable; the MCP tool's `only` array) runs
-just the named rules: `disclosureAffordance`, `unlabelledControl`, `symbolNameLabel`, `duplicateLabel`, `smallTarget` (enabled control under 44×44 pt), `readingOrder` (tree order against the layout) and `largeTypeOverflow` (text past the screen or over a sibling, at accessibility Dynamic Type sizes only); an
-unknown name is refused, listing these. Two more rules are opt-in. The first, `motionBudget`: `--walkbook <walkbook.json>` (the MCP tool's `walkbook`)
+just the named rules: `disclosureAffordance`, `unlabelledControl`, `symbolNameLabel`, `duplicateLabel`, `smallTarget` (enabled control under 44×44 pt), `readingOrder` (tree order against the layout), `largeTypeOverflow` (text past the screen or over a sibling, at accessibility Dynamic Type sizes only) and `truncatedText` (text drawn cut short with an ellipsis); an
+unknown name is refused, listing every rule (the tree rules above, the seven `apple*` rules and the two budget rules).
+
+**`truncatedText`** reads the screenshot, which the tree cannot say (a label is the full string whatever is drawn). One text recognition per capture, never per element; each `StaticText` with a label that lies wholly on screen is given the recognised lines centred inside its frame, joined in reading order. It is a finding only when that text ends in `…` or `...` and what precedes the ellipsis is a strict prefix of the label (whitespace collapsed, case-sensitive; a label that ends in an ellipsis of its own is compared without it), as `StaticText 'Notifications' reads "Notific…" [state]`. Recognition noise cannot fake a prefix followed by an ellipsis, so text that was merely misread is not a finding. What it cannot tell: a label deliberately fuller than the text drawn (a `Loading…` placeholder over the label `Loading your library`, a message preview cut by design) reads as truncation at every size, and text drawn in a different case from its label (uppercased section headers) is not matched. It judges every state, not only accessibility sizes. It is not run without a recognizer (`[truncatedText] not applicable — no text recognizer on this face, so the rule did not run`, never `clean`). A capture whose screenshot cannot be read (missing, or recognition failed) is counted in the heading (`; 1 capture not checked (no screenshot read)`, kept on a `not applicable` heading too), qualifies the verdict (`1 capture not checked by truncatedText (no screenshot read)`), and in JUnit is one skipped case, `truncatedText not checked`; the passing case needs at least one capture checked. When every capture is unchecked the heading is `not applicable — no capture's screenshot could be read`.
+
+**Apple's own findings.** Seven more rules read the per-state `apple-audit.json` a walk records with `"appleAudit": true` (or `walk --apple-audit`), one per issue type of Apple's audit: `appleContrast` (`contrast`), `appleTextClipped` (`textClipped`), `appleDynamicType` (`dynamicType`), `appleHitRegion` (`hitRegion`), `appleElementDetection` (`elementDetection`), `appleTrait` (`trait`) and `appleDescription` (`sufficientElementDescription`). `--only` accepts them. They report Apple's judgement, not SimWalk's: a finding is `Type 'label' — Apple's description [states]` (`#identifier` when the label is empty, `(no element)` when Apple names none), one row per element across states, identified by screen, issue type, element type and identifier (else label, else Apple's description) and never by frame. They overlap three tree rules on purpose (`smallTarget`/`appleHitRegion`, `largeTypeOverflow`/`appleTextClipped`, `unlabelledControl`/`appleDescription`) and run independently of them. A capture whose audit threw (`; 1 audit failed, not checked there`) or whose record is missing or malformed (`; 1 unreadable, not checked there`, the path listed) is never read as clean, and qualifies the verdict; `k of n captures audited` says when only some states were recorded. A bundle with no record at all prints one line, `[appleContrast, …] not recorded — the walk did not run Apple's accessibility audit …`, the rules are not counted among those run (JUnit: skipped as `not recorded`), and `--only` naming one is refused (`appleContrast has no record to read: …`). Issues of a type no rule reads are never dropped: `apple audit: 2 issues of a type no rule reads — unknown(4294967296) ×2`.
+
+Two more rules are opt-in. The first, `motionBudget`: `--walkbook <walkbook.json>` (the MCP tool's `walkbook`)
 holds each screen's recorded `motion` to that screen's `budgets` (see the walkbook screen keys). Without a walkbook that states any, a default run's heading
 reads `[motionBudget] not run — no walkbook budgets (pass --walkbook)` (or `(the walkbook states no budgets)` when one was passed) and it is not counted;
 naming it in `--only` (the MCP `only`) with no budgets to check is refused as input refused, non-zero exit, naming why, so an `ok` never stands for a check that ran on nothing. A screen not captured, a capture with no motion record
@@ -935,6 +983,8 @@ from qualifies the verdict.
 The second, `performanceBudget`: with `--walkbook`, it holds each screen's `budgets` keys `launchMs`, `transitionHitches`, `cpuMs` and `memoryPeakMB` to the median of the figures a physical-device walk measured. A simulator bundle, or a capture with no performance record, is UNREACHABLE for it. Without such budgets a full run prints `[performanceBudget] not run — no walkbook performance budgets (pass --walkbook)`. A control seen in light, dark and a Dynamic Type state is one
 finding naming its states.
 
+`--junit <file>` writes one failing case per finding (`<screen> · <states> · <label or type>`, plus ` at y=<y>` for a label finding, classname the rule), so `failures` is the answer's finding count; a rule that found nothing is one passing case, a rule not applicable or not run is skipped. See "JUnit output".
+
 ### `bundle diff`
 
 `simwalk bundle diff <ref> <run> [--crops <dir>]` compares two bundles by form and writes a crop for each flag.
@@ -942,9 +992,26 @@ finding naming its states.
 **`diff` flags.** Open only the crops a flag names, not the screenshots. A flag marked
 `list — may be data-driven` is a section of same-shaped rows: open its crop and treat it as a value.
 
+`--junit <file>` writes one failing case per counted flag (`<state> · <rule> · <key>`, classname the screen id; a layout shift is `<state> · shift · <element>`, an Apple audit issue `<state> · apple · <rule> · <element>`), one passing case per compared state with none, and a skipped case for each screen or state on one side only or not compared. A flag the reference also has is printed, never counted, and is not a case. See "JUnit output".
+
+**Apple audit issues.** For walks that ran Apple's accessibility audit, a state both bundles audited is compared for issues the run has and the reference lacks: `  apple  appleContrast  root/light: StaticText 'General' — Contrast nearly passed, not in reference`. An issue is its type, its element's type and identifier (else label) and Apple's description, never its frame, and each is counted: two equal issues in the run against one in the reference are one flag. An issue only the reference has is not a flag, and a changed description on one element is a new issue. It counts like a layout shift (exit 2) and has no crop. When neither bundle was audited nothing is printed; when only one has any record, one line says `apple audit: not compared — the reference was not audited` (or `the run`); otherwise a state one side did not audit, or whose audit failed or could not be read, gets `  root/light: apple audit not compared: the run's audit failed`.
+
 ### `bundle coverage`
 
 `simwalk bundle coverage <bundle>` lists the controls no route step reaches, as the steps to add. It exits 2 when it finds any.
+
+### `bundle labels`
+
+`simwalk bundle labels <bundle> [--claim <names>]` reports what a bundle holds for the App Store's Accessibility Nutrition Label claims, for a person preparing a submission. `--claim` takes a comma-separated list from `larger-text`, `dark-interface`, `sufficient-contrast` and `differentiate-without-color` (all four by default); an unknown name is refused, listing the four. It is a CLI verb only: an agent audits with `bundle audit`.
+
+Each claim prints up to four parts, each only when it has something in it: **evidence** (what the bundle holds for it), **fails**, **missing** (each as the walkbook change to make) and **manual** (what SimWalk cannot check). A claim is never printed as holding while anything is missing, and a check that did not run is missing, never a pass. A failing or missing item makes the answer `qualified` (exit 2); a bundle with neither is `ok`.
+
+A claim's heading is its status: **`fails`** (something fails it, whether or not anything is also missing), **`incomplete`** (nothing fails, but the bundle lacks something to say either way), **`holds`** (neither) or **`manual only`**. The headline counts each, as `0 hold, 1 fail, 2 incomplete, 1 manual only`. Identical lines under `fails` (two findings with no element on one screen and state) print once with `×N`; the headline still counts every finding.
+
+- **`larger-text`** needs a capture at `UICTContentSizeCategoryAccessibilityXL` (AX3) or larger, the smallest size that reaches Apple's 200% (Body is 17 pt at the default size, 40 pt at AX3, 33 pt at AX2). Each screen without one is missing, as the state to add; a capture at a smaller size is named as below 200% and not counted. It fails on `largeTypeOverflow`, on `truncatedText` (text drawn cut short with an ellipsis, read from the screenshot) and on Apple's `dynamicType` findings, in the accessibility-size captures. Apple's `textClipped` does not fail it: the check proved unreliable in both directions, so its findings at accessibility sizes are one manual line with a count (`Apple's audit reports 2 textClipped findings at accessibility sizes on root, general; its textClipped check proved unreliable, so check them by hand`). Text recognition runs on the accessibility-size captures, and on a default-size capture (no `dynamicTypeSize`) only of a screen with a truncation finding at an accessibility size. A label that also reads truncated at the default size was not cut by the larger type, so it does not fail: it is one manual line per screen (`root: 'Notifications' reads truncated at the default size too, so larger type did not cause it; check whether that is by design`). Truncation that was not checked (no text recognizer on the face, or no readable screenshot on an accessibility-size capture) is a manual line too, never silence.
+- **`dark-interface`** needs a `"theme": "dark"` capture of each screen and measures each one's screenshot: brighter than mid-grey fails, and a screenshot that will not decode is not measured and so missing.
+- **`sufficient-contrast`** needs each screen's light and dark captures audited by Apple (`walk --apple-audit`); it fails on `appleContrast` findings. An audit that threw or whose record is unreadable is listed as not checked. Apple's criteria ask for the ratios **by default** and suggest testing with Increase Contrast on as well, so a bundle walked without it can hold the claim, and the walk with it is listed as a manual check (`"setup": {"increaseContrast": true}`, then `labels` on that bundle). The report reads Increase Contrast from the manifest's `deviceSetup` (set and unverified, as under `setup`). **A bundle walked with `increaseContrast` has every audit taken with it on**, so it says nothing about the default appearance: the evidence says so and the default appearance is missing (walk again without it and run `labels` on that bundle too). Bold Text and Reduce Transparency are manual: a walk cannot set either.
+- **`differentiate-without-color`** is manual only: a simulator cannot be put in Grayscale from the host.
 
 ### The value oracle
 
@@ -964,6 +1031,8 @@ request. One line per figure per state: `matches <windows>`, `matches none`, `no
 `state not captured (<why>)` for one in a walkbook state a captured screen holds no capture of. Only a
 match is clean; anything else exits 2, as does a walkbook whose hash differs from the bundle's (stated, and the
 figures are matched by screen id). A bundle without capture times, or a walkbook with no `oracle`, is refused (exit 1).
+
+`--junit <file>` writes one case per figure × state (classname the screen id, name `<figure id> · <state slug>`): `matches` passes; `matches none`, `not on screen`, no readable number and an oracle failure fail with the figure's line; a figure in a state or on a screen the walk did not capture fails as `state not captured` / `screen not captured`. See "JUnit output".
 
 ## Live reads and sessions
 
@@ -1012,7 +1081,14 @@ session, a `start` still holding its claim, anyone else holding its lease, or a 
 a walk claim (`<leases>/.walks/<udid>/`, taken under whatever lease it runs, so a walk under the session's own
 `--lease` counts), any of which may be rebooting or reading it; the `list` after they are done makes the restore.
 `end`, and a `start` whose runner never became ready, leave such a device alone the same way, each with a line
-saying why (SimWalk#128). A device found with accessibility already back on
+saying why (SimWalk#128), and ask again after the teardown wait, before each write, so a holder that takes the
+device while the handback waits has neither its accessibility nor its appearance written. A session whose handback
+was skipped this way is kept, not removed: the handback is deferred, the line names the kind of holder found and
+the `session end <id>` that completes it, `list` switches its accessibility back on once the device is free, and
+that later `end` makes the whole handback and removes the session; a device taken during the teardown wait, whose
+remaining writes the re-ask left undone, keeps its session the same way. A device busy only because the session's own
+`--lease` is no longer held (a clone whose lease lapsed, or one a release is deleting) is not deferred: it awaits
+deletion, so `end` removes the session with nothing handed back and one line saying so. A device found with accessibility already back on
 once the teardown's budget has passed since the session's `exit.json` is recorded as needing nothing, with no write,
 no wait and no qualification. A runner that died without `exit.json` is bounded by its `heartbeat.json`, rewritten
 every 2 s until the runner stops: its stop is taken as no later than three intervals after the last beat, and the
@@ -1032,6 +1108,25 @@ answers the step as a walkbook writes it, then (for a `tap`, `scrollTo` or `type
 hash is stale is refused before anything acts. `save <id> --screen <id> --into <walkbook.json>` writes the
 steps that landed as a validated walkbook screen, to walk from then on; save before `end`, which deletes the
 session.
+
+**Drafting a walkbook with `discover`.** `simwalk discover --app <bundle id> (--lease <token> | --device <udid>)
+[--state <json>] [--depth N] [--max-screens N] --output <draft.walkbook.json>` starts a session of its own, crawls
+the app and writes the screens it reached as a draft walkbook, shaped as `session save` writes one, with an `expect`
+where a screen carries an identifier. It taps only tab bar buttons, disclosure rows and the back button; a plain
+button, a switch, a text field and an alert's buttons are never tapped, and a row that raises an alert ends its
+branch. It gets back by the back button where there is one, otherwise by relaunching the app as the session
+launched it and replaying the route. Screens are told apart by structure, never values, and taken in visual order.
+`--depth` (default 2) counts row taps from a tab; `--max-screens` (default 25) bounds the draft. The answer is
+`ok — N screens drafted to <path> · M skipped`, or `qualified` when a bound was reached, an alert ended a branch or
+a screen could not be returned to, followed by every control not tapped, grouped by screen, with its reason. A
+replay after a relaunch taps a row only on a screen of the form it was first tapped on, where the row is still the
+only thing its label names; otherwise the branch stops and its rows are listed as not returned to. **Rows below the
+fold are not read**: a lazy list builds no rows the screen has not shown, and `discover` never scrolls a list to find
+more, so a screen whose list's last loaded row reaches the bottom of the screen is listed as `<screen>: the list may
+continue below the rows the app loaded; rows there were not read`, and the verdict is qualified with `N screens'
+lists may continue below the fold, not read`. A system permission alert drawn over the app
+(SpringBoard's) ends the branch like an app alert: its buttons are listed as alert buttons, never tapped. An existing `--output` is refused: merge a draft into a walkbook yourself. The session is ended on every way out,
+Ctrl-C included. There is no MCP twin yet.
 
 ## Usage report: `simwalk usage`
 
@@ -1093,7 +1188,7 @@ about route steps, states, `setup`, `expect` and the oracle.
 - **Hand-driving the simulator.** A context hears the nudge at most once per 30 minutes and never on its
   first such call (SimWalk#110): that call, and its identical re-run, go through; the next distinct call is
   refused once. The refusal of `simctl io … screenshot`, `simctl ui … appearance` or
-  `axe tap` in a repo with walkbooks lets the command it names through on a second run, alone or beside
+  a third-party simulator CLI's `tap` in a repo with walkbooks lets the command it names through on a second run, alone or beside
   anything but another simulator command — the allowance is keyed on that command's own words, not on the
   rest of the call. `simwalk inspect --device <udid|name> --app <bundle id> [--match <text>]` reads the
   running app for a fraction of a screenshot's tokens.
@@ -1137,6 +1232,65 @@ names a directory, which is never pruned. Captures and burst directories are nam
 (`read, tap, swipe, scroll, menu, burst`) with `at` and `to` as `[x, y]` fractions, `ms`, `lines`,
 `horizontal`, `item`, `frames`, `sheet`, `match`, `settleMs` and `out`; an argument the action does not take
 is refused by name.
+
+## GitHub Action
+
+The repository root is a composite GitHub Action: `uses: Agulhas-Labs/simwalk@<tag>`. It runs on a macOS runner with Xcode (SimWalk's own requirements). It installs SimWalk from the Homebrew tap, leases a simulator, walks, runs `bundle diff --crops` against the last walk on the pull request's base branch and `bundle audit`, posts the three text answers as one pull request comment, uploads the bundle and the crops as artifacts, and sets the check from the exit codes. The first walk on a runner builds the walk runner with `xcodebuild`.
+
+| Input | Meaning |
+| --- | --- |
+| `walkbook` | Required. Path to the walkbook, relative to the workspace. |
+| `app-path` | The simulator `.app` to install (`walk --app-path`). Omit when the app is already installed. |
+| `build-command` | A shell command run before the walk. Point `app-path` at the `.app` it produces. |
+| `device` | Simulator name for `lease acquire --device`. Default: lease acquire's own choice. |
+| `reference-artifact` | Name of the artifact that holds the reference bundle. Default `simwalk-reference`. |
+| `fail-on` | `qualified` (default) fails the check on exit 1 or 2; `refused` fails it on exit 1 only. Any other non-zero exit always fails. |
+| `github-token` | Default `${{ github.token }}`. |
+
+**Permissions.** The comment needs `pull-requests: write`, and the reference lookup needs `actions: read`; give the job `contents: read` as well.
+
+**The reference.** On a pull request the action finds the newest unexpired artifact named `reference-artifact` whose workflow run's head branch is the pull request's base and whose run belongs to this repository (a fork's run is never chosen), and diffs it (the first argument) against this run. On a push to the repository's default branch it uploads the run as that artifact, when the walk's exit code was 0 or 2 (a refused walk's partial bundle never becomes the reference), so the next pull request has one. References come only from runs on the default branch, so a pull request into any other base has none. When there is none the diff is skipped, and the comment says `no reference on <base> yet; references come from runs on <default branch>`. That is not a pass: the check then comes from the walk and the audit alone.
+
+**The comment.** Only on `pull_request` events. One comment, found by the hidden marker `<!-- simwalk-action -->` and updated in place on every run. The marker must start the comment and the comment must be by the token's own identity (`gh api user`, else `github-actions[bot]`), so another user's comment carrying the marker is never edited; the walk, diff and audit answers each sit in a fenced block under a heading, and an answer set over 60,000 bytes is cut at a line boundary (never inside a character), any open fence is closed, and a stated note follows (the full text is in the bundle artifact). A pull request from a fork gets a read-only token, so the comment cannot be posted there; that step is allowed to fail and the check still comes from the answers.
+
+**The artifacts.** `simwalk-bundle` and `simwalk-crops` upload on every run. Artifact names are unique within a run, so use the action once per workflow run.
+
+**Inputs are data.** They reach the scripts only through environment variables, never interpolated into a shell line, so a walkbook path with spaces or `$(...)` is passed on as text. `build-command` is the one input that is run as a shell line, because that is its purpose.
+
+```yaml
+name: SimWalk
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  walk:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Agulhas-Labs/simwalk@<tag>
+        with:
+          walkbook: walkbooks/main.json
+          build-command: xcodebuild build -scheme MyApp -destination 'generic/platform=iOS Simulator' -derivedDataPath build
+          app-path: build/Build/Products/Debug-iphonesimulator/MyApp.app
+          fail-on: qualified
+```
+
+## JUnit output
+
+`walk`, `bundle diff`, `bundle audit` and `bundle oracle` take `--junit <file>`, which also writes the result as JUnit XML for a CI test reporter. It is a CLI flag only: the MCP tools do not take it.
+
+- **Shape:** `<testsuites name="simwalk <command>" tests failures errors skipped>`, one `<testsuite>` with the same counts, and a `<testcase classname name>` per case with a `<failure>`, `<error>` or `<skipped>` child carrying its `message`. The five XML characters are escaped. There is no `time` or `timestamp`, and the cases follow the answer's own order, so the same inputs write the same bytes.
+- **Failures are the answer's tallies.** A clean run still writes its passing cases, because a CI reporter treats a file with no cases as missing results. The case per command is under each command above.
+- **Unique names.** A CI reporter merges cases with the same classname and name, so a name repeated within a classname is numbered in case order: `… #2`, `… #3`.
+- **Exit codes are unchanged.** A command that refuses after argument validation writes one `<error>` case carrying the refusal line. A `--junit` path that is empty, is a directory, or whose directory does not exist is refused at argument validation (exit 64) before any work; that writes no file and leaves any earlier one in place (`walk --dry-run` refuses the flag too: it captures nothing). A walk killed by a signal writes none. A file that cannot be written after the run qualifies the answer (`JUnit file not written: <reason>`, exit 2); the report is written atomically.
+- **The verdict case.** When the answer's verdict is qualified (exit 2) and the file would hold no failure or error, one failing case `classname="simwalk" name="verdict"` carries the verdict line, so an exit-2 run never writes an all-green file. An oracle whose walkbook names no figure is this case.
 
 ## Using SimWalk from a coding agent (MCP)
 
@@ -1182,7 +1336,7 @@ therefore answers a `walk` in one of two modes, chosen from the client's name.
 - **Blocking.** The server records `params.clientInfo.name` from `initialize`. A client named `claude-code`
   gets what `walk` has always done: one call, answered when the walk ends. For it `tools/list` is
   byte-identical to today's and `walk_status` is not listed. Renaming that client would switch it into
-  bounded mode, which is why a test pins the bytes.
+  bounded mode, which is why a test pins the JSON.
 - **Bounded.** Every other client, including one that sends no `clientInfo`, gets the rest of this section.
   `SIMWALK_MCP_CLIENT`, when set, replaces the recorded name (for tests).
   A bounded client's `initialize` result also carries a short `instructions` string (about 1 KB: dry run first, the
@@ -1223,13 +1377,14 @@ wins:
 | 4 | file `pid` or `startedAt` differs from the handle | `refused — the walk <handle> was replaced by a later run under <stem>` | true |
 | 5 | `tool` is `session` | `refused — <handle> is a live session, not a walk` | true |
 | 6 | phase not final, process gone | `refused — the walk <handle> ended without finishing: the process running it exited` | true |
-| 7 | phase not final, process alive | wait up to the budget, reading the file once a second; each read re-applies rows 2–11 and the first row other than 7 that matches answers at once; at the budget, the `running` line | false |
+| 7 | phase not final, process alive | wait up to the budget, reading the file once a second; each read re-applies rows 2–12 and the first row other than 7 that matches answers at once; at the budget, the `running` line | false |
 | 8 | final, `resultPath` set (even with `error` set) | the ended answer | by verdict |
 | 9 | final, no `resultPath`, `error` set | `refused — the walk <handle> ended: <error>` | true |
 | 10 | final, no `resultPath`, no `error`, `tool` is `walk --dry-run` | `ok — the dry run <handle> finished; a dry run keeps no result file` | false |
-| 11 | final, no `resultPath`, no `error`, any other `tool` | `refused — the walk <handle> ended but its result file was not written` | true |
+| 11 | final, no `resultPath`, no `error`, `device.physical` is true | `ok — the walk <handle> on a physical device finished; a device walk keeps no result file` | false |
+| 12 | final, no `resultPath`, no `error`, any other walk | `refused — the walk <handle> ended but its result file was not written` | true |
 
-Rows 1–6 and 8–11 answer at once; only row 7 waits. "Process gone" is the reader rule in
+Rows 1–6 and 8–12 answer at once; only row 7 waits. "Process gone" is the reader rule in
 `Docs/SIMWALK-PROGRESS.md` (the dead-process rule there). Apart from held answers, `walk_status` reads files only, so a poll
 works from any server process, and after a crash it answers instead of hanging.
 
@@ -1315,7 +1470,7 @@ handle that 'walk' returned on its running line"
 - EOF mid-walk: the process exits only after the walk ends.
 - A `validate` sent while a bounded `walk` call is waiting is answered before the budget runs out.
 - `claude-code`: a second call sent during a walk is answered after the walk's answer.
-- A walk that ends without a result file, and is not a dry run: row 11.
+- A walk that ends without a result file, and is neither a dry run nor a device walk: row 12.
 
 ## Installing with `simwalk install`
 
@@ -1356,7 +1511,7 @@ simwalk doctor --json                            # the same answer as one JSON o
 simwalk install-hook     # from the repo root
 ```
 
-A binary installed by Homebrew, npm or a release tarball has no checkout, and `install-hook` then takes the runner
+A binary installed by Homebrew or a release tarball has no checkout, and `install-hook` then takes the runner
 from the tree shipped beside it: `<prefix>/share/simwalk/` for `<prefix>/bin/simwalk`, found with symlinks in
 the binary's path resolved (Homebrew links `bin/simwalk` into its Cellar). The tree is used only when its
 `BINARY_SHA256` stamp equals this binary's SHA-256, and its `RUNNER_COMMIT` names the snapshot. Its
@@ -1366,7 +1521,7 @@ file or a changed byte never reaches a runner: the install refuses, naming the f
 stamped for another binary, or with a missing or malformed stamp, is refused, and the `runner: not installed`
 line names every place it looked and why each was unusable. The shipped tree is tried first, the checkout the
 binary was compiled from second. **A walk installs the shipped tree by itself**: the first walk after
-`brew upgrade` or `npm update` finds a new binary with no pairing, installs the tree shipped with it and walks
+`brew upgrade` finds a new binary with no pairing, installs the tree shipped with it and walks
 that, without re-running `install-hook`. A walk never snapshots a checkout.
 
 It always installs **the walk runner**, copied out of the checkout this binary was compiled from into
@@ -1394,7 +1549,7 @@ With Claude Code (`claude` on your PATH) it also makes four registrations:
   `claude mcp add --transport stdio --scope user simwalk -- <path> mcp`, then reads the file back to
   confirm the registration is there.
 - **the status line** (see [The status line](#the-status-line)).
-- **the `PreToolUse` hook**, written into `~/.claude/settings.json`. It runs `simwalk hook pre-tool-use` before each shell call an agent makes. It tags a command-line `simwalk` call with its session, so the status line counts it. In a repo with walkbooks it also refuses some of an agent's own simulator driving, namely `xcrun simctl io … screenshot`, `simctl ui … appearance` and `axe tap`, and points at the SimWalk tool instead. The refusal comes once per 30 minutes, and the same command run again goes through (see Hand-driving the simulator in [Notes for writing walkbooks](#notes-for-writing-walkbooks)). Other tools' hooks in the same list stay as they were. `simwalk hook pre-tool-use --agent cursor` is the same hook for Cursor: it reads Cursor's `preToolUse` payload (its `Shell` tool as `Bash`), judges it the same way, and writes a refusal in Cursor's response schema; a call it lets through prints nothing. Without `--agent`, or with `--agent claude`, it answers Claude Code as before.
+- **the `PreToolUse` hook**, written into `~/.claude/settings.json`. It runs `simwalk hook pre-tool-use` before each shell call an agent makes. It tags a command-line `simwalk` call with its session, so the status line counts it. In a repo with walkbooks it also refuses some of an agent's own simulator driving, namely `xcrun simctl io … screenshot`, `simctl ui … appearance` and a third-party simulator CLI's `tap`, and points at the SimWalk tool instead. The refusal comes once per 30 minutes, and the same command run again goes through (see Hand-driving the simulator in [Notes for writing walkbooks](#notes-for-writing-walkbooks)). Other tools' hooks in the same list stay as they were. `simwalk hook pre-tool-use --agent cursor` is the same hook for Cursor: it reads Cursor's `preToolUse` payload (its `Shell` tool as `Bash`), judges it the same way, and writes a refusal in Cursor's response schema; a call it lets through prints nothing. Without `--agent`, or with `--agent claude`, it answers Claude Code as before.
 - **the agent guide**, `SimWalk.md`, copied to `~/.claude/rules/simwalk.md`, where its `paths:`
   frontmatter keeps it out of sessions that never touch a walkbook, a capture bundle or a UI-test
   target. It is looked for beside the binary, then in the `share/simwalk` tree a packaged release ships beside it, then in the working directory, which is why a checkout install is run from the repo root — a

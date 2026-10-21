@@ -20,6 +20,10 @@ public struct ScreenDiff: Codable, Equatable, Sendable {
     public var shiftFlags: [ShiftFlag]?
     /// The states whose shifts were not compared because only one side recorded them; `nil` when there are none.
     public var shiftNotes: [ShiftNote]?
+    /// The Apple accessibility-audit issues the run has and the reference lacks (E1b), by identity and never frame; `nil` where no state was audited on both sides, so absent reads as "not compared", never "none".
+    public var appleFlags: [AppleFlag]?
+    /// The states whose audits were not compared, with the side and why; `nil` when there are none.
+    public var appleNotes: [AppleNote]?
 
     public init(
         id: String,
@@ -28,7 +32,9 @@ public struct ScreenDiff: Codable, Equatable, Sendable {
         states: [StateDiff],
         unpairedStates: [UnpairedState],
         shiftFlags: [ShiftFlag]? = nil,
-        shiftNotes: [ShiftNote]? = nil
+        shiftNotes: [ShiftNote]? = nil,
+        appleFlags: [AppleFlag]? = nil,
+        appleNotes: [AppleNote]? = nil
     ) {
         self.id = id
         self.referenceOutcome = referenceOutcome
@@ -37,6 +43,8 @@ public struct ScreenDiff: Codable, Equatable, Sendable {
         self.unpairedStates = unpairedStates
         self.shiftFlags = shiftFlags
         self.shiftNotes = shiftNotes
+        self.appleFlags = appleFlags
+        self.appleNotes = appleNotes
     }
 
     /// Whether both sides captured the screen, so its states were compared; a screen either side refused is reported with its outcomes and nothing else.
@@ -46,7 +54,7 @@ public struct ScreenDiff: Codable, Equatable, Sendable {
 
     /// Every flag on every state of this screen that is a difference between the two bundles.
     public var flagCount: Int {
-        states.reduce(0) { $0 + $1.flags.filter { !$0.isInherited }.count } + (shiftFlags?.count ?? 0)
+        states.reduce(0) { $0 + $1.flags.filter { !$0.isInherited }.count } + (shiftFlags?.count ?? 0) + (appleFlags?.count ?? 0)
     }
 
     /// Every flag on every state of this screen that the reference has too: reported, never counted as a difference.
@@ -100,5 +108,63 @@ public extension ScreenDiff {
             self.slug = slug
             self.missingSide = missingSide
         }
+    }
+
+    /// An Apple accessibility-audit issue the run has and the reference lacks (E1b), matched by type, element and Apple's description, never by frame.
+    ///
+    /// **No screenshot crop**: the record's frame is read after the audit, which can scroll, so it need not line up with the state's screenshot.
+    struct AppleFlag: Codable, Equatable, Sendable {
+        /// The state's slug.
+        public var slug: String
+        /// The `bundle audit` rule that reads the issue's type, else the raw type.
+        public var rule: String
+        /// The element's type by the tree's name; `nil` for an issue with no element.
+        public var elementType: String?
+        /// The element's identifier, else its label; `nil` where it has neither.
+        public var name: String?
+        /// Apple's one-line description of the issue.
+        public var compactDescription: String
+
+        public init(slug: String, rule: String, elementType: String?, name: String?, compactDescription: String) {
+            self.slug = slug
+            self.rule = rule
+            self.elementType = elementType
+            self.name = name
+            self.compactDescription = compactDescription
+        }
+
+        init(slug: String, issue: AppleAuditRecord.Issue) {
+            self.init(
+                slug: slug,
+                rule: AuditRuleName.allCases.first { $0.appleIssueType == issue.type }?.rawValue ?? issue.type,
+                elementType: issue.element?.type,
+                name: AppleAuditIdentity.name(of: issue.element),
+                compactDescription: issue.compactDescription
+            )
+        }
+    }
+
+    /// A state whose Apple audits were not compared, because one side's capture has no readable record (E1b).
+    struct AppleNote: Codable, Equatable, Sendable {
+        /// The state's slug.
+        public var slug: String
+        /// The side whose audit could not be read.
+        public var side: BundleDiff.Side
+        public var reason: Reason
+
+        public init(slug: String, side: BundleDiff.Side, reason: Reason) {
+            self.slug = slug
+            self.side = side
+            self.reason = reason
+        }
+    }
+}
+
+public extension ScreenDiff.AppleNote {
+    /// Why a side's audit cannot be read as evidence.
+    enum Reason: String, Codable, Sendable {
+        case notAudited
+        case failed
+        case unreadable
     }
 }

@@ -46,9 +46,11 @@ public struct AccessibilityPreference {
     ///   - run: spawns a child and returns what it said — `Shell().run` in use, a script in a test.
     ///   - pause: waits, between two reads of the teardown and before confirming a write.
     ///   - now: the clock both waits are bounded by, so a runtime whose teardown never shows costs the budget rather than however many spawns fit in it.
+    ///   - isDeviceBusy: whether another holder — a walk, another session, a `session start` — has taken the device, asked again before every round of writes, after the teardown wait (SimWalk#128): the wait can run for the whole teardown budget, and a holder that took the device meanwhile would have the write land under it. Answered busy, no further write is made and the answer is `.leftToAnotherHolder` — before the first round nothing has been written, and before a retry the earlier write was already switched back off. A walk, a dry run or `inspect`, handing back its own change under its own claim, passes nothing.
     public static func restore(
         udid: String,
         stoppedAt: Date? = nil,
+        isDeviceBusy: ((Date) -> Bool)? = nil,
         run: (String, [String]) throws -> Shell.Result,
         pause: (TimeInterval) -> Void,
         now: () -> Date
@@ -65,6 +67,9 @@ public struct AccessibilityPreference {
         var lastReadOff = teardownSeen
         var writes = 0
         while true {
+            if isDeviceBusy?(now()) == true {
+                return Restoration(udid: udid, state: .leftToAnotherHolder)
+            }
             for key in keys {
                 guard let written = try? run(xcrun, enableArguments(udid: udid, key: key)), written.succeeded else {
                     // Known off only when the key that failed is the deciding one and it last read off. A failure on
@@ -209,7 +214,9 @@ public extension AccessibilityPreference {
         }
 
         /// The same line, naming what switched the preference back on: `this walk`, or `this session` at `session end`.
-        public func note(by actor: String) -> String {
+        ///
+        /// `completedBy` names what will finish a handback another holder interrupted, when something will; `nil` leaves the line telling the user to run the command, since nothing else will.
+        public func note(by actor: String, completedBy: String? = nil) -> String {
             let subject = "\(AccessibilityPreference.domain) \(AccessibilityPreference.key)"
             return switch state {
             case .restored:
@@ -222,6 +229,12 @@ public extension AccessibilityPreference {
                 "accessibility: the XCUITest session switched \(subject) off as it ended, and \(actor) could not switch it back on (\(reason)) — an in-process accessibility suite on this device reads empty trees until you run: \(AccessibilityPreference.command(udid: udid))"
             case let .unconfirmed(reason):
                 "accessibility: \(actor) could not confirm \(subject) back on for \(udid) (\(reason)) — if an in-process accessibility suite on this device reads empty trees, run: \(AccessibilityPreference.command(udid: udid))"
+            case .leftToAnotherHolder:
+                if let completedBy {
+                    "accessibility: another holder took \(udid) before \(actor) could confirm \(subject) back on, so it was left as that holder has it — \(completedBy) switches it back on once that holder is done"
+                } else {
+                    "accessibility: another holder took \(udid) before \(actor) could confirm \(subject) back on, so it was left as that holder has it — once it is done, if an in-process accessibility suite on this device reads empty trees, run: \(AccessibilityPreference.command(udid: udid))"
+                }
             }
         }
 
@@ -238,13 +251,15 @@ public extension AccessibilityPreference {
                 "device accessibility left off"
             case .unconfirmed:
                 "device accessibility not confirmed on"
+            case .leftToAnotherHolder:
+                "device accessibility left to another holder that took the device during the handback"
             }
         }
     }
 }
 
 public extension AccessibilityPreference.Restoration {
-    /// The five things a restore can have done.
+    /// The six things a restore can have done.
     enum State: Codable, Equatable, Sendable {
         /// The teardown was seen to switch the preference off, and it was switched back on and still read on a few seconds later.
         case restored
@@ -256,6 +271,8 @@ public extension AccessibilityPreference.Restoration {
         case failed(reason: String)
         /// Not known either way: the write could not be read back, failed where the key had not been seen off, or failed on a later key after the deciding one was written and before it was read back; the payload says which.
         case unconfirmed(reason: String)
+        /// Not confirmed back on: another holder took the device after the teardown wait (SimWalk#128) — before the first write, or after a write the teardown switched back off and before the retry — so the preference was left as that holder has it, with no further write.
+        case leftToAnotherHolder
     }
 }
 

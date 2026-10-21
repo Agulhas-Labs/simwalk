@@ -13,6 +13,8 @@ public struct Shell {
     ///
     /// Told each call's bound, which a script may ignore.
     private let script: ((String, [String], [String: String], TimeInterval?) throws -> Result)?
+    /// What stops this shell's children when set: each one is registered with it while it runs, and none is started once it has stopped.
+    private var childStop: ChildStop?
 
     public init() {
         script = nil
@@ -32,6 +34,15 @@ public struct Shell {
         self.script = script
     }
 
+    /// A copy of this shell whose children `childStop` can stop: each is registered right after its launch and forgotten at its exit.
+    ///
+    /// A child stopped this way makes its `run` throw `ShellError.stopped`, once it has been reaped and its output drains settled; a `run` called after the stop throws the same without spawning — a scripted shell without calling its script.
+    public func stopped(by childStop: ChildStop) -> Self {
+        var copy = self
+        copy.childStop = childStop
+        return copy
+    }
+
     /// Runs `executable` with `arguments`, optionally adding to its environment, and waits for it — for at most `timeout` seconds when one is given.
     ///
     /// **A bound is for a child that can wedge in the middle of a walk**, where waiting forever turns a failure the walk could have reported into a session that never answers (SimWalk#26: `simctl bootstatus` on a device whose boot hung). Past it the child's process group is sent `SIGTERM`, then `SIGKILL` if any of it is still there a moment later — whatever the child started goes with it, unless it left the group — and the call throws `ShellError.timedOut` naming the command — or `stalledOnFirstLaunch`, when the tree held `xcodebuild -runFirstLaunch` as the bound ran out. **An `xcrun simctl` call given no bound gets its verb's** (``SimctlBound``), so no `simctl` call waits forever. A scripted shell answers from its script, which decides for itself what a timeout looks like.
@@ -47,6 +58,9 @@ public struct Shell {
     ) throws -> Result {
         // Every `simctl` call is bounded, by its verb, unless its caller set a bound of its own (SimWalk#136).
         let timeout = timeout ?? SimctlBound.seconds(for: executable, arguments)
+        if childStop?.isStopped == true {
+            throw ShellError.stopped
+        }
         if let script {
             return try script(executable, arguments, environment, timeout)
         }
@@ -97,7 +111,12 @@ public struct Shell {
         }
         // Set before the launch, so an exit that comes first is not missed.
         let exited = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in exited.signal() }
+        // The stop's own signal of the same exit, so neither waiter takes the other's (see `ChildStop.Child`).
+        let exitedForStop = childStop.map { _ in DispatchSemaphore(value: 0) }
+        process.terminationHandler = { _ in
+            exited.signal()
+            exitedForStop?.signal()
+        }
 
         do {
             try process.run()
@@ -120,6 +139,21 @@ public struct Shell {
         // deadlock, and `xcodebuild` emits far more than the buffer holds.
         let collector = OutputCollector()
         let drains = [Drain(out, into: collector, isStandardError: false), Drain(error, into: collector, isStandardError: true)]
+        var ticket: Int?
+        if let childStop, let exitedForStop {
+            ticket = childStop.register(ChildStop.Child(process: process, group: group, exited: exitedForStop))
+            if ticket == nil {
+                // Stopped between the check above and the launch: the stop's sweep is already taken, so this child is stopped here.
+                Self.stop(process, group: group, exited: exited)
+                Self.settle(drains)
+                throw ShellError.stopped
+            }
+        }
+        defer {
+            if let ticket {
+                childStop?.deregister(ticket)
+            }
+        }
         if let timeout, exited.wait(timeout: .now() + timeout) == .timedOut {
             // Read before the stop, while the stalled tree is still there to say what it was waiting on — the only
             // evidence a refusal may name a cause on (SimWalk#136).
@@ -133,6 +167,11 @@ public struct Shell {
             throw waitingOnFirstLaunch ? ShellError.stalledOnFirstLaunch(command: command, seconds: timeout) : ShellError.timedOut(command: command, seconds: timeout)
         }
         process.waitUntilExit()
+        // Still registered, so a stop seen now swept this child: its answer is the stop, not whatever it said on the way down.
+        if ticket != nil, childStop?.isStopped == true {
+            Self.settle(drains)
+            throw ShellError.stopped
+        }
         var truncated = false
         if timeout == nil {
             // **A call with no bound waits for the output for as long as it takes, deliberately.** An

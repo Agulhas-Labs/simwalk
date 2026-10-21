@@ -28,6 +28,8 @@ public struct DeviceHandback: Equatable, Sendable {
     ///
     /// `runnerFinished` is whether the runner is known to have run its last reset — in use, whether a finalised bundle *this walk wrote* was read back, since the runner resets before it writes the manifest; the walk refuses a non-empty output path before it starts, and a manifest that started before the runner launched, so a bundle read back cannot be a previous walk's. Not `xcodebuild`'s exit status: it is non-zero for any recorded XCTest failure on a runner that ran to the end (the SimWalk#19 review). A runner that did not finish may have stopped before its last reset, so a device reading other than it was found then says nothing about the resets — only that the walk ended where its last state left it.
     ///
+    /// `isDeviceBusy` is whether another holder has taken the device, for a handback whose caller asked that before it began — `session end`, a never-ready `session start` (SimWalk#128). Asked once, before the call, it leaves a window: the accessibility restore can wait out the whole teardown budget before it writes, and a walk that takes its claim meanwhile would have its accessibility and appearance written under it. So it is asked again after the teardown wait, right before each write, and a write it answers busy for is not made: that part reads `leftToAnotherHolder`, and its note says the device was left as that holder has it. A walk, a dry run or `inspect` hands back its own change under its own claim and passes nothing.
+    ///
     /// `stoppedAt` is when the runner stopped, for a handback made after it — `session end` on a runner that had already exited — and is passed on to ``AccessibilityPreference/restore(udid:stoppedAt:run:pause:now:)``, whose teardown wait runs from it; a walk, whose runner has just stopped, passes nothing. `recorded` is an accessibility restore already made for this runner's stop — `session list`'s, recorded in the session's directory — which is reported instead of restoring again; the appearance is still put back, since `list` hands back accessibility alone.
     public static func perform(
         udid: String,
@@ -35,6 +37,7 @@ public struct DeviceHandback: Equatable, Sendable {
         runnerFinished: Bool = true,
         stoppedAt: Date? = nil,
         recorded: AccessibilityPreference.Restoration? = nil,
+        isDeviceBusy: ((Date) -> Bool)? = nil,
         run: (String, [String]) throws -> Shell.Result,
         pause: (TimeInterval) -> Void,
         now: () -> Date
@@ -42,8 +45,10 @@ public struct DeviceHandback: Equatable, Sendable {
         // Read first, before anything here touches the appearance: the runner reset the device to what the
         // walk found after its last state, and this is the one place that can see whether that last reset held.
         let reset = resetCheck(udid: udid, found: found, runnerFinished: runnerFinished, run: run)
-        let accessibility = recorded ?? AccessibilityPreference.restore(udid: udid, stoppedAt: stoppedAt, run: run, pause: pause, now: now)
-        let appearance = found.map { DeviceAppearance.restore($0, udid: udid, run: run) } ?? .unknown
+        let accessibility = recorded ?? AccessibilityPreference.restore(udid: udid, stoppedAt: stoppedAt, isDeviceBusy: isDeviceBusy, run: run, pause: pause, now: now)
+        let appearance = found.map { found in
+            isDeviceBusy?(now()) == true ? .leftToAnotherHolder(found: found) : DeviceAppearance.restore(found, udid: udid, run: run)
+        } ?? .unknown
         return DeviceHandback(accessibility: accessibility, appearance: appearance, reset: reset)
     }
 
@@ -75,14 +80,39 @@ public struct DeviceHandback: Equatable, Sendable {
         notes(by: "this walk")
     }
 
-    /// The same lines, naming what handed the device back — `this session` at `session end`.
-    public func notes(by actor: String) -> [String] {
-        [accessibility.note(by: actor)] + [appearance.note(udid: accessibility.udid), resetNote].compactMap(\.self)
+    /// The same lines, naming what handed the device back — `this session` at `session end` — and, when something will finish a handback another holder interrupted, what that is.
+    ///
+    /// `appearanceBy` names what put the appearance back when that differs from `actor`: `session end` puts the appearance back itself even when accessibility's recorded restore is reported as `session list`'s.
+    ///
+    /// `omittingUndone` drops the note of each part left to another holder. It is for the session whose own lease lapsed during the handback: the undone parts were left to no holder, so saying another holder took them is untrue, and nothing is owed to a device about to be deleted. The reset note is unaffected.
+    public func notes(by actor: String, appearanceBy: String? = nil, completedBy: String? = nil, omittingUndone: Bool = false) -> [String] {
+        let accessibilityNote = omittingUndone && accessibilityUndone ? nil : accessibility.note(by: actor, completedBy: completedBy)
+        let appearanceNote = omittingUndone && appearanceUndone ? nil : appearance.note(udid: accessibility.udid, by: appearanceBy ?? actor, completedBy: completedBy)
+        return [accessibilityNote, appearanceNote, resetNote].compactMap(\.self)
     }
 
     /// What these qualify the walk's answer by: anything that leaves the device other than the next suite needs, or other than it was found, and a reset the state check relied on that did not hold.
     public var qualifications: [String] {
-        [accessibility.qualification, appearance.qualification, reset.qualification].compactMap(\.self)
+        qualifications(omittingUndone: false)
+    }
+
+    /// The qualifications, less those of each part left to another holder when `omittingUndone`.
+    ///
+    /// See ``notes(by:appearanceBy:completedBy:omittingUndone:)`` for why; the reset's is unaffected.
+    public func qualifications(omittingUndone: Bool) -> [String] {
+        [omittingUndone && accessibilityUndone ? nil : accessibility.qualification, omittingUndone && appearanceUndone ? nil : appearance.qualification, reset.qualification].compactMap(\.self)
+    }
+
+    private var accessibilityUndone: Bool {
+        accessibility.state == .leftToAnotherHolder
+    }
+
+    private var appearanceUndone: Bool {
+        if case .leftToAnotherHolder = appearance {
+            true
+        } else {
+            false
+        }
     }
 
     /// The line saying the runner's last reset did not hold, that a failed runner left nothing to judge it by, or that the device's answer was cut short; `nil` when it held or was not checked.

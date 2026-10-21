@@ -49,6 +49,12 @@ public struct VisionTextReader: Sendable {
     }
 }
 
+extension VisionTextReader: ScreenTextRecognizing {
+    public func lines(inPNGAt url: URL) throws -> [MirrorTextLine] {
+        try read(url, capturedAt: Date(timeIntervalSince1970: 0)).lines
+    }
+}
+
 public extension VisionTextReader {
     /// Why a capture could not be read.
     struct ReadError: Error, Equatable, CustomStringConvertible, Sendable {

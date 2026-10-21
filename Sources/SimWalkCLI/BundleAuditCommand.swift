@@ -5,6 +5,7 @@
 import ArgumentParser
 import Foundation
 import SimWalkCore
+import SimWalkDriver
 
 /// `simwalk bundle audit <path>` — checks one bundle against itself, without a reference frame or a second run.
 struct BundleAuditCommand: ParsableCommand {
@@ -23,8 +24,12 @@ struct BundleAuditCommand: ParsableCommand {
     @Option(name: .long, help: ArgumentHelp("A walkbook whose screens' `budgets` the motionBudget rule (settleMs, layoutShifts) and the performanceBudget rule (launchMs, transitionHitches, cpuMs, memoryPeakMB) hold the bundle's recorded motion and device performance to. Without budgets for a rule it prints `not run` in a full run, and `--only` naming it is refused.", valueName: "walkbook.json"))
     var walkbook: String?
 
+    @Option(name: .long, help: JUnitOutput.help)
+    var junit: String?
+
     /// A rule name nobody wrote is refused before anything is read, naming the ones that exist — a typo must not become a silent run of a different rule set, or of none.
     func validate() throws {
+        try JUnitOutput.validate(junit)
         if let unknown = only.first(where: { AuditRuleName(rawValue: $0) == nil }) {
             throw ValidationError("'\(unknown)' is not a bundle audit rule — the rules are \(Self.ruleNames)")
         }
@@ -38,18 +43,21 @@ struct BundleAuditCommand: ParsableCommand {
     ///
     /// The code is no longer computed here. An audit that found something, and one over a bundle whose screens were never opened, are both *qualified answers* — the verdict says so on the second line, and `TimedCall` exits on what the verdict says, so the report and the code cannot disagree.
     func run(log: UsageLog, emit: (String) -> Void, emitError: (String) -> Void, isStdoutPiped: () -> Bool = { false }) throws {
-        try run(log: log, emit: emit, emitError: emitError, isStdoutPiped: isStdoutPiped) { try answer() }
+        let output = JUnitOutput.make(junit, command: "bundle audit")
+        try run(log: log, emit: emit, emitError: emitError, isStdoutPiped: isStdoutPiped, junit: output) { try answer(junit: output) }
     }
 
     /// The same run with the answer itself injectable too, so the kind an unmapped failure records can be checked without a bundle that could produce one.
     ///
     /// Every failure of the bundle argument is a `CaptureBundleError`, classified on its own account — a tree the runner wrote that does not decode is `runner-failed` there, not here. What is left is this command's own code over a bundle it has already read, so an unmapped failure is `tool-error`, never a caller's mistake.
-    func run(log: UsageLog, emit: (String) -> Void, emitError: (String) -> Void, isStdoutPiped: () -> Bool = { false }, body: () throws -> Answer) throws {
-        try TimedCall.run(tool: "bundle audit", target: bundle, log: log, emit: emit, emitError: emitError, defaultFailureKind: .toolError, isStdoutPiped: isStdoutPiped, body: body)
+    func run(log: UsageLog, emit: (String) -> Void, emitError: (String) -> Void, isStdoutPiped: () -> Bool = { false }, junit: JUnitOutput? = nil, body: () throws -> Answer) throws {
+        try TimedCall.run(tool: "bundle audit", target: bundle, log: log, emit: emit, emitError: emitError, defaultFailureKind: .toolError, isStdoutPiped: isStdoutPiped, junit: junit, body: body)
     }
 
     /// The answer, without the printing — what the MCP face serves, so one verb cannot come to answer differently depending on which face asked.
-    func answer() throws -> Answer {
+    ///
+    /// `junit` is handed the same findings as test cases, for the CLI's `--junit`; the MCP face passes none.
+    func answer(junit: JUnitOutput? = nil) throws -> Answer {
         let opened = try CaptureBundle.read(at: URL(fileURLWithPath: bundle))
         let rules = only.compactMap(AuditRuleName.init(rawValue:))
         let book = try walkbook.map { try WalkbookLoader.load(contentsOf: URL(fileURLWithPath: $0)) }
@@ -65,12 +73,16 @@ struct BundleAuditCommand: ParsableCommand {
             let why = book == nil ? "pass --walkbook with a walkbook whose screens state \"budgets\" with launchMs, transitionHitches, cpuMs or memoryPeakMB" : "the walkbook passed states no performance \"budgets\" (launchMs, transitionHitches, cpuMs, memoryPeakMB)"
             throw InputRefusal("performanceBudget has no budgets to check: \(why)")
         }
-        let report = try BundleAudit(opened, rules: rules, budgets: budgets).run()
+        if let named = only.compactMap(AuditRuleName.init(rawValue:)).first(where: \.isApple), opened.manifest.appleAuditEntries.isEmpty {
+            throw InputRefusal("\(named.rawValue) has no record to read: the walk did not run Apple's accessibility audit (walkbook \"appleAudit\": true, or walk --apple-audit)")
+        }
+        let report = try BundleAudit(opened, rules: rules, budgets: budgets, recognizer: VisionTextReader()).run()
         // As `bundle oracle` does: budgets are tightened after a walk, so a walkbook that is not the one the bundle was walked from qualifies rather than refuses.
         let changed = try book.map { try !WalkbookIdentity.isPlan($0, of: opened.manifest) } ?? false
         let ran = (!motionBudgets.isEmpty && (only.isEmpty || only.contains(AuditRuleName.motionBudget.rawValue)))
             || (!performanceBudgets.isEmpty && (only.isEmpty || only.contains(AuditRuleName.performanceBudget.rawValue)))
         let qualified = changed && ran ? ["walkbook changed since the walk; budgets matched by screen id"] : []
+        junit?.report = JUnitAuditCases.report(report, of: opened, walkbookPassed: book != nil, budgetsStated: !budgets.isEmpty)
         return BundleAuditSummary(report, of: opened, qualifiedBy: qualified, walkbookPassed: book != nil, budgetsStated: !budgets.isEmpty).answer()
     }
 

@@ -156,6 +156,9 @@ struct SessionStartCommand: ParsableCommand {
                         recorded: claim.release,
                         isDeviceBusy: { now in
                             LiveSessionAccessibilityHandback.isHeldByAnother(udid: simulator.udid, session: (sessionID, lease), store: store, processes: processes, leases: leases, now: now)
+                        },
+                        holder: { now in
+                            LiveSessionStop.Holder.on(udid: simulator.udid, session: (sessionID, lease), store: store, processes: processes, leases: leases, now: now)
                         }
                     )
                 )
@@ -206,7 +209,7 @@ struct SessionStartCommand: ParsableCommand {
         let line: String
         if let found {
             let handback = DeviceAppearance.restore(found, udid: udid, run: run)
-            line = handback.note(udid: udid).map { "⚠ \($0)" } ?? "appearance: \(udid) was put back to \(found.rawValue), as start found it"
+            line = handback.note(udid: udid, by: "this session").map { "⚠ \($0)" } ?? "appearance: \(udid) was put back to \(found.rawValue), as start found it"
         } else {
             line = "⚠ appearance: \(udid) was settled, and its appearance before could not be read, so it was not put back"
         }

@@ -16,12 +16,15 @@ public struct BundleDiff: Codable, Equatable, Sendable {
     public var screens: [ScreenDiff]
     /// Screens one bundle records and the other does not — reference-only first, each side in its walkbook order.
     public var unpairedScreens: [UnpairedScreen]
+    /// The side that has no Apple audit record at all while the other has some (E1b), so no state's issues were compared; `nil` otherwise.
+    public var appleNotAudited: Side?
 
-    public init(reference: Build, run: Build, screens: [ScreenDiff], unpairedScreens: [UnpairedScreen]) {
+    public init(reference: Build, run: Build, screens: [ScreenDiff], unpairedScreens: [UnpairedScreen], appleNotAudited: Side? = nil) {
         self.reference = reference
         self.run = run
         self.screens = screens
         self.unpairedScreens = unpairedScreens
+        self.appleNotAudited = appleNotAudited
     }
 
     /// The rules a diff applies unless told otherwise, in the order their flags are listed.
@@ -51,14 +54,16 @@ public struct BundleDiff: Codable, Equatable, Sendable {
         let runScreens = run.manifest.screens
         let referenceIDs = Set(referenceScreens.map(\.id))
         let runIDs = Set(runScreens.map(\.id))
+        let apple = (reference: AppleAuditDiff.Records(reference), run: AppleAuditDiff.Records(run))
+        let appleNotAudited = AppleAuditDiff.unauditedSide(reference: apple.reference, run: apple.run)
         let screens = referenceScreens.compactMap { referenceScreen -> ScreenDiff? in
             guard let runScreen = runScreens.first(where: { $0.id == referenceScreen.id }) else { return nil }
-            let sides = Sides(reference: reference, run: run, segmenter: segmenter, rules: rules)
+            let sides = Sides(reference: reference, run: run, segmenter: segmenter, rules: rules, apple: appleNotAudited == nil && (apple.reference.hasRecords || apple.run.hasRecords) ? apple : nil)
             return sides.screenDiff(reference: referenceScreen, run: runScreen)
         }
         let unpaired = referenceScreens.filter { !runIDs.contains($0.id) }.map { UnpairedScreen(id: $0.id, side: .reference) }
             + runScreens.filter { !referenceIDs.contains($0.id) }.map { UnpairedScreen(id: $0.id, side: .run) }
-        return BundleDiff(reference: Build(reference.manifest), run: Build(run.manifest), screens: screens, unpairedScreens: unpaired)
+        return BundleDiff(reference: Build(reference.manifest), run: Build(run.manifest), screens: screens, unpairedScreens: unpaired, appleNotAudited: appleNotAudited)
     }
 
     /// Every flag on every screen that is a difference between the two bundles: one the reference does not have.
@@ -126,6 +131,8 @@ extension BundleDiff {
         let run: CaptureBundle
         let segmenter: any Segmenter
         let rules: [any FormRule]
+        /// Both bundles' Apple audit records, or `nil` where they are not compared (neither has any, or only one does).
+        var apple: (reference: AppleAuditDiff.Records, run: AppleAuditDiff.Records)?
 
         /// One paired screen: its states compared when both sides captured it, its outcomes alone when either did not.
         func screenDiff(reference referenceScreen: CaptureManifest.ScreenRecord, run runScreen: CaptureManifest.ScreenRecord) -> ScreenDiff {
@@ -135,12 +142,19 @@ extension BundleDiff {
             let referenceSlugs = Set(referenceScreen.captures.map(\.state.slug))
             let runSlugs = Set(runScreen.captures.map(\.state.slug))
             var shifts = ShiftDiff()
+            var audits = AppleAuditDiff()
             let states = referenceScreen.captures.compactMap { referenceCapture -> StateDiff? in
                 guard let runCapture = runScreen.captures.first(where: { $0.state.slug == referenceCapture.state.slug }) else { return nil }
                 let compared = ShiftDiff.compare(slug: referenceCapture.state.slug, reference: referenceCapture.motion, run: runCapture.motion)
                 shifts.flags += compared.flags
                 shifts.notes += compared.notes
                 shifts.compared = shifts.compared || compared.compared
+                if let apple {
+                    let compared = AppleAuditDiff.compare(screenID: referenceScreen.id, reference: (apple.reference, referenceCapture), run: (apple.run, runCapture))
+                    audits.flags += compared.flags
+                    audits.notes += compared.notes
+                    audits.compared = audits.compared || compared.compared
+                }
                 return stateDiff(reference: referenceCapture, run: runCapture, referenceScrolled: referenceScreen.scrolls, runScrolled: runScreen.scrolls)
             }
             let unpaired = referenceScreen.captures.filter { !runSlugs.contains($0.state.slug) }
@@ -154,7 +168,9 @@ extension BundleDiff {
                 states: states,
                 unpairedStates: unpaired,
                 shiftFlags: shifts.compared ? shifts.flags : nil,
-                shiftNotes: shifts.notes.isEmpty ? nil : shifts.notes
+                shiftNotes: shifts.notes.isEmpty ? nil : shifts.notes,
+                appleFlags: audits.compared ? audits.flags : nil,
+                appleNotes: audits.notes.isEmpty ? nil : audits.notes
             )
         }
 

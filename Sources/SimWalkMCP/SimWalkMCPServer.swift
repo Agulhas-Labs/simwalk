@@ -187,7 +187,6 @@ private extension SimWalkMCPServer {
             tool = invocation.logName
             target = invocation.target.isEmpty ? nil : invocation.target
             resolvedTool = invocation.tool
-            // The next job replaces this refusal with the reader.
             let answer = try answering(invocation.tool, invocation.argumentVector, cancellation) { _, _ in }
             record(tool: tool, target: target, since: started, err: nil, saving: answer.saving)
             guard !cancellation.isCancelled else { return }
@@ -216,26 +215,35 @@ private extension SimWalkMCPServer {
             defer { inFlight.finish(id: id) }
             guard !cancellation.isCancelled else { return }
             let status = await walkStatus(invocation.target)
-            record(tool: invocation.logName, target: target, since: started, err: status.isError ? status.text.removingPrefix(AnswerVerdict.refused("").line) : nil, saving: nil, kind: status.isError ? Self.defaultFailureKind(for: .walkStatus) : nil)
+            // A cancelled status read did no device work, unlike a cancelled `walk`, whose thread logs the walk it did: it records nothing.
             guard !cancellation.isCancelled else { return }
+            record(tool: invocation.logName, target: target, since: started, err: status.isError ? status.text.removingPrefix(AnswerVerdict.refused("").line) : nil, saving: nil, kind: status.isError ? Self.defaultFailureKind(for: .walkStatus) : nil)
             return emit(resultID: id, text: status.text, isError: status.isError)
         }
+        // In flight before the busy wait, so a cancel heard while it waits names this call: a cancelled call is not answered, not even
+        // with the busy refusal, records nothing, and leaves no id behind for a later call to consume.
+        let cancellation = inFlight.start(id: id)
+        defer { inFlight.finish(id: id) }
+        guard !cancellation.isCancelled else { return }
         // One device-touching walk at a time, judged from the in-process state; a walk that has not reported its handle yet does so within milliseconds.
         while let running = walks.last, running.ended == nil {
             guard let handle = running.handle else {
                 await running.untilHandleOrEnd()
                 continue
             }
+            guard !cancellation.isCancelled else { return }
             let reason = "a walk is running (\(handle.text)); poll it with walk_status, then retry"
             record(tool: invocation.logName, target: target, since: started, err: reason, saving: nil, kind: .toolError)
             return emit(resultID: id, text: AnswerVerdict.refused(reason).line, isError: true)
         }
+        guard !cancellation.isCancelled else { return }
         guard invocation.tool == .walk else {
+            // `handleToolCall` starts the call itself: a cancel heard from here on is kept for that start to consume. Finish first, then
+            // re-check, so a cancel heard before the finish is not lost between the guard above and the hand-over.
+            inFlight.finish(id: id)
+            guard !cancellation.isCancelled else { return }
             return handleToolCall(id: id, params: params)
         }
-        let cancellation = inFlight.start(id: id)
-        defer { inFlight.finish(id: id) }
-        guard !cancellation.isCancelled else { return }
         let walk = BoundedWalk()
         walks.append(walk)
         start(walk, invocation, cancellation: cancellation, since: started)

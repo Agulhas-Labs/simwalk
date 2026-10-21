@@ -46,9 +46,11 @@ struct MCPClientModeTests {
 
     // MARK: Claude Code is unchanged
 
-    /// The recorded bytes are what the server sent before bounded mode existed (keys sorted, so the comparison is byte for byte).
+    /// The recorded fixture is what the server sent before bounded mode existed.
+    ///
+    /// The comparison is of the parsed list re-serialised with sorted keys, so it pins the JSON, not the bytes the server wrote.
     @Test
-    func claudeCodeToolsListIsByteIdenticalToTheRecordedFixture() async throws {
+    func claudeCodeToolsListIsTheSameJSONAsTheRecordedFixture() async throws {
         let tools = try await Self.listedTools(initializeFixture: "claude-code-2.1.302-initialize")
         let bytes = try JSONSerialization.data(withJSONObject: ["tools": tools], options: [.sortedKeys])
 

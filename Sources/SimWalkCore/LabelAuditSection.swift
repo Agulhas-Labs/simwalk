@@ -22,21 +22,25 @@ struct LabelAuditSection {
         distinct.count
     }
 
-    /// The verdict's clause for this rule, or nothing when it found nothing.
-    var verdictClause: String? {
-        AnswerVerdict.qualification(findingCount, noun, clause)
+    /// The verdict's clauses for this rule: what it found, then the captures it could not check; nothing for either that is zero.
+    var verdictClauses: [String] {
+        [
+            AnswerVerdict.qualification(findingCount, noun, clause),
+            AnswerVerdict.qualification(result.unchecked, "capture", "not checked by \(name.rawValue) (no screenshot read)"),
+        ].compactMap(\.self)
     }
 
     /// The heading, its arithmetic, and the findings grouped under their screens.
     var lines: [String] {
         let examined = "\(result.examined) \(examinedNoun)\(result.examined == 1 ? "" : "s") examined across \(captureCount) capture\(captureCount == 1 ? "" : "s")"
+        let unchecked = result.unchecked == 0 ? "" : "; \(result.unchecked) capture\(result.unchecked == 1 ? "" : "s") not checked (no screenshot read)"
         if let notApplicable, findingCount == 0 {
-            return ["[\(name.rawValue)] not applicable — \(notApplicable)"]
+            return ["[\(name.rawValue)] not applicable — \(notApplicable)\(unchecked)"]
         }
         guard findingCount > 0 else {
-            return ["[\(name.rawValue)] clean — \(examined)"]
+            return ["[\(name.rawValue)] clean — \(examined)\(unchecked)"]
         }
-        var lines = ["[\(name.rawValue)] \(findingCount) found — \(examined)"]
+        var lines = ["[\(name.rawValue)] \(findingCount) found — \(examined)\(unchecked)"]
         for (screen, rows) in AuditRowFormat.screensInOrder(distinct, screen: { $0.screenID }) {
             lines.append("  \(screen):")
             for row in rows {
@@ -48,7 +52,7 @@ struct LabelAuditSection {
         return lines
     }
 
-    private var distinct: [Row] {
+    var distinct: [Row] {
         var order: [Key] = []
         var collected: [Key: Row] = [:]
         var seenInCapture: [CaptureKey: Int] = [:]
@@ -71,7 +75,7 @@ struct LabelAuditSection {
     }
 }
 
-private extension LabelAuditSection {
+extension LabelAuditSection {
     struct CaptureKey: Hashable {
         let screenID: String
         let stateSlug: String

@@ -84,24 +84,52 @@ extension AXSegmenter {
     static func stack(from root: AXNode) -> [AXNode] {
         var node = root
         while true {
-            let items = node.children.filter(isContent)
+            let items = contentChildren(of: node).filter(isContent)
             guard items.count == 1, let only = items.first, only.label?.isEmpty ?? true else { return items }
             node = only
         }
     }
 
-    /// Whether `node` is part of the content: not a bar, not a scroll indicator, and carrying text somewhere below it.
+    /// Whether `node` is part of the content: not a bar, and carrying text somewhere below it, scroll indicators aside.
     static func isContent(_ node: AXNode) -> Bool {
-        guard barRoles[node.type] == nil, !isScrollIndicator(node) else { return false }
+        guard barRoles[node.type] == nil else { return false }
         if !(node.label ?? "").isEmpty || !(node.value ?? "").isEmpty {
             return true
         }
-        return node.children.contains(where: isContent)
+        return contentChildren(of: node).contains(where: isContent)
     }
 
-    /// A scroll view's indicator, which the tree carries as a labelled element whose value is a percentage.
-    static func isScrollIndicator(_ node: AXNode) -> Bool {
-        node.type == "Other" && node.value?.hasSuffix("%") == true
+    /// `node`'s children less its scroll indicators.
+    static func contentChildren(of node: AXNode) -> [AXNode] {
+        node.children.filter { !isScrollIndicator($0, in: node) }
+    }
+
+    /// Whether `node` is a scroll view's indicator, which the tree carries as a labelled element whose value is a percentage.
+    ///
+    /// It is one only when all of these hold, as every indicator in the measured captures does (2026-10-20): it is an `Other` directly under a scrolling container (``SystemSheetScope/scrollTypes``); nothing below it is more than a bare element, the indicator's thumb, with no text and no children; and its whole value is a whole number and a percent sign (``isPercentage(_:)``). A labelled element with a percentage for its value is otherwise content wherever it sits: a combined row, `Battery` with `80%`, in a card or a cell.
+    static func isScrollIndicator(_ node: AXNode, in parent: AXNode) -> Bool {
+        guard SystemSheetScope.scrollTypes.contains(parent.type), node.type == "Other", let value = node.value else { return false }
+        let bare = node.children.allSatisfy { thumb in
+            thumb.children.isEmpty && (thumb.label ?? "").isEmpty && (thumb.value ?? "").isEmpty
+        }
+        return bare && isPercentage(value)
+    }
+
+    /// Whether `value` is a whole number and a percent sign, in any locale's format: decimal digits of any script, with `%` or the Arabic `٪` at either end.
+    ///
+    /// The direction marks iOS writes around the figure and the sign in a right-to-left language (`\u{200F}0\u{200E}%\u{200E}` in Arabic) are read past, and so is the space many locales put between them (`0\u{00A0}%` in French and German): kept, the indicator became content in those states alone. The sign leads in Turkish (`%0`), and Persian writes its own digits (`۰٪`).
+    static func isPercentage(_ value: String) -> Bool {
+        let scalars = Array(value.unicodeScalars.filter { !$0.properties.isBidiControl && $0.properties.generalCategory != .spaceSeparator })
+        let isSign: (Unicode.Scalar) -> Bool = { $0 == "%" || $0 == "\u{066A}" }
+        let figure: ArraySlice<Unicode.Scalar>
+        if let last = scalars.last, isSign(last) {
+            figure = scalars.dropLast()
+        } else if let first = scalars.first, isSign(first) {
+            figure = scalars.dropFirst()
+        } else {
+            return false
+        }
+        return !figure.isEmpty && figure.allSatisfy { $0.properties.numericType == .decimal }
     }
 
     /// The stack's items grouped into sections, in order.
@@ -161,14 +189,22 @@ extension AXSegmenter {
         min(first.maxY, second.maxY) - max(first.y, second.y) > 1
     }
 
-    /// The runs of text under `node` that nothing below them restates — a combined element's parts rather than their join, and never an image.
+    /// The runs of text under `node` that nothing below them restates — a combined element's parts rather than their join, and never an image or a scroll indicator.
     static func textLeaves(of node: AXNode) -> [AXNode] {
+        textLeaves(of: node, in: nil).map(\.leaf)
+    }
+
+    /// ``textLeaves(of:)``, each with the frame of the list cell it sits in — the innermost `Cell` around it, from `cell` down — or `nil` outside one.
+    ///
+    /// A scroll indicator is not text wherever its container sits: the tree carries it twice at one frame, so a section holding it as a run had its label drawn over itself.
+    static func textLeaves(of node: AXNode, in cell: AXNode.Frame?) -> [(leaf: AXNode, cell: AXNode.Frame?)] {
         guard node.type != "Image" else { return [] }
-        let inner = node.children.flatMap(textLeaves)
+        let cell = node.type == "Cell" ? node.frame : cell
+        let inner = contentChildren(of: node).flatMap { textLeaves(of: $0, in: cell) }
         if !inner.isEmpty {
             return inner
         }
-        return (node.label ?? "").isEmpty ? [] : [node]
+        return (node.label ?? "").isEmpty ? [] : [(node, cell)]
     }
 }
 
@@ -180,7 +216,7 @@ extension AXSegmenter {
             role: role,
             frame: bar.frame,
             placement: placement(of: bar.frame, in: viewport),
-            textRuns: textLeaves(of: bar).map(textRun)
+            textRuns: textLeaves(of: bar).map { textRun($0) }
         )
     }
 
@@ -194,7 +230,7 @@ extension AXSegmenter {
             role: .content,
             frame: frame,
             placement: placement(of: frame, in: viewport),
-            textRuns: members.flatMap(textLeaves).map(textRun),
+            textRuns: members.flatMap { textLeaves(of: $0, in: nil) }.map { textRun($0.leaf, cell: $0.cell) },
             containerFrame: containers.isEmpty ? nil : union(containers.map(\.frame))
         )
     }
@@ -250,9 +286,9 @@ extension AXSegmenter {
         }
     }
 
-    /// A text leaf as a run: its shape and its frame.
-    static func textRun(_ node: AXNode) -> ScreenSection.TextRun {
-        ScreenSection.TextRun(shape: TextShape.of(node.label ?? ""), frame: node.frame)
+    /// A text leaf as a run: its shape, its frame, the list cell it sits in, if any, and its text.
+    static func textRun(_ node: AXNode, cell: AXNode.Frame? = nil) -> ScreenSection.TextRun {
+        ScreenSection.TextRun(shape: TextShape.of(node.label ?? ""), frame: node.frame, cell: cell, text: node.label ?? "")
     }
 
     /// Where `frame` sits against `viewport`.

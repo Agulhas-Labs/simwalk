@@ -21,6 +21,8 @@ final class LiveSessionServer {
     /// The app launched, once it is.
     private var app: XCUIApplication?
     private var bundleID = ""
+    /// What the session launched, which a `relaunch` launches again.
+    private var launched: LiveSessionLaunch?
     /// The location the device was simulating before the launch state set its own; read only when it does.
     private var foundLocation: XCUILocation?
     private var setsLocation = false
@@ -89,6 +91,15 @@ final class LiveSessionServer {
         let app = XCUIApplication(bundleIdentifier: launch.appBundleID)
         self.app = app
         bundleID = launch.appBundleID
+        launched = launch
+        try self.launch(app, as: launch)
+        return LiveSessionReady(device: WalkRunner.device(), runnerCommit: runnerCommit, readyAt: Date())
+    }
+
+    /// Ends `app` and launches it under `launch`'s state — the start's launch, and every `relaunch`'s, so the two cannot differ.
+    ///
+    /// The location the device simulated before is taken once, at the first launch that sets one, so a relaunch cannot take the state's own location for it.
+    private func launch(_ app: XCUIApplication, as launch: LiveSessionLaunch) throws {
         app.terminate()
         if let state = launch.state {
             // The host refuses a location on a device, which cannot simulate one; if one arrives anyway, fail rather than set it.
@@ -98,8 +109,10 @@ final class LiveSessionServer {
             let baseEnvironment = AnimationsOptIn.inserting(AnimationsOptIn.library(in: ProcessInfo.processInfo.environment), into: app.launchEnvironment)
             XCUIDevice.shared.appearance = WalkRunner.style(state.theme)
             if let location = state.location {
+                if !setsLocation {
+                    foundLocation = XCUIDevice.shared.location
+                }
                 setsLocation = true
-                foundLocation = XCUIDevice.shared.location
                 XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: location.latitude, longitude: location.longitude))
             }
             WalkRunner.launch(app, under: state, over: baseEnvironment)
@@ -107,7 +120,6 @@ final class LiveSessionServer {
             app.launchEnvironment = AnimationsOptIn.inserting(AnimationsOptIn.library(in: ProcessInfo.processInfo.environment), into: app.launchEnvironment)
             app.launch()
         }
-        return LiveSessionReady(device: WalkRunner.device(), runnerCommit: runnerCommit, readyAt: Date())
     }
 
     /// One request's answer.
@@ -121,6 +133,16 @@ final class LiveSessionServer {
             return LiveSessionResponse(n: request.n, action: .read, screen: screen)
         case .step:
             return try step(request, in: app)
+        case .relaunch:
+            guard let launched else {
+                throw WalkRunner.InspectRefusal(description: "the session was asked to relaunch before it had launched")
+            }
+            return try stepper.relaunch(
+                request,
+                screen: WalkRunner.Device(app: app, springboard: XCUIApplication(bundleIdentifier: StepPerformer.springboardBundleID), started: Date()),
+                launch: { try launch(app, as: launched) },
+                read: { try WalkRunner.liveScreen(of: app, bundleID: bundleID, runnerCommit: runnerCommit, nonce: sessionID) }
+            )
         case .end:
             // The loop has already handed the device back; this is the acknowledgement, and the exit record follows it.
             return LiveSessionResponse(n: request.n, action: .end)

@@ -100,7 +100,8 @@ struct SessionAnimationsTests {
                 .reduce(0) { $0 + $1.components(separatedBy: needle).count - 1 }
         }
 
-        #expect(try count("animationsLibrary: Self.standardAnimationsLibrary(), note: StandardStreams.emitError)", in: "WalkCommand.swift") == 2)
+        #expect(try count("animationsLibrary: Self.standardAnimationsLibrary(), interruption: cancellation, note: StandardStreams.emitError)", in: "WalkCommand.swift") == 1)
+        #expect(try count("animationsLibrary: Self.standardAnimationsLibrary(), note: StandardStreams.emitError)", in: "WalkCommand.swift") == 1)
         #expect(try count("animationsLibrary: WalkCommand.standardAnimationsLibrary(), note: StandardStreams.emitError)", in: "SessionStartCommand.swift") == 1)
         #expect(try count("animationsLibrary: ([String: String]) -> WalkCommand.AnimationsLibrary = { WalkCommand.standardAnimationsLibrary(environment: $0) }", in: "MCPToolRunner.swift") == 1)
         #expect(try count("animationsLibrary:", in: "MCPCommand.swift") == 0)

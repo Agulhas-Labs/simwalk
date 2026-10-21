@@ -1,0 +1,51 @@
+# DemoApp — the subject of SimWalk's README demo: one generic "Account" screen whose rows are a title and a value.
+#
+# Launched with the `SimWalkDemoRegression` user default on, each row stops being the adaptive baseline (an HStack, a VStack at
+# accessibility sizes) and becomes a ZStack with the title pinned leading and the value pinned trailing, so at an
+# accessibility text size the two draw over each other. At the default size, in light and dark, they do not touch.
+# `demo.walkbook.json` walks light, dark, an accessibility size and Arabic; a walk with the default off and one with
+# it on differ by exactly that regression. README.md says how to set the default and read the result.
+#
+# A project of its own, like RouteFixture. The committed `.xcodeproj` builds without XcodeGen; this file documents
+# how it was made. Build and walk:
+#     xcodegen generate
+#     xcodebuild -project DemoApp.xcodeproj -scheme DemoApp \
+#       -destination 'generic/platform=iOS Simulator' -derivedDataPath ../../.build/demo-app build
+#     simwalk walk demo.walkbook.json --output <output>.simwalk --device <udid> \
+#       --app-path ../../.build/demo-app/Build/Products/Debug-iphonesimulator/DemoApp.app
+name: DemoApp
+
+options:
+  bundleIdPrefix: dev.simwalk
+  deploymentTarget:
+    iOS: "18.0"
+
+targets:
+  DemoApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: DemoApp
+    info:
+      path: DemoApp/Info.plist
+      properties:
+        CFBundleDisplayName: Demo
+        CFBundleLocalizations: [en, ar]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.simwalk.demo
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+
+schemes:
+  DemoApp:
+    build:
+      targets:
+        DemoApp: all
+    run:
+      config: Debug

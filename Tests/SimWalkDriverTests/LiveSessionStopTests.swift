@@ -295,6 +295,29 @@ struct LiveSessionStopTests {
         #expect(report.lines.contains { $0.hasPrefix("accessibility:") && $0.contains("`session list` switched it back on") })
     }
 
+    /// SimWalk#159: when accessibility's restore is `session list`'s, the appearance line still names the session, which put the appearance back itself.
+    @Test
+    func theAppearanceLineNamesTheSessionEvenWhenListRestoredAccessibility() {
+        let report = LiveSessionStop.Report(
+            steps: [],
+            exit: nil,
+            handback: DeviceHandback(
+                accessibility: AccessibilityPreference.Restoration(udid: "UDID-1", state: .restored),
+                appearance: .failed(found: .light, reason: "boom")
+            ),
+            stillRunning: false,
+            removalFailure: nil,
+            accessibilityBy: "`session list`",
+            skippedHandback: false,
+            completedBy: nil,
+            ownLeaseLapsedDuring: false
+        )
+
+        #expect(report.lines.contains { $0.hasPrefix("accessibility:") && $0.contains("`session list` switched it back on") })
+        #expect(report.lines.contains { $0.hasPrefix("appearance:") && $0.contains("before this session started and could not be put back") })
+        #expect(!report.lines.contains { $0.hasPrefix("appearance:") && $0.contains("session list") })
+    }
+
     /// A restore `session list` recorded as failed is made again: this `end` is the last handback before the record goes with the session's directory.
     @Test
     func arestoreSessionListRecordedAsFailedIsMadeAgain() throws {
@@ -503,9 +526,11 @@ struct LiveSessionStopTests {
         #expect(!fixture.wroteAccessibility)
     }
 
-    /// SimWalk#96: a device something else is using is not written to — no accessibility write, no appearance write — and the answer says why and is qualified; the session is still removed.
+    /// SimWalk#96: a device something else is using is not written to — no accessibility write, no appearance write — and the answer says why and is qualified.
+    ///
+    /// SimWalk#128: the session is kept rather than removed, so the handback is deferred, not dropped, and the answer names the `end` that completes it.
     @Test
-    func aBusyDeviceIsNotHandedBack() throws {
+    func aBusyDeviceIsNotHandedBackAndItsHandbackIsDeferred() throws {
         let fixture = try Fixture.stoppedLongAgo()
         fixture.accessibility = "0"
 
@@ -515,7 +540,127 @@ struct LiveSessionStopTests {
         #expect(fixture.vectors.isEmpty)
         #expect(report.steps.contains { $0.hasPrefix("did not hand UDID-1 back") })
         #expect(report.qualifications == ["the device was not handed back: something else is using it"])
+        #expect(FileManager.default.fileExists(atPath: fixture.layout.directory.path))
+        #expect(LiveSessionStop.Deferral.read(from: fixture.layout.deferredHandback) == LiveSessionStop.Deferral(holder: "a walk or another session"))
+        #expect(report.steps.contains { $0.contains("the handback is deferred until a walk or another session is done with UDID-1 — `simwalk session end s1` then hands it back") })
+    }
+
+    /// SimWalk#128: once the device is free, the next `end` of a session whose handback was deferred makes the whole handback, says it is completing the deferred one, and removes the session.
+    @Test
+    func aDeferredHandbackIsMadeByTheNextEndOnceTheDeviceIsFree() throws {
+        let fixture = try Fixture.stoppedLongAgo()
+        fixture.accessibility = "0"
+        _ = fixture.stop(isDeviceBusy: { _ in true })
+
+        let report = fixture.stop()
+
+        #expect(report.handback?.accessibility.state == .restored)
+        #expect(report.handback?.appearance == .restored(.light))
+        #expect(report.steps.contains { $0.hasPrefix("handing UDID-1 back now: an earlier `end` deferred it while a walk or another session held the device") })
+        #expect(report.qualifications.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: fixture.layout.directory.path))
+    }
+
+    /// SimWalk#128 review: a device free when the handback began and taken during its teardown wait has the rest left undone by the re-ask, and the session is kept with a deferral rather than removed with the restore dropped for good; the next `end` with the device free completes it.
+    @Test
+    func aDeviceTakenDuringTheHandbackKeepsTheSessionWithADeferral() throws {
+        let fixture = try Fixture.stoppedLongAgo()
+        fixture.accessibility = "0"
+        var asked = 0
+
+        let report = fixture.stop(isDeviceBusy: { _ in
+            asked += 1
+            return asked > 1
+        })
+
+        #expect(report.handback?.accessibility.state == .leftToAnotherHolder)
+        #expect(report.handback?.appearance == .leftToAnotherHolder(found: .light))
+        #expect(!fixture.wroteAccessibility)
+        #expect(report.steps.contains("did not finish handing UDID-1 back: a walk or another session took it during the handback, so what was left would land under that holder"))
+        #expect(report.lines.contains { $0.hasSuffix("— `simwalk session end s1` switches it back on once that holder is done") })
+        #expect(report.lines.contains { $0.hasSuffix("— `simwalk session end s1` puts it back once that holder is done") })
+        #expect(!report.lines.contains { $0.contains("run: ") })
+        #expect(LiveSessionStop.Deferral.read(from: fixture.layout.deferredHandback) == LiveSessionStop.Deferral(holder: "a walk or another session"))
+
+        let next = fixture.stop()
+
+        #expect(next.handback?.accessibility.state == .restored)
+        #expect(next.handback?.appearance == .restored(.light))
+        #expect(next.steps.contains { $0.hasPrefix("handing UDID-1 back now: an earlier `end` deferred it") })
+        #expect(!FileManager.default.fileExists(atPath: fixture.layout.directory.path))
+    }
+
+    /// The session's own lease stopping being held during the handback, after accessibility was written: the step says the rest was not handed back, not that nothing was, and the parts the re-ask left undone are neither noted as taken by another holder nor qualify the answer.
+    @Test
+    func anOwnLeaseThatLapsesDuringTheHandbackSaysTheRestWasNotHandedBack() throws {
+        let fixture = try Fixture.stoppedLongAgo()
+        fixture.accessibility = "0"
+        var asked = 0
+
+        let report = fixture.stop(isDeviceBusy: { _ in
+            asked += 1
+            return asked > 2
+        }, holder: { _ in .ownLeaseNotHeld })
+
+        #expect(report.handback?.accessibility.state == .restored)
+        #expect(report.handback?.appearance == .leftToAnotherHolder(found: .light))
+        #expect(fixture.wroteAccessibility)
+        #expect(report.steps.contains("did not finish handing UDID-1 back: the session's own lease stopped being held during the handback (lapsed, or being released), so the device awaits deletion and the rest was not handed back"))
+        #expect(!report.steps.contains { $0.contains("nothing was handed back") })
+        #expect(report.lines.contains { $0.hasPrefix("accessibility:") })
+        #expect(!report.lines.contains { $0.contains("another holder took") })
+        #expect(report.qualifications.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: fixture.layout.directory.path))
+    }
+
+    /// The lease lapsing before accessibility is written leaves both parts undone, and neither is said to be another holder's.
+    @Test
+    func anOwnLeaseThatLapsesBeforeAnythingIsWrittenLeavesNoLineSayingAnotherHolderTookIt() throws {
+        let fixture = try Fixture.stoppedLongAgo()
+        fixture.accessibility = "0"
+        var asked = 0
+
+        let report = fixture.stop(isDeviceBusy: { _ in
+            asked += 1
+            return asked > 1
+        }, holder: { _ in .ownLeaseNotHeld })
+
+        #expect(report.handback?.accessibility.state == .leftToAnotherHolder)
+        #expect(report.handback?.appearance == .leftToAnotherHolder(found: .light))
+        #expect(!report.lines.contains { $0.contains("another holder took") })
+        #expect(report.qualifications.isEmpty)
+    }
+
+    /// A restore `session list` recorded names that actor for accessibility; the drop must not depend on the actor `end` renders the undone appearance with.
+    @Test
+    func anOwnLeaseThatLapsesAfterARecordedListRestoreLeavesNoLineSayingAnotherHolderTookIt() throws {
+        let fixture = try Fixture.stoppedLongAgo()
+        try fixture.listed(.restored, coveredStop: Date(timeIntervalSince1970: 900))
+        var asked = 0
+
+        let report = fixture.stop(isDeviceBusy: { _ in
+            asked += 1
+            return asked > 1
+        }, holder: { _ in .ownLeaseNotHeld })
+
+        #expect(report.accessibilityBy == "`session list`")
+        #expect(report.handback?.appearance == .leftToAnotherHolder(found: .light))
+        #expect(report.lines.contains { $0.hasPrefix("accessibility:") && $0.contains("`session list` switched it back on") })
+        #expect(!report.lines.contains { $0.contains("another holder took") })
+        #expect(report.qualifications.isEmpty)
+    }
+
+    /// A live lease carrying the session's own token, with the walk that held the device gone, is a holder that has just finished — a deferral the next `end` completes — not a clone awaiting deletion.
+    @Test
+    func aLiveOwnLeaseWithNoWalkIsAnotherHolderNotAnUnheldLease() throws {
+        let directory = try TemporaryDirectory()
+        let store = LiveSessionStore(directory: directory.url.appendingPathComponent("sessions", isDirectory: true))
+        let leases = LeaseStore(directory: directory.url.appendingPathComponent("leases", isDirectory: true)) { _ in true }
+        _ = try leases.acquire(udid: "UDID-1", ttl: 1800, holderPID: 1, now: Date(timeIntervalSince1970: 1000), createdDevice: true, token: "LEASE-1")
+
+        let holder = LiveSessionStop.Holder.on(udid: "UDID-1", session: (id: "s1", leaseToken: "LEASE-1"), store: store, processes: FakeSessionProcesses(), leases: leases, now: Date(timeIntervalSince1970: 1001))
+
+        #expect(holder == .another("another holder of its lease"))
     }
 }
 
@@ -607,9 +752,13 @@ extension LiveSessionStopTests {
             )
         }
 
-        func stop(isDeviceBusy: @escaping (Date) -> Bool = { _ in false }) -> LiveSessionStop.Report {
+        func stop(isDeviceBusy: @escaping (Date) -> Bool = { _ in false }, holder: @escaping (Date) -> LiveSessionStop.Holder = { _ in .another("a walk or another session") }) -> LiveSessionStop.Report {
             let record = LiveSessionRecord(id: "s1", pid: LiveSessionStopTests.pid, udid: "UDID-1", app: "com.example.live", startedAt: Date(timeIntervalSince1970: 0), foundAppearance: .light)
-            return LiveSessionStop(record: record, store: store, processes: processes, isDeviceBusy: isDeviceBusy).perform(
+            // `end` stops a session it found by its record, and only a recorded session is kept for a later `end`.
+            if FileManager.default.fileExists(atPath: layout.directory.path), store.record(id: "s1") == nil {
+                try? store.write(record)
+            }
+            return LiveSessionStop(record: record, store: store, processes: processes, isDeviceBusy: isDeviceBusy, holder: holder).perform(
                 run: { [self] _, arguments in
                     vectors.append(arguments)
                     if arguments.contains("write") {

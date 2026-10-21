@@ -150,6 +150,29 @@ struct LiveSessionStepTests {
         #expect(readsWhenRead >= 6)
     }
 
+    /// A relaunch launches, waits for the relaunched app to hold still, and answers with the screen under its own action.
+    @Test
+    func aRelaunchLaunchesThenReadsTheScreenOnceItHasHeldStill() throws {
+        var stepper = LiveSessionStepper(quiet: 0.25)
+        let screen = CountingTreeSource(trees: [Self.home(x: 60), Self.home(x: 40)], then: Self.home)
+        var launched = 0
+        var readsWhenRead = 0
+
+        let response = try stepper.relaunch(
+            LiveSessionRequest(n: 4, action: .relaunch),
+            screen: screen,
+            launch: { launched += 1 },
+            read: {
+                readsWhenRead = screen.reads
+                return Self.screen(Self.home)
+            }
+        )
+
+        #expect(launched == 1)
+        #expect(readsWhenRead >= 3)
+        #expect(response == LiveSessionResponse(n: 4, action: .relaunch, screen: Self.screen(Self.home)))
+    }
+
     // MARK: - The route, and the answer
 
     @Test
@@ -168,6 +191,26 @@ struct LiveSessionStepTests {
         try channel.respond(LiveSessionResponse(n: 5, action: .step, step: .landed(.back, delta: delta)))
 
         #expect(try channel.route() == [.openURL(url: "x://detail"), .back])
+    }
+
+    /// A relaunch puts the app back at launch, so the steps before it are not on the way to where the session ends.
+    @Test
+    func theRouteStartsAfterTheLastRelaunch() throws {
+        let directory = try TemporaryDirectory()
+        let channel = LiveSessionChannel(layout: LiveSessionLayout(directory: directory.url))
+        try channel.prepare()
+        let delta = ScreenDelta(from: Self.home, to: Self.detail)
+        for _ in 1 ... 5 {
+            _ = try channel.send(.read)
+        }
+        try channel.respond(LiveSessionResponse(n: 1, action: .step, step: .landed(.openURL(url: "x://one"), delta: delta)))
+        try channel.respond(LiveSessionResponse(n: 2, action: .step, step: .landed(.openURL(url: "x://two"), delta: delta)))
+        try channel.respond(LiveSessionResponse(n: 3, action: .step, step: .landed(.back, delta: delta)))
+        try channel.respond(LiveSessionResponse(n: 4, action: .relaunch, screen: Self.screen(Self.home)))
+        try channel.respond(LiveSessionResponse(n: 5, action: .step, step: .landed(.openURL(url: "x://detail"), delta: delta)))
+
+        #expect(try channel.route() == [.openURL(url: "x://detail")])
+        #expect(try channel.landedSteps(since: 1).map(\.request) == [5])
     }
 
     @Test

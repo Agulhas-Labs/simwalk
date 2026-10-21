@@ -54,8 +54,7 @@ public struct DisclosureAffordanceAudit {
     /// A row qualifies when it carries a label of its own — so it is a row a user reads, not a layout box — and holds a descendant that is small, unlabelled, and pressed against the row's trailing edge. The thresholds are generous relative to the real glyph (7.7 × 13.7, its right edge 8pt inside its row's) because they are describing a class of symbol rather than one asset, and a check that only ever matches the exact chevron this app ships is a check that silently stops working when the design does.
     static func disclosureRows(in tree: AXNode, screenID: String, stateSlug: String) -> [DisclosureRow] {
         tree.flattened.compactMap { node in
-            guard let label = node.label, !label.isEmpty else { return nil }
-            guard node.children.contains(where: { isTrailingGlyph($0, within: node) }) else { return nil }
+            guard isDisclosureRow(node), let label = node.label else { return nil }
             return DisclosureRow(
                 screenID: screenID,
                 stateSlug: stateSlug,
@@ -64,6 +63,12 @@ public struct DisclosureAffordanceAudit {
                 frame: node.frame
             )
         }
+    }
+
+    /// Whether `node` is a disclosure row: it carries a label of its own and a trailing glyph among its children — the one test `discover` taps a row by as well (`DiscoverClassifier`).
+    static func isDisclosureRow(_ node: AXNode) -> Bool {
+        guard let label = node.label, !label.isEmpty else { return false }
+        return node.children.contains { isTrailingGlyph($0, within: node) }
     }
 
     /// Whether a child reads as a disclosure glyph drawn at the end of its row.

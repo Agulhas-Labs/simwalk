@@ -57,6 +57,48 @@ struct LiveSessionAccessibilityHandbackTests {
         #expect(fixture.device.calls.isEmpty != handedBack)
     }
 
+    /// The session's own token exempts its device only while that lease is held: a release under it is deleting the device, so the device is busy and `list` leaves it alone.
+    @Test
+    func asessionsOwnLeaseBeingReleasedKeepsListFromHandingItsDeviceBack() throws {
+        let fixture = try Fixture()
+        try fixture.staleSession("stale", leaseToken: "LEASE-1")
+        _ = try fixture.leases.acquire(udid: "UDID-1", ttl: 60, holderPID: Fixture.walkPID, now: Date(timeIntervalSince1970: 0), token: "LEASE-1")
+        var handbacks: [String: AccessibilityPreference.Restoration] = [:]
+
+        let released = try fixture.leases.retire(udid: "UDID-1", token: "LEASE-1") { _ in handbacks = fixture.perform() }
+
+        #expect(released)
+        #expect(handbacks.isEmpty)
+        #expect(fixture.device.calls.isEmpty)
+    }
+
+    /// A clone whose lease, the session's own, has lapsed awaits deletion: its device is busy, and `list` leaves it alone.
+    @Test
+    func asessionsOwnLapsedCloneLeaseKeepsListFromHandingItsDeviceBack() throws {
+        let fixture = try Fixture(start: Date(timeIntervalSince1970: 3600))
+        try fixture.staleSession("stale", leaseToken: "LEASE-1")
+        _ = try fixture.leases.acquire(udid: "UDID-1", ttl: 60, holderPID: Fixture.walkPID, now: Date(timeIntervalSince1970: 0), createdDevice: true, token: "LEASE-1")
+
+        let handbacks = fixture.perform()
+
+        #expect(handbacks.isEmpty)
+        #expect(fixture.device.calls.isEmpty)
+    }
+
+    /// Two stopped sessions on one device started under different leases: whichever of the two is still held is a stopped session's own, so `list` hands the device back.
+    @Test(arguments: ["LEASE-A", "LEASE-B"])
+    func eitherOfTwoStoppedSessionsOwnLeasesDoesNotKeepListFromHandingTheirDeviceBack(held: String) throws {
+        let fixture = try Fixture()
+        try fixture.staleSession("a", leaseToken: "LEASE-A")
+        try fixture.staleSession("b", leaseToken: "LEASE-B")
+        _ = try fixture.leases.acquire(udid: "UDID-1", ttl: 60, holderPID: Fixture.walkPID, now: Date(timeIntervalSince1970: 0), token: held)
+
+        let handbacks = fixture.perform()
+
+        #expect(Set(handbacks.keys) == ["a", "b"])
+        #expect(!fixture.device.calls.isEmpty)
+    }
+
     /// A walk under the stopped session's own lease token is still a walk: the token's exemption does not cover its claim, so `list` leaves the device alone until the walk ends (SimWalk#128).
     @Test
     func awalkUnderTheSessionsOwnLeaseKeepsListFromHandingItsDeviceBack() throws {
@@ -188,6 +230,54 @@ struct LiveSessionAccessibilityHandbackTests {
             #expect(LiveSessionAccessibilityHandback.Record.read(from: fixture.store.layout(id: id).accessibilityHandback)?.coveredStop == list.addingTimeInterval(-2))
         }
     }
+
+    /// A walk that claims the device while `list` waits out the teardown gets nothing written under it: the busy question is asked again after the wait, the session is left unrecorded, its line says another holder took the device, and the `list` after the walk is gone hands it back (SimWalk#128).
+    @Test
+    func awalkThatClaimsTheDeviceDuringTheTeardownWaitGetsNoWriteAndNoRecord() throws {
+        let fixture = try Fixture(accessibility: "1")
+        try fixture.staleSession("stale")
+        fixture.teardownAfter = 3
+        fixture.whenTornDown = { [unowned fixture] in
+            fixture.processes.alive.insert(Fixture.walkPID)
+            _ = try? WalkClaim.take(udid: "UDID-1", in: fixture.leases, holder: Fixture.walkPID, isAlive: fixture.processes.isAlive)
+        }
+
+        let whileWalking = try #require(fixture.perform()["stale"])
+        let writesWhileWalking = fixture.device.writes
+        let recordedWhileWalking = FileManager.default.fileExists(atPath: fixture.store.layout(id: "stale").accessibilityHandback.path)
+        fixture.processes.alive.remove(Fixture.walkPID)
+        let afterward = fixture.perform()
+
+        #expect(whileWalking.state == .leftToAnotherHolder)
+        #expect(writesWhileWalking.isEmpty)
+        #expect(!recordedWhileWalking)
+        #expect(LiveSessionAccessibilityHandback.line(whileWalking).contains("another holder took UDID-1"))
+        #expect(LiveSessionAccessibilityHandback.line(whileWalking).hasSuffix("— the next `session list` or `session end` switches it back on once that holder is done"))
+        #expect(!LiveSessionAccessibilityHandback.line(whileWalking).contains("run:"))
+        #expect(afterward["stale"]?.state == .restored)
+    }
+
+    /// A device that turns busy after `list` has begun, while an earlier device's restore waits, is skipped when its turn comes.
+    ///
+    /// The busy question is asked afresh before each device, not once before the loop. Nothing is run against it and it gets no entry, so a later `list` or `end` hands it back.
+    @Test
+    func adeviceThatTurnsBusyBeforeItsTurnIsSkippedNotRestored() throws {
+        let fixture = try Fixture(accessibility: "1")
+        try fixture.staleSession("a", udid: "UDID-1")
+        try fixture.staleSession("b", udid: "UDID-2")
+        fixture.teardownAfter = 3
+        fixture.whenTornDown = { [unowned fixture] in
+            fixture.processes.alive.insert(Fixture.walkPID)
+            _ = try? WalkClaim.take(udid: "UDID-2", in: fixture.leases, holder: Fixture.walkPID, isAlive: fixture.processes.isAlive)
+        }
+
+        let handbacks = fixture.perform()
+
+        #expect(handbacks["a"]?.state == .restored)
+        #expect(handbacks["b"] == nil)
+        #expect(!fixture.device.calls.contains { $0.contains("UDID-2") })
+        #expect(!FileManager.default.fileExists(atPath: fixture.store.layout(id: "b").accessibilityHandback.path))
+    }
 }
 
 extension LiveSessionAccessibilityHandbackTests {
@@ -202,6 +292,8 @@ extension LiveSessionAccessibilityHandbackTests {
         let device: Device
         /// After how long paused the device's XCUITest teardown switches accessibility off, when it is still to come.
         var teardownAfter: TimeInterval?
+        /// What else happens the moment the teardown lands — another holder taking the device during the wait.
+        var whenTornDown: (() -> Void)?
         private var elapsed: TimeInterval = 0
         private let start: Date
 
@@ -219,10 +311,10 @@ extension LiveSessionAccessibilityHandbackTests {
             elapsed
         }
 
-        /// A session on `UDID-1` whose runner's pid is gone; `stoppedAt`, when given, is when its runner recorded an idle exit.
-        func staleSession(_ id: String, stoppedAt: Date? = nil) throws {
+        /// A session on `udid` whose runner's pid is gone; `stoppedAt`, when given, is when its runner recorded an idle exit, and `leaseToken` the lease it was started under.
+        func staleSession(_ id: String, udid: String = "UDID-1", stoppedAt: Date? = nil, leaseToken: String? = nil) throws {
             _ = try store.create(id: id)
-            try store.write(LiveSessionRecord(id: id, pid: 11, udid: "UDID-1", app: "com.example.live", startedAt: Date(timeIntervalSince1970: 0), foundAppearance: .light))
+            try store.write(LiveSessionRecord(id: id, pid: 11, udid: udid, app: "com.example.live", startedAt: Date(timeIntervalSince1970: 0), foundAppearance: .light, leaseToken: leaseToken))
             if let stoppedAt {
                 try LiveSessionChannel(layout: store.layout(id: id)).markExit(.idle(after: 900, served: 1, stoppedAt: stoppedAt))
             }
@@ -252,6 +344,7 @@ extension LiveSessionAccessibilityHandbackTests {
                     if let teardown = teardownAfter, elapsed >= teardown {
                         device.tearDown()
                         teardownAfter = nil
+                        whenTornDown?()
                     }
                 },
                 now: { [self] in start.addingTimeInterval(elapsed) }

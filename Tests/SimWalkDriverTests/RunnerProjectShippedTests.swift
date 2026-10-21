@@ -141,6 +141,52 @@ struct RunnerProjectShippedTests {
         #expect(try String(contentsOf: package, encoding: .utf8) == "// package\n")
     }
 
+    /// Two first walks both find a stale snapshot: the one that replaces it second waits for the first's replace to finish, then finds the fresh snapshot matching and keeps it rather than moving it away (SimWalk#139 item 2).
+    ///
+    /// This pins the property itself — the check and the replace hold one lock — since the race sits between two adjacent statements no stress run can be relied on to hit.
+    @Test
+    func aCopyThatFoundAStaleSnapshotWaitsOutAnotherReplaceAndKeepsItsSnapshot() throws {
+        let directory = try TemporaryDirectory()
+        let fixture = try ShippedTreeFixture(in: directory, commit: Self.commit, stampedFor: Self.binaryHash)
+        let runner = directory.url.appendingPathComponent("runner")
+        let store = RunnerStore(directory: runner)
+        let shipped = try ShippedRunner.find(besideExecutable: fixture.binary, binaryHash: Self.binaryHash)
+        let content = try store.install(shipped: shipped, binaryHash: Self.binaryHash).binding.contentHash
+        let snapshot = store.snapshotsDirectory.appendingPathComponent(Self.commit, isDirectory: true)
+        try Data("// tampered\n".utf8).write(to: snapshot.appendingPathComponent("Package.swift"))
+        let lock = open(store.snapshotsDirectory.path, O_RDONLY | O_DIRECTORY)
+        #expect(lock >= 0)
+        #expect(flock(lock, LOCK_EX) == 0)
+        defer { close(lock) }
+
+        let finished = DispatchSemaphore(value: 0)
+        let failure = Failure()
+        let (files, root) = (shipped.files(), shipped.root)
+        DispatchQueue.global().async {
+            do {
+                try RunnerStore(directory: runner).copy(files, from: root, to: snapshot, content: content)
+            } catch {
+                failure.record(error)
+            }
+            finished.signal()
+        }
+        #expect(finished.wait(timeout: .now() + 0.4) == .timedOut, "the copy replaced the snapshot while another replace held the lock")
+        // The other replacer, holding the lock, moves the stale snapshot away and its own fresh one into place.
+        let fresh = directory.url.appendingPathComponent("fresh", isDirectory: true)
+        try FileManager.default.copyItem(at: snapshot, to: fresh)
+        try Data("// package\n".utf8).write(to: fresh.appendingPathComponent("Package.swift"))
+        try FileManager.default.removeItem(at: snapshot)
+        try FileManager.default.moveItem(at: fresh, to: snapshot)
+        let placed = try FileManager.default.attributesOfItem(atPath: snapshot.path)[.systemFileNumber] as? Int
+        #expect(flock(lock, LOCK_UN) == 0)
+        #expect(finished.wait(timeout: .now() + 10) == .success)
+
+        let kept = try FileManager.default.attributesOfItem(atPath: snapshot.path)[.systemFileNumber] as? Int
+        #expect(failure.error == nil)
+        #expect(placed != nil)
+        #expect(kept == placed)
+    }
+
     /// With neither a shipped tree nor a checkout, the refusal names the shipped place it looked.
     @Test
     func awalkWithNoTreeAndNoCheckoutNamesWhereItLooked() throws {
@@ -178,5 +224,25 @@ struct RunnerProjectShippedTests {
 
     private static var otherHash: String {
         String(repeating: "5e", count: 32)
+    }
+}
+
+private extension RunnerProjectShippedTests {
+    /// The error a copy on another thread threw, if any.
+    final class Failure: @unchecked Sendable {
+        private let lock = NSLock()
+        private var thrown: (any Error)?
+
+        func record(_ error: any Error) {
+            lock.lock()
+            defer { lock.unlock() }
+            thrown = error
+        }
+
+        var error: (any Error)? {
+            lock.lock()
+            defer { lock.unlock() }
+            return thrown
+        }
     }
 }

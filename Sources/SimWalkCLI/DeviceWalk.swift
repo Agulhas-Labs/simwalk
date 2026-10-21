@@ -26,13 +26,16 @@ struct DeviceWalk {
     let screens: [String]
     let settle: Int?
     let motion: Bool
+    var appleAudit = false
+    /// The `--junit` output the walk's bundle is reported to as test cases, when asked for.
+    var junit: JUnitOutput?
 
     /// The answer, with the shell, the runner builds and the runner resolution injectable so the order of commands is checkable without a phone.
     ///
     /// **Every exit after the first appearance read reads the appearance back** and hands it back if it differs, so a walk that dies mid-way (a dark state, a runner failure) does not leave the user's phone in Dark Mode unsaid. A runner failure does not discard a bundle the runner finalised: it is kept if it is this walk's, and the answer is qualified by the failure.
     ///
     /// **The phone's lease comes before any `devicectl` call**, reads included, so a phone leased by someone else is refused naming the holder with nothing run on it. A `--lease` walk renews the lease and leaves it to its holder; a `--udid` walk takes its own (holder: this process, 30 minutes) and releases it on every exit. **Either way the walk also takes a `WalkClaim` on the phone** (SimWalk#128), whatever lease it runs under, so a `session end` under the same lease sees the walk; it is released on every exit.
-    func answer(shell: Shell, builds: RunnerBuilds, resolveRunner: (() throws -> RunnerSource)?, leases: LeaseStore, holderPID: Int32, now: Date = Date()) throws -> Answer {
+    func answer(shell: Shell, builds: RunnerBuilds, resolveRunner: (() throws -> RunnerSource)?, leases: LeaseStore, holderPID: Int32, now: Date = Date(), telemetry: WalkTelemetry? = nil) throws -> Answer {
         // Named absolute and standardized in a refusal, not as typed: the reader may not be where the walk was run from.
         let walkbookURL = URL(fileURLWithPath: walkbook).standardizedFileURL
         let data: Data
@@ -56,7 +59,7 @@ struct DeviceWalk {
         do {
             try CaptureBundleWriter.requireFresh(outputURL)
         } catch {
-            throw DeviceWalkRefusal.failed(Self.naming(output: resolution, in: String(describing: error)), usageFailureKind: UsageFailureKind.of(error) ?? .inputRefused, handback: [])
+            throw DeviceWalkRefusal.failed(String(describing: error), suffixedOutput: resolution.suffixAdded ? outputURL.path : nil, usageFailureKind: UsageFailureKind.of(error) ?? .inputRefused, handback: [])
         }
 
         // The app is checked before the lease, as is its hash: a wrong or unreadable `.app` refuses with nothing run.
@@ -71,10 +74,11 @@ struct DeviceWalk {
         }
         defer { held.release() }
         let udid = held.udid
-        let claim = try LeaseError.mapping { try WalkClaim.take(udid: udid, in: leases) }
+        let claim = try LeaseError.takingClaim(udid: udid, in: leases)
         defer { claim.release() }
 
         let device = try PhysicalDevicePrerequisites.check(udid: udid, team: team, shell: shell)
+        telemetry?.resolved(device)
         let before = try PhysicalDeviceAppearance.read(udid: udid, shell: shell)
         // `setup.increaseContrast` is the one setup key a device has a form of (`devicectl`); `false` and absent leave it as found. The appearance read above is the read before the set, so the value found is what is handed back.
         let contrast = book.setup?.increaseContrast == true
@@ -87,7 +91,7 @@ struct DeviceWalk {
         } catch {
             // Once the install succeeded, every refusal says so: the phone's previous copy is gone whatever came after.
             let handback = handBack(found: before, restoringContrast: contrast, udid: udid, trail: trail, shell: shell)
-            throw DeviceWalkRefusal.failed(Self.naming(output: resolution, in: String(describing: error)), usageFailureKind: UsageFailureKind.of(error) ?? .runnerFailed, handback: trail.installed + trail.container + handback.lines)
+            throw DeviceWalkRefusal.failed(String(describing: error), suffixedOutput: resolution.suffixAdded ? outputURL.path : nil, usageFailureKind: UsageFailureKind.of(error) ?? .runnerFailed, handback: trail.installed + trail.container + handback.lines)
         }
 
         let handback = handBack(found: before, restoringContrast: contrast, udid: udid, trail: trail, shell: shell)
@@ -103,7 +107,8 @@ struct DeviceWalk {
         let recorded = record.flatMap { try? $0.write(into: walked.bundle) }
         let recordLines = record.map { recorded == nil ? $0.lines : [] } ?? []
         let written = recorded ?? walked.bundle
-        let bundle = resolution.suffixAdded ? written.noting("output: \(Self.naming(output: resolution, in: outputURL.path))") : written
+        let bundle = resolution.suffixAdded ? written.noting("output: \(outputURL.path) (suffix added)") : written
+        junit?.report = JUnitWalkCases.report(of: bundle)
         return CaptureBundleSummary(bundle, qualifiedBy: survived + handback.qualifications).answer(appending: residue + recordLines)
     }
 
@@ -129,6 +134,10 @@ struct DeviceWalk {
         guard let lapsed = trail.leaseLapsed else {
             return PhysicalDeviceAppearance.handBack(found: found, udid: udid, restoringContrast: restoringContrast, shell: shell)
         }
+        // The first renewal found the lease gone before the walk changed anything: there is nothing to hand back, so the refusal does not say a handback failed.
+        if trail.leaseLapsedBeforeAnyChange {
+            return PhysicalDeviceAppearance.Handback(lines: ["the lease on \(udid) lapsed before anything on the phone was changed (\(lapsed))"], qualifications: [], contrastNotHandedBack: nil)
+        }
         return PhysicalDeviceAppearance.Handback(
             lines: ["appearance not handed back: the lease on \(udid) is no longer this walk's (\(lapsed))"]
                 + (restoringContrast ? ["Increase Contrast not handed back: the lease on \(udid) is no longer this walk's (\(lapsed))"] : []),
@@ -138,18 +147,14 @@ struct DeviceWalk {
     }
 
     /// `requireRenewed`, with the lapse written into the trail before it is thrown: the handback is then skipped as it is after the wipe's renewal, not run against a phone another holder has taken.
-    private func renewed(_ lease: WalkLease, trail: inout DeviceWalkTrail) throws {
+    private func renewed(_ lease: WalkLease, trail: inout DeviceWalkTrail, beforeAnyChange: Bool = false) throws {
         do {
             try lease.requireRenewed(now: Date())
         } catch {
             trail.leaseLapsed = String(describing: error)
+            trail.leaseLapsedBeforeAnyChange = beforeAnyChange
             throw error
         }
-    }
-
-    /// `text` with the output path followed by "(suffix added)" where the walk completed `--output` with `.simwalk`, so a refusal names the path as the success answer does and the reader is not sent looking for a path they never typed (SimWalk#122).
-    private static func naming(output resolution: CaptureBundleLayout.Resolution, in text: String) -> String {
-        resolution.suffixAdded ? text.replacingOccurrences(of: resolution.url.path, with: "\(resolution.url.path) (suffix added)") : text
     }
 
     private static func replacedLine(_ bundleID: String) -> String {
@@ -170,7 +175,7 @@ struct DeviceWalk {
     ) throws -> (bundle: CaptureBundle, runnerFailure: String?) {
         let udid = plan.udid
         // A renewal that fails refuses before the walk changes anything on the phone.
-        try renewed(plan.lease, trail: &trail)
+        try renewed(plan.lease, trail: &trail, beforeAnyChange: true)
         // Set after the appearance read and before anything else is run on the phone, and judged by its read-back as a simulator's setup is (SimWalk#63): a read that disagrees refuses before the runner starts, and the caller's handback puts the value found back.
         if plan.book.setup?.increaseContrast == true {
             try PhysicalDeviceAppearance.setIncreaseContrast(true, udid: udid, shell: shell)
@@ -178,7 +183,7 @@ struct DeviceWalk {
             guard read.increaseContrast else {
                 throw DeviceWalkRefusal.contrastNotSet(found: plan.before.increaseContrast)
             }
-            trail.contrastMade = "Increase Contrast enabled by devicectl, found \(plan.before.increaseContrast ? "enabled" : "disabled"), read back enabled (set, unverified: nothing captured reports it)"
+            trail.contrastMade = "\(CaptureManifest.SetupRecord.increaseContrastPrefix) by devicectl, found \(plan.before.increaseContrast ? "enabled" : "disabled"), read back enabled (set, unverified: nothing captured reports it)"
         }
         // The install comes after the prerequisites and before the runner build; a failure refuses naming devicectl's error.
         if let installing = plan.installing {
@@ -232,6 +237,7 @@ struct DeviceWalk {
                 nonce: nonce,
                 settleMilliseconds: settle,
                 motion: motion,
+                appleAudit: appleAudit,
                 deviceAppearance: deviceAppearance,
                 runnerCommit: source.commit,
                 performance: measured.performance,
@@ -293,6 +299,8 @@ extension DeviceWalk {
         var containerEmptied = true
         /// Why the lease is no longer this walk's, once the renewal before the wipe found it so: the wipe and the appearance handback are both skipped.
         var leaseLapsed: String?
+        /// Whether that lapse was the first renewal's, found before the walk had changed anything on the phone.
+        var leaseLapsedBeforeAnyChange = false
         /// The manifest's line for Increase Contrast, once it was set and read back enabled.
         var contrastMade: String?
         /// One line per measure run's record, for the answer.

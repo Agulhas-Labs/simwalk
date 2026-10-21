@@ -77,6 +77,7 @@ struct MCPToolCatalog {
                         "settle": ["type": "integer", "description": "How long the screen must hold still before each capture, in milliseconds. Raise it for content that streams in after the screen appears."],
                         "animations": ["type": "boolean", "description": "Keep UIKit animations on in the app under walk. A simulator walk switches them off by default; a walk that records motion keeps them on."],
                         "motion": ["type": "boolean", "description": "Record on every screen's captures when the tree last changed before the capture (settle time, ms), with the read cadence and read count — the resolution of that figure. A screen asks for it alone with \"motion\": true in the walkbook. Absent from a capture means motion was not recorded, never that there was none."],
+                        "appleAudit": ["type": "boolean", "description": "Record Apple's accessibility audit on every state's capture (apple-audit.json), after the capture; about 2 s a state on a simulator, and the audit moves scroll position, so it runs last. A walkbook asks for it alone with \"appleAudit\": true. Absent from a capture means it was not audited, never that it was clean."],
                         "stock": ["type": "boolean", "description": "Boot a device SimWalk created (a `lease acquire` with `cloneFrom`) with every launchd service on. Without it, such a device boots with the services the app at appPath does not need switched off, and the answer says so on a `device:` line. Refused for a device that SimWalk did not create and that has services off, and for a physical device."],
                         "dryRun": ["type": "boolean", "description": "Follow every screen's route against the booted app and report each step that no longer lands, capturing nothing. Writes a route-probe report to 'output' instead of a capture bundle."],
                         "verbose": ["type": "boolean", "description": "Write the full result file: every state, every route taken."],
@@ -115,7 +116,7 @@ struct MCPToolCatalog {
             ],
             [
                 "name": SimWalkTool.audit.rawValue,
-                "description": "Call this instead of reading a bundle's accessibility trees: it runs every audit rule over the bundle by default — disclosure rows not typed as controls, enabled controls with neither label nor identifier, controls labelled with an SF Symbol name, and one label shared by distinct controls on a screen — one section per rule. It reports form, never value, and it says which screens it could not cover.",
+                "description": "Call this instead of reading a bundle's accessibility trees: it runs every audit rule over the bundle by default — disclosure rows not typed as controls, enabled controls with neither label nor identifier, controls labelled with an SF Symbol name, and one label shared by distinct controls on a screen — one section per rule. Over a bundle whose walk recorded Apple's accessibility audit (appleAudit), seven apple* rules report Apple's own findings per state, and say \"not recorded\" otherwise. It reports form, never value, and it says which screens it could not cover.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -132,7 +133,7 @@ struct MCPToolCatalog {
             ],
             [
                 "name": SimWalkTool.diff.rawValue,
-                "description": "Call this instead of opening two walks' screenshots side by side: it compares a run bundle against a reference bundle by form, never value — sections present on one side only, sections in a different order, sections whose box moved or resized, and layout shifts present on one side only (walks with motion on) — and says which screens it could not compare. Each flag names a crop of the screenshot that shows it; pass 'crops' to write them as PNGs, then open only the crops a flag names.",
+                "description": "Call this instead of opening two walks' screenshots side by side: it compares a run bundle against a reference bundle by form, never value — sections present on one side only, sections in a different order, sections whose box moved or resized, and layout shifts present on one side only (walks with motion on), and Apple accessibility-audit issues the run has and the reference lacks, by element and never frame (walks that ran Apple's audit) — and says which screens it could not compare. Each form flag names a crop of the screenshot that shows it; pass 'crops' to write them as PNGs, then open only the crops a flag names.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [

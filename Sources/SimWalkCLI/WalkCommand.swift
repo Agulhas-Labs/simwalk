@@ -56,6 +56,12 @@ struct WalkCommand: ParsableCommand {
 
     @Flag(
         name: .long,
+        help: "Record Apple's accessibility audit on every state's capture, after the capture (about 2 s a state on a simulator). A walkbook asks for it alone with \"appleAudit\": true."
+    )
+    var appleAudit = false
+
+    @Flag(
+        name: .long,
         help: "Keep UIKit animations on in the app under walk. A simulator walk switches them off by default so screens settle sooner; a walk that records motion keeps them on."
     )
     var animations = false
@@ -78,6 +84,12 @@ struct WalkCommand: ParsableCommand {
     )
     var dryRun = false
 
+    @Option(name: .long, help: JUnitOutput.help)
+    var junit: String?
+
+    @Option(name: .long, help: "Walk on N simulators at once: each screen goes to one device with all its states, extra devices are leased or cloned from the walk's device and deleted again, and the answer is one bundle in walkbook order. Simulators only.")
+    var parallel: Int?
+
     @Flag(name: .long, help: "Write the full result file: every state's artefacts and the routes taken, uncapped.")
     var verbose = false
 
@@ -96,8 +108,21 @@ struct WalkCommand: ParsableCommand {
         if verbose, dryRun {
             throw ValidationError("--verbose shapes a walk's result file, and a dry run writes none — drop one of them")
         }
+        if appleAudit, dryRun {
+            throw ValidationError("--apple-audit audits each capture, and a dry run captures nothing — drop one of them")
+        }
+        try JUnitOutput.validate(junit)
+        if junit != nil, dryRun {
+            throw ValidationError("--junit reports a walk's states, and a dry run captures nothing — drop one of them")
+        }
         if motion, dryRun {
             throw ValidationError("--motion records what each capture's watch saw, and a dry run captures nothing — drop one of them")
+        }
+        if let parallel, parallel < 1 {
+            throw ValidationError("--parallel takes a device count of at least 1; \(parallel) walks nothing")
+        }
+        if parallel != nil, dryRun {
+            throw ValidationError("--parallel shards a walk's captures, and a dry run captures nothing — drop one of them")
         }
         guard let settle else { return }
         guard settle > 0 else {
@@ -113,7 +138,8 @@ struct WalkCommand: ParsableCommand {
         defer { withExtendedLifetime(signals) {} }
         let telemetry = telemetry(cancellation: cancellation)
         guard dryRun else {
-            try runServing(log: .standard(), emit: StandardStreams.emit, emitError: StandardStreams.emitError, isStdoutPiped: StandardStreams.isStdoutPiped, answering: { try walked(builds: .standard(), leases: .standard(), telemetry: telemetry, animationsLibrary: Self.standardAnimationsLibrary(), note: StandardStreams.emitError) })
+            let output = JUnitOutput.make(junit, command: "walk")
+            try runServing(log: .standard(), emit: StandardStreams.emit, emitError: StandardStreams.emitError, isStdoutPiped: StandardStreams.isStdoutPiped, junit: output, answering: { try walked(builds: .standard(), leases: .standard(), telemetry: telemetry, junit: output, animationsLibrary: Self.standardAnimationsLibrary(), interruption: cancellation, note: StandardStreams.emitError) })
             return
         }
         try runDryRun(log: .standard(), emit: StandardStreams.emit, emitError: StandardStreams.emitError, isStdoutPiped: StandardStreams.isStdoutPiped) {
@@ -162,14 +188,15 @@ struct WalkCommand: ParsableCommand {
     ///
     /// The exit code is no longer computed here: the verdict on the answer's second line names every qualification, and `TimedCall` exits on what that verdict says. A shortfall, an unsettled capture, a chrome-only capture and a survived runner failure all mean "the bundle is honest and qualified"; the verdict names which, and a pipeline that wants to gate on one and not the other reads the manifest it already has.
     func run(log: UsageLog, emit: (String) -> Void, emitError: (String) -> Void, isStdoutPiped: () -> Bool = { false }, walk: () throws -> Outcome) throws {
-        try runServing(log: log, emit: emit, emitError: emitError, isStdoutPiped: isStdoutPiped, answering: { try walk().servedAnswer() })
+        let output = JUnitOutput.make(junit, command: "walk")
+        try runServing(log: log, emit: emit, emitError: emitError, isStdoutPiped: isStdoutPiped, junit: output, answering: { try walk().servedAnswer(junit: output) })
     }
 
     /// The same, for a walk that may be a device's and so answers with an ``Answer`` and no ``Outcome``; logged as `walk` whichever target it took.
-    func runServing(log: UsageLog, emit: (String) -> Void, emitError: (String) -> Void, isStdoutPiped: () -> Bool = { false }, answering: () throws -> Answer) throws {
+    func runServing(log: UsageLog, emit: (String) -> Void, emitError: (String) -> Void, isStdoutPiped: () -> Bool = { false }, junit: JUnitOutput? = nil, answering: () throws -> Answer) throws {
         // An unmapped failure here is the runner's own machinery — including a walk's own file writes,
         // like the temporary walkbook `--screens` narrows to — never a caller's argument.
-        try TimedCall.run(tool: "walk", target: walkbook, log: log, emit: emit, emitError: emitError, defaultFailureKind: .runnerFailed, isStdoutPiped: isStdoutPiped, body: answering)
+        try TimedCall.run(tool: "walk", target: walkbook, log: log, emit: emit, emitError: emitError, defaultFailureKind: .runnerFailed, isStdoutPiped: isStdoutPiped, junit: junit, body: answering)
     }
 
     /// The answer, without the printing — what the MCP face serves, so one verb cannot come to answer differently depending on which face asked.
@@ -180,7 +207,7 @@ struct WalkCommand: ParsableCommand {
     ///
     /// `started` hears the claimed progress-file stem and the progress as begun. The claim and the `begin` come first, before the target and the device are resolved, so a bounded MCP server has the walk's handle within milliseconds of the call (`Docs/Reference.md`, "Bounded walks"). A run that nothing else ended — a physical device's, which writes no result, or one refused while its target was resolved — is ended here, by its answer or its refusal.
     ///
-    /// `shell`, `builds` and `leases` are the seams a test uses to drive this entry against a fake `devicectl`.
+    /// `shell`, `builds` and `leases` are the seams a test uses to drive this entry against a fake `devicectl`; `provisioning` roots a simulator walk's override directory, as `performWalk`'s does.
     func answer(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         cancellation: Cancellation? = nil,
@@ -189,10 +216,11 @@ struct WalkCommand: ParsableCommand {
         runner resolveRunner: (() throws -> RunnerSource)? = nil,
         builds: RunnerBuilds = .standard(),
         leases: LeaseStore = .standard(),
-        animationsLibrary: AnimationsLibrary? = nil
+        animationsLibrary: AnimationsLibrary? = nil,
+        provisioning: @escaping (Shell) -> SlimWalkProvisioning = { SlimWalkProvisioning(shell: $0) }
     ) throws -> Answer {
         try WalkStart(telemetry: telemetry(environment: environment, cancellation: cancellation), tool: dryRun ? Self.dryRunLogName : "walk", logPath: UsageLog.standard().fileURL.path, started: started).run { telemetry in
-            try dryRun ? probed(shell: shell, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, animationsLibrary: animationsLibrary).answer() : walked(shell: shell, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, animationsLibrary: animationsLibrary)
+            try dryRun ? probed(shell: shell, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, animationsLibrary: animationsLibrary).answer() : walked(shell: shell, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, animationsLibrary: animationsLibrary, provisioning: provisioning)
         }
     }
 
@@ -209,6 +237,8 @@ struct WalkCommand: ParsableCommand {
     /// `provisioning` makes the slim-boot step for the shell in use: the live one writes the machine's override directory, so a test hands one rooted in its own.
     ///
     /// `firstLaunch` is the walk's one preflight (SimWalk#136): a caller that has already asked it hands it on, so it is not asked twice.
+    ///
+    /// `interruption` is the run's own cancellation, from a SIGTERM or a Ctrl-C; `nil` for a caller whose cancel lets the walk carry on to its end (the MCP face). On it a `--parallel` walk stops its runners through `childStop` and gives back every extra device.
     func performWalk(
         shell: Shell = Shell(),
         pause: (TimeInterval) -> Void = Thread.sleep(forTimeInterval:),
@@ -222,125 +252,203 @@ struct WalkCommand: ParsableCommand {
         firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
         provisioning: (Shell) -> SlimWalkProvisioning = { SlimWalkProvisioning(shell: $0) },
         animationsLibrary: AnimationsLibrary? = nil,
+        interruption: Cancellation? = nil,
+        childStop: ChildStop = ChildStop(),
         note: (String) -> Void = { _ in }
     ) throws -> Outcome {
         try WalkTelemetry.recording(on: telemetry) {
-            let prepared = try prepare(shell: shell, runner: resolveRunner, builds: builds, leases: leases, now: now(), logPath: logFileURL.path, telemetry: telemetry, firstLaunch: firstLaunch, provisioning: provisioning, animationsLibrary: animationsLibrary, note: note)
-            defer { Self.discardTemporary(prepared.temporaryWalkbook) }
-            // Released once the device is handed back, whichever way the walk went; a `--lease` lease is left to its holder.
-            defer {
-                prepared.claim.release()
-                prepared.lease.release()
-            }
-            let (book, outputURL, source, simulator, buildHash, runner) = (prepared.book, prepared.outputURL, prepared.source, prepared.simulator, prepared.buildHash, prepared.runner)
-            // From here until the runner takes the file over, `xcodebuild` is starting the runner and the app.
-            telemetry?.enter(.launching)
-            let run: (String, [String]) throws -> Shell.Result = { try shell.run($0, $1) }
-
-            // Read before any state touches it, on the host: what the walk puts back afterwards, and what the
-            // state check decides a failed light/dark comparison by. `nil` when it cannot be read, which the
-            // check answers by refusing both sides; a read stalled behind `xcodebuild -runFirstLaunch` refuses the walk (SimWalk#136).
-            let foundAppearance = try DeviceAppearance.read(udid: simulator.udid, run: run)
-            // And the locale it is already in, which the state check needs to tell a discarded locale from one the
-            // device already had (SimWalk#18). Nothing to put back: a locale state is a launch argument.
-            let foundLocale = DeviceLocale.read(udid: simulator.udid, run: run)
-            // The walkbook's setup, made before the runner and handed back after it, whichever way the runner went. A step
-            // that fails refuses here, having handed back what the steps before it made. Not made at all under a lease that
-            // could no longer be renewed. Each change is recorded on disk before it is made and the record removed once handed
-            // back, so a walk killed in between leaves one (SimWalk#63) — which the next walk on the device settles first, setup or
-            // not (SimWalk#72, SimWalk#73): a walk that makes none hands it back only on a device it owns, as a setup is made only on one,
-            // and only under a lease that still renews, as a setup is (SimWalk#75).
-            let journal = DeviceSetupJournal.beside(leases)
-            let (made, setupNotMade) = try Self.makeSetup(
-                SetupRequest(
-                    setup: book.setup,
-                    udid: simulator.udid,
-                    bundleID: book.appBundleID,
-                    owned: DeviceSettle.mayReboot(simulator, requested: device, leased: lease != nil)
-                ),
-                lease: prepared.lease,
-                now: now(),
-                journal: journal,
-                run: run
-            )
-            let applied = made?.applied
-            // Set by the settle's hook when a status bar override could not be made again after its reboot.
-            var statusBarNotReapplied: String?
-            // Named by the second pass's runner call, for the diagnosis of that runner's failure — as the first pass's is (SimWalk#70).
-            var retryResultBundlePath: String?
-
-            // **A failed runner is not a lost bundle.** `xcodebuild test` exits non-zero for any recorded
-            // XCTest failure, and the simulator's pasteboard XPC wedges an app under test for 30s on this
-            // toolchain — for reasons entirely outside the app, and outside this tool (SimWalk#3). Thrown
-            // here, that took eleven perfectly good captures down with the one screen that stalled, where the
-            // Brief's contract is per-screen outcomes. So the failure is held, the bundle is read, and it
-            // decides: a readable bundle is the answer and the failure qualifies it; no bundle and the
-            // failure is the answer.
-            var runnerFailure: Error?
-            // Taken just before the runner launches; a bundle whose manifest started earlier is not this walk's.
-            let launchedAt = now()
-            // Generated fresh per walk and passed the runner below: what tells this walk's bundle from one an
-            // overlapping walk of the same build left, which the build hash and `startedAt` slack alone cannot
-            // (SimWalk#41) — a second walk launched before this one's runner starts capturing can read this
-            // one's bundle, started after the second's own launch.
-            let runNonce = nonce()
-            // Named before the run, so a refusal reads this run's result bundle rather than searching for the
-            // newest (SimWalk#50); the nonce names it, as the dry run's does.
-            let resultBundlePath = runner.resultBundlePath(launchedAt: launchedAt, id: runNonce)
-            // The first runner alone is handed the progress file and timed as `runMs`: a second pass runs during `matching`, and
-            // one that took the file over would write `running` after it.
-            do {
-                try WalkTelemetry.measure(telemetry, \.runMs) {
-                    try runner.walk(
-                        walkbookPath: prepared.executedPath,
-                        outputPath: outputURL.path,
-                        buildHash: buildHash,
-                        logFilePath: logFileURL.path,
-                        settleMilliseconds: settle,
-                        motion: motion,
-                        animationsOffLibrary: prepared.animationsOffLibrary,
-                        deviceAppearance: foundAppearance,
-                        deviceLocale: foundLocale,
-                        runnerCommit: source.commit,
-                        nonce: runNonce,
-                        resultBundlePath: resultBundlePath,
-                        progressPath: telemetry?.writer.url.path,
-                        on: simulator
-                    )
+            // The extra devices of a `--parallel` walk, given back whichever way the walk ends: before `prepare`, so a throw after the acquire still releases.
+            // Its deletions remove each clone's override from the root `provisioning` writes it to, so a test's stays in its scratch.
+            let pool = ShardDevicePool(leasing: DeviceLeasing(store: leases, shell: shell, overrides: provisioning(shell).overrides))
+            defer { pool.release() }
+            // An interruption stops the runners first, then deletes what the walk created, before the signal ends the process — naming on stderr what it could not, since no answer follows.
+            interruption?.onCancel {
+                childStop.stop()
+                for left in pool.release() {
+                    StandardStreams.emitError("⚠ interrupted — not given back: \(left)")
                 }
-            } catch {
-                runnerFailure = error
             }
-            telemetry?.takeBack()
-            // Read back rather than trusted. The runner wrote it in another process on another machine's
-            // filesystem view; reading it here is what turns "the test passed" into "a bundle exists that
-            // this build will accept" — and it is the same refusal any later reader would give. Read *before*
-            // the handback because it is also the evidence the handback needs: the runner resets the device and
-            // only then finalises the manifest, so a finalised bundle means the last reset ran, whatever
-            // `xcodebuild` exited with — it exits non-zero for any recorded XCTest failure, on a runner that
-            // finished (the SimWalk#19 review). It is *this walk's* bundle because the path was refused above
-            // unless empty, and a manifest from another build, another walk's start, or another walk's nonce is
-            // refused all the same (SimWalk#41). Reading it touches nothing on the device.
-            let read = Result { try Self.bundleWrittenBy(walkLaunchedAt: launchedAt, buildHash: buildHash, nonce: runNonce, at: outputURL) }
+            // A throw anywhere from here names what the pool could not give back; a shard's refusal or a merge's failure already does.
+            do {
+                var plan: ShardPlan?
+                var narrowedBook: Walkbook?
+                var extras: [ShardDevicePool.Shard] = []
+                let prepared = try prepare(shell: shell, runner: resolveRunner, builds: builds, leases: leases, now: now(), logPath: logFileURL.path, telemetry: telemetry, firstLaunch: firstLaunch, provisioning: provisioning, animationsLibrary: animationsLibrary, beforeBoot: { book, simulator in
+                    guard let parallel else { return }
+                    let narrowed = screens.isEmpty ? book : try WalkbookSubset.narrow(book, to: screens)
+                    let made = ShardPlan(narrowed, devices: parallel)
+                    (plan, narrowedBook) = (made, narrowed)
+                    // Before shard 0 boots: a clone is made only from a shut-down device. A setup that changes the device is made only on one the walk owns, so no extra is one it would not.
+                    extras = try pool.acquire(made.shards.count - 1, beside: simulator, ownedOnly: book.setup?.changesDevice == true, now: now())
+                }, note: note)
+                defer { Self.discardTemporary(prepared.temporaryWalkbook) }
+                // Released once the device is handed back, whichever way the walk went; a `--lease` lease is left to its holder.
+                defer {
+                    prepared.claim.release()
+                    prepared.lease.release()
+                }
+                let owned = DeviceSettle.mayReboot(prepared.simulator, requested: device, leased: lease != nil)
+                let deviceRun = DeviceRun(book: prepared.book, outputURL: prepared.outputURL, source: prepared.source, simulator: prepared.simulator, buildHash: prepared.buildHash, executedPath: prepared.executedPath, runner: prepared.runner, lease: prepared.lease, animationsOffLibrary: prepared.animationsOffLibrary, owned: owned)
+                var outcome: Outcome
+                if let plan, let narrowedBook, plan.shards.count > 1 {
+                    let parallelRun = ParallelRun(prepared: prepared, narrowedBook: narrowedBook, plan: plan, extras: extras, pool: pool, stop: childStop, builds: builds, owned: owned, interrupted: { interruption?.isCancelled == true })
+                    outcome = try walkShards(parallelRun, shell: shell, pause: pause, now: now, nonce: nonce, logFileURL: logFileURL, leases: leases, telemetry: telemetry, provisioning: provisioning)
+                } else {
+                    outcome = try walkDevice(deviceRun, shell: shell, pause: pause, now: now, nonce: nonce, logFileURL: logFileURL, leases: leases, telemetry: telemetry)
+                    // One shard runs the serial walk; a clamp to it is said.
+                    if let plan, plan.clamped, let narrowedBook {
+                        outcome.parallelLines = [Self.clampNote(plan, screens: narrowedBook.screens.count)]
+                    }
+                }
+                // A simulator walk measures nothing (SimWalk#67, M4); said on the answer so the absence of figures is not read as none.
+                if let measureNote = MeasureOptIn.walkNote(for: prepared.book, screens: screens) {
+                    outcome.measureNote = measureNote
+                }
+                outcome.animationsNote = Self.animationsNote(for: prepared.animations)
+                outcome.deviceNote = prepared.deviceNote
+                if prepared.outputSuffixAdded {
+                    outcome.bundle = outcome.bundle.noting("output: \(prepared.outputURL.path) (suffix added)")
+                }
+                telemetry?.finish(walk: outcome.bundle, logPath: logFileURL.path)
+                outcome.resultPath = telemetry?.writer.current.resultPath
+                return outcome
+            } catch let error as ParallelWalkRefusal {
+                throw error
+            } catch let error as ParallelWalkFailure {
+                throw error
+            } catch {
+                let left = pool.release()
+                throw left.isEmpty ? error : ParallelWalkFailure(underlying: error, notes: [], unreleased: left)
+            }
+        }
+    }
 
-            // SimWalk#26: screens with a state refused on appearance are walked again once, after the device is
-            // settled — set dark, rebooted, put back. Only with a found appearance to put back, and only over a bundle
-            // this walk wrote; on a device that drew what it reported, nothing happens.
-            let retry = foundAppearance.flatMap { found in
-                (try? read.get()).flatMap { first in
-                    AppearanceRetryPass(
-                        udid: simulator.udid,
-                        found: found,
-                        walkbookPath: walkbook,
-                        mayReboot: DeviceSettle.mayReboot(simulator, requested: device, leased: lease != nil),
-                        buildHash: buildHash,
-                        nonce: nonce,
-                        // A `simctl status_bar` override does not survive the settle's reboot, so it is made again before the second pass.
-                        afterSettle: { statusBarNotReapplied = applied.flatMap { DeviceSetup.reapplyStatusBar($0, udid: simulator.udid, run: run) } },
-                        renew: { prepared.lease.renew(now: $0) },
-                        walk: { walkbookPath, outputPath, retryNonce in
-                            let resultBundlePath = runner.resultBundlePath(launchedAt: now(), id: retryNonce)
-                            retryResultBundlePath = resultBundlePath
+    /// Walks one prepared device: reads what the walk must put back, makes the walkbook's setup, runs the runner (and the appearance retry), hands the device back and reads the bundle the runner wrote.
+    ///
+    /// Everything `performWalk` does between `prepare` and the answer's notes, for one device. `run.owned` says whether this walk may reboot the device; the caller releases the lease and the claim.
+    func walkDevice(
+        _ run: DeviceRun,
+        shell: Shell = Shell(),
+        pause: (TimeInterval) -> Void = Thread.sleep(forTimeInterval:),
+        now: @escaping () -> Date = { Date() },
+        nonce: @escaping () -> String = { UUID().uuidString },
+        logFileURL: URL = UsageLog.standard().fileURL,
+        leases: LeaseStore,
+        telemetry: WalkTelemetry? = nil
+    ) throws -> Outcome {
+        let (book, outputURL, source, simulator, buildHash, runner) = (run.book, run.outputURL, run.source, run.simulator, run.buildHash, run.runner)
+        // From here until the runner takes the file over, `xcodebuild` is starting the runner and the app.
+        telemetry?.enter(.launching)
+        let shellRun: (String, [String]) throws -> Shell.Result = { try shell.run($0, $1) }
+
+        // Read before any state touches it, on the host: what the walk puts back afterwards, and what the
+        // state check decides a failed light/dark comparison by. `nil` when it cannot be read, which the
+        // check answers by refusing both sides; a read stalled behind `xcodebuild -runFirstLaunch` refuses the walk (SimWalk#136).
+        let foundAppearance = try DeviceAppearance.read(udid: simulator.udid, run: shellRun)
+        // And the locale it is already in, which the state check needs to tell a discarded locale from one the
+        // device already had (SimWalk#18). Nothing to put back: a locale state is a launch argument.
+        let foundLocale = DeviceLocale.read(udid: simulator.udid, run: shellRun)
+        // The walkbook's setup, made before the runner and handed back after it, whichever way the runner went. A step
+        // that fails refuses here, having handed back what the steps before it made. Not made at all under a lease that
+        // could no longer be renewed. Each change is recorded on disk before it is made and the record removed once handed
+        // back, so a walk killed in between leaves one (SimWalk#63) — which the next walk on the device settles first, setup or
+        // not (SimWalk#72, SimWalk#73): a walk that makes none hands it back only on a device it owns, as a setup is made only on one,
+        // and only under a lease that still renews, as a setup is (SimWalk#75).
+        let journal = DeviceSetupJournal.beside(leases)
+        let (made, setupNotMade) = try Self.makeSetup(
+            SetupRequest(
+                setup: book.setup,
+                udid: simulator.udid,
+                bundleID: book.appBundleID,
+                owned: run.owned
+            ),
+            lease: run.lease,
+            now: now(),
+            journal: journal,
+            run: shellRun
+        )
+        let applied = made?.applied
+        // Set by the settle's hook when a status bar override could not be made again after its reboot.
+        var statusBarNotReapplied: String?
+        // Named by the second pass's runner call, for the diagnosis of that runner's failure — as the first pass's is (SimWalk#70).
+        var retryResultBundlePath: String?
+        // The second runner's failure, kept for whether the walk's stop ended it: the pass answers only whether it finished.
+        var retryRunnerFailure: Error?
+
+        // **A failed runner is not a lost bundle.** `xcodebuild test` exits non-zero for any recorded
+        // XCTest failure, and the simulator's pasteboard XPC wedges an app under test for 30s on this
+        // toolchain — for reasons entirely outside the app, and outside this tool (SimWalk#3). Thrown
+        // here, that took eleven perfectly good captures down with the one screen that stalled, where the
+        // Brief's contract is per-screen outcomes. So the failure is held, the bundle is read, and it
+        // decides: a readable bundle is the answer and the failure qualifies it; no bundle and the
+        // failure is the answer.
+        var runnerFailure: Error?
+        // Taken just before the runner launches; a bundle whose manifest started earlier is not this walk's.
+        let launchedAt = now()
+        // Generated fresh per walk and passed the runner below: what tells this walk's bundle from one an
+        // overlapping walk of the same build left, which the build hash and `startedAt` slack alone cannot
+        // (SimWalk#41) — a second walk launched before this one's runner starts capturing can read this
+        // one's bundle, started after the second's own launch.
+        let runNonce = nonce()
+        // Named before the run, so a refusal reads this run's result bundle rather than searching for the
+        // newest (SimWalk#50); the nonce names it, as the dry run's does.
+        let resultBundlePath = runner.resultBundlePath(launchedAt: launchedAt, id: runNonce)
+        // The first runner alone is handed the progress file and timed as `runMs`: a second pass runs during `matching`, and
+        // one that took the file over would write `running` after it.
+        do {
+            try WalkTelemetry.measure(telemetry, \.runMs) {
+                try runner.walk(
+                    walkbookPath: run.executedPath,
+                    outputPath: outputURL.path,
+                    buildHash: buildHash,
+                    logFilePath: logFileURL.path,
+                    settleMilliseconds: settle,
+                    motion: motion,
+                    appleAudit: appleAudit,
+                    animationsOffLibrary: run.animationsOffLibrary,
+                    deviceAppearance: foundAppearance,
+                    deviceLocale: foundLocale,
+                    runnerCommit: source.commit,
+                    nonce: runNonce,
+                    resultBundlePath: resultBundlePath,
+                    progressPath: telemetry?.writer.url.path,
+                    on: simulator
+                )
+            }
+        } catch {
+            runnerFailure = error
+        }
+        telemetry?.takeBack()
+        // Read back rather than trusted. The runner wrote it in another process on another machine's
+        // filesystem view; reading it here is what turns "the test passed" into "a bundle exists that
+        // this build will accept" — and it is the same refusal any later reader would give. Read *before*
+        // the handback because it is also the evidence the handback needs: the runner resets the device and
+        // only then finalises the manifest, so a finalised bundle means the last reset ran, whatever
+        // `xcodebuild` exited with — it exits non-zero for any recorded XCTest failure, on a runner that
+        // finished (the SimWalk#19 review). It is *this walk's* bundle because the path was refused above
+        // unless empty, and a manifest from another build, another walk's start, or another walk's nonce is
+        // refused all the same (SimWalk#41). Reading it touches nothing on the device.
+        let read = Result { try Self.bundleWrittenBy(walkLaunchedAt: launchedAt, buildHash: buildHash, nonce: runNonce, at: outputURL) }
+
+        // SimWalk#26: screens with a state refused on appearance are walked again once, after the device is
+        // settled — set dark, rebooted, put back. Only with a found appearance to put back, and only over a bundle
+        // this walk wrote; on a device that drew what it reported, nothing happens.
+        let retry = foundAppearance.flatMap { found in
+            (try? read.get()).flatMap { first in
+                AppearanceRetryPass(
+                    udid: simulator.udid,
+                    found: found,
+                    walkbookPath: walkbook,
+                    mayReboot: run.owned,
+                    buildHash: buildHash,
+                    nonce: nonce,
+                    // A `simctl status_bar` override does not survive the settle's reboot, so it is made again before the second pass.
+                    afterSettle: { statusBarNotReapplied = applied.flatMap { DeviceSetup.reapplyStatusBar($0, udid: simulator.udid, run: shellRun) } },
+                    renew: { run.lease.renew(now: $0) },
+                    walk: { walkbookPath, outputPath, retryNonce in
+                        let resultBundlePath = runner.resultBundlePath(launchedAt: now(), id: retryNonce)
+                        retryResultBundlePath = resultBundlePath
+                        do {
                             try runner.walk(
                                 walkbookPath: walkbookPath,
                                 outputPath: outputPath,
@@ -348,7 +456,8 @@ struct WalkCommand: ParsableCommand {
                                 logFilePath: logFileURL.path,
                                 settleMilliseconds: settle,
                                 motion: motion,
-                                animationsOffLibrary: prepared.animationsOffLibrary,
+                                appleAudit: appleAudit,
+                                animationsOffLibrary: run.animationsOffLibrary,
                                 deviceAppearance: found,
                                 deviceLocale: foundLocale,
                                 runnerCommit: source.commit,
@@ -356,67 +465,72 @@ struct WalkCommand: ParsableCommand {
                                 resultBundlePath: resultBundlePath,
                                 on: simulator
                             )
-                        },
-                        diagnose: { retryResultBundlePath.map { RunnerFailureDiagnosis.read(resultBundlePath: $0, shell: shell).lines } ?? [] }
-                    )
-                    .perform(after: first, of: book, run: { try shell.run($0, $1, timeout: $2) }, now: now)
-                }
+                        } catch {
+                            retryRunnerFailure = error
+                            throw error
+                        }
+                    },
+                    diagnose: { retryResultBundlePath.map { RunnerFailureDiagnosis.read(resultBundlePath: $0, shell: shell).lines } ?? [] }
+                )
+                .perform(after: first, of: book, run: { try shell.run($0, $1, timeout: $2) }, now: now)
             }
-            // Read again after a second pass: the fold rewrote the bundle, and what is on disk now is the answer —
-            // still under this walk's own nonce, which the fold never changes.
-            let final = retry == nil ? read : Result { try Self.bundleWrittenBy(walkLaunchedAt: launchedAt, buildHash: buildHash, nonce: runNonce, at: outputURL) }
-
-            // Handed back whether the runner succeeded or not: the XCUITest session ended either way, its
-            // teardown switched the device's accessibility off either way (SimWalk#5), and the runner left the
-            // appearance at whatever its last state set. `AccessibilityPreference` carries the measurements —
-            // which key decides it, which `defaults` can see it, and why the restore waits for the teardown.
-            // After a settle that stopped short the device may be down or wedged mid-boot, and the handback's calls go to it
-            // next: each is bounded then, so a wedge ends as a handback that could not put things back — the commands
-            // printed — rather than a walk that never answers.
-            let handbackRun: (String, [String]) throws -> Shell.Result = { executable, arguments in
-                try shell.run(executable, arguments, timeout: retry?.handbackBound)
-            }
-            let handback = DeviceHandback.perform(
-                udid: simulator.udid,
-                found: foundAppearance,
-                runnerFinished: retry?.lastRunnerFinished ?? ((try? read.get()) != nil),
-                run: handbackRun,
-                pause: pause,
-                now: now
-            )
-
-            // The setup handed back last, bounded as the rest of the handback is, and recorded in the manifest when there is
-            // one to record it in — the record `bundle inspect` reads a week later.
-            let setup = made.map { DeviceSetup.Report(applied: $0.applied, leftover: $0.leftover, statusBarNotReapplied: statusBarNotReapplied, handback: DeviceSetup.handBack($0.applied, udid: simulator.udid, bundleID: book.appBundleID, journal: journal, run: handbackRun)) }
-            let recorded = setup.flatMap { report in (try? final.get()).flatMap { try? report.record.write(into: $0) } }
-
-            var outcome = try Self.outcome(
-                runnerFailure: runnerFailure,
-                handback: retry?.judging(handback) ?? handback,
-                appearanceRetry: retry?.report,
-                setup: setup,
-                setupNotMade: setupNotMade,
-                diagnosingRunnerFailure: { RunnerFailureDiagnosis.read(resultBundlePath: resultBundlePath, shell: shell) },
-                readingBundle: { try recorded ?? final.get() }
-            )
-            // A simulator walk measures nothing (SimWalk#67, M4); said on the answer so the absence of figures is not read as none.
-            if let measureNote = MeasureOptIn.walkNote(for: book, screens: screens) {
-                outcome.measureNote = measureNote
-            }
-            outcome.animationsNote = Self.animationsNote(for: prepared.animations)
-            outcome.deviceNote = prepared.deviceNote
-            if prepared.outputSuffixAdded {
-                outcome.bundle = outcome.bundle.noting("output: \(outputURL.path) (suffix added)")
-            }
-            telemetry?.finish(walk: outcome.bundle, logPath: logFileURL.path)
-            outcome.resultPath = telemetry?.writer.current.resultPath
-            return outcome
         }
+        // Read again after a second pass: the fold rewrote the bundle, and what is on disk now is the answer —
+        // still under this walk's own nonce, which the fold never changes.
+        let final = retry == nil ? read : Result { try Self.bundleWrittenBy(walkLaunchedAt: launchedAt, buildHash: buildHash, nonce: runNonce, at: outputURL) }
+
+        // Handed back whether the runner succeeded or not: the XCUITest session ended either way, its
+        // teardown switched the device's accessibility off either way (SimWalk#5), and the runner left the
+        // appearance at whatever its last state set. `AccessibilityPreference` carries the measurements —
+        // which key decides it, which `defaults` can see it, and why the restore waits for the teardown.
+        // After a settle that stopped short the device may be down or wedged mid-boot, and the handback's calls go to it
+        // next: each is bounded then, so a wedge ends as a handback that could not put things back — the commands
+        // printed — rather than a walk that never answers.
+        // A runner the walk's stop ended — the first or the appearance retry's — can still be running its app, which would flip the appearance
+        // after the handback below has put it back: ended first, best effort — the app may already be gone — and its result is not the handback's.
+        let endedByStop = [runnerFailure, retryRunnerFailure].contains { $0.map(Self.isStop) == true }
+        if endedByStop {
+            _ = try? shell.run(
+                "/usr/bin/xcrun",
+                ["simctl", "terminate", simulator.udid, RunnerInvocation.deviceContainerBundleID(runnerBundleID: nil)],
+                timeout: DeviceSettle.handbackBound
+            )
+        }
+        let handbackRun: (String, [String]) throws -> Shell.Result = { executable, arguments in
+            try shell.run(executable, arguments, timeout: retry?.handbackBound)
+        }
+        let handback = DeviceHandback.perform(
+            udid: simulator.udid,
+            found: foundAppearance,
+            runnerFinished: retry?.lastRunnerFinished ?? ((try? read.get()) != nil),
+            run: handbackRun,
+            pause: pause,
+            now: now
+        )
+
+        // The setup handed back last, bounded as the rest of the handback is, and recorded in the manifest when there is
+        // one to record it in — the record `bundle inspect` reads a week later.
+        let setup = made.map { DeviceSetup.Report(applied: $0.applied, leftover: $0.leftover, statusBarNotReapplied: statusBarNotReapplied, handback: DeviceSetup.handBack($0.applied, udid: simulator.udid, bundleID: book.appBundleID, journal: journal, run: handbackRun)) }
+        let recorded = setup.flatMap { report in (try? final.get()).flatMap { try? report.record.write(into: $0) } }
+
+        var answer = try Self.outcome(
+            runnerFailure: runnerFailure,
+            handback: retry?.judging(handback) ?? handback,
+            appearanceRetry: retry?.report,
+            setup: setup,
+            setupNotMade: setupNotMade,
+            diagnosingRunnerFailure: { RunnerFailureDiagnosis.read(resultBundlePath: resultBundlePath, shell: shell) },
+            readingBundle: { try recorded ?? final.get() }
+        )
+        answer.endedByStop = endedByStop
+        return answer
     }
 
     /// Everything a walk and a dry run do before the runner runs, in the order a walk has always done it: the walkbook loaded, the output refused unless fresh, the runner resolved and its use recorded, the device booted, the app found and hashed, the walkbook to execute written, and the runner built.
     ///
     /// One sequence for both modes, so a dry run refuses what a walk refuses and at the same point — before anything boots wherever that is knowable — and differs only in which artefact the output path has to be fresh for.
+    ///
+    /// `beforeBoot` is called with the walkbook and the held device once any setup refusal is made and before anything boots: the serial walk passes nothing to do, and a parallel walk readies its other devices there.
     ///
     /// **The caller owns the temporary walkbook once this returns**; if the build throws, it is deleted here, because the caller never gets a `Prepared` to delete it from. `scratch` is where it is written — the system's temporary directory, or a test's own, which is the only way to see it gone.
     func prepare(
@@ -431,6 +545,7 @@ struct WalkCommand: ParsableCommand {
         firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
         provisioning: (Shell) -> SlimWalkProvisioning = { SlimWalkProvisioning(shell: $0) },
         animationsLibrary: AnimationsLibrary? = nil,
+        beforeBoot: (Walkbook, Simulator) throws -> Void = { _, _ in },
         note: (String) -> Void = { _ in }
     ) throws -> Prepared {
         telemetry?.begin(tool: dryRun ? Self.dryRunLogName : "walk", logPath: logPath)
@@ -488,6 +603,7 @@ struct WalkCommand: ParsableCommand {
             if book.setup?.changesDevice == true, !DeviceSettle.mayReboot(simulator, requested: device, leased: lease != nil) {
                 throw DeviceSetupError.notOwned(udid: simulator.udid)
             }
+            try beforeBoot(book, simulator)
             let deviceNote = try provisioning(shell).boot(simulator, createdByWalk: held.lease.createdDevice, stockRequested: stock, appPath: appPath) { device in
                 try WalkTelemetry.segment(telemetry, .booting, \.bootMs) { try device.boot(shell: shell) }
             }
@@ -674,6 +790,16 @@ extension WalkCommand {
         let setup: DeviceSetup.Report?
         /// Why the walkbook's setup was not made, or a setup an earlier walk left was not handed back — the walk's lease could not be renewed before it (``WalkCommand/makeSetup(_:lease:now:journal:run:)``); `nil` when it was made or handed back, or there was none.
         let setupNotMade: String?
+        /// What the walks of a `walk --parallel`'s other devices came to, in shard order.
+        var otherDevices: [Outcome] = []
+        /// Those devices, each named `<name> <udid8>`.
+        var otherDeviceLabels: [String] = []
+        /// What the answer says about a parallel walk's shards, or a `--parallel` clamped to one device.
+        var parallelLines: [String] = []
+        /// Whether the walk's stop ended a runner of this device's walk, the appearance retry's included, though a bundle was read: how a parallel walk's refusal labels the shard.
+        var endedByStop = false
+        /// A device or lease a parallel walk could not give back, which qualifies the verdict.
+        var parallelQualifications: [String] = []
 
         init(
             bundle: CaptureBundle,
@@ -701,20 +827,27 @@ extension WalkCommand {
             // The handback's qualifications ride the verdict, not only the notes: a device left unable to run
             // the next accessibility suite, or in an appearance it was not found in, is exactly what an agent
             // reading the verdict line has to act on.
-            CaptureBundleSummary(
-                bundle,
-                qualifiedBy: (survivedRunnerFailure == nil ? [] : ["a runner failure this bundle survived"])
-                    + [appearanceRetry?.qualification].compactMap(\.self)
-                    + (handback?.qualifications ?? [])
-                    + (setup?.qualifications ?? [])
-                    + [setupNotMade].compactMap(\.self),
-                notes: notes
-            ).answer()
+            // A parallel walk's other devices qualify it as their own walks would, each qualification once.
+            var qualifications = runQualifications
+            for other in otherDevices {
+                qualifications += other.runQualifications.filter { !qualifications.contains($0) }
+            }
+            return CaptureBundleSummary(bundle, qualifiedBy: qualifications + parallelQualifications, notes: notes).answer()
+        }
+
+        /// What qualifies this device's walk: a survived runner failure, the appearance retry, the handback and the setup.
+        private var runQualifications: [String] {
+            (survivedRunnerFailure == nil ? [] : ["a runner failure this bundle survived"])
+                + [appearanceRetry?.qualification].compactMap(\.self)
+                + (handback?.qualifications ?? [])
+                + (setup?.qualifications ?? [])
+                + [setupNotMade].compactMap(\.self)
         }
 
         /// ``answer()`` as a face serves it: the result file, when the run wrote one, named on one trailing residue line (`Docs/SIMWALK-PROGRESS.md` §4).
-        func servedAnswer() -> Answer {
-            Self.naming(result: resultPath, in: answer())
+        func servedAnswer(junit: JUnitOutput? = nil) -> Answer {
+            junit?.report = JUnitWalkCases.report(of: bundle)
+            return Self.naming(result: resultPath, in: answer())
         }
 
         /// `answer` with `result: <path>` as its last residue line when there is a `path`, and nothing else changed — after the notes, which ``CaptureBundleSummary/answer(appending:)`` would put the line ahead of.
@@ -754,6 +887,12 @@ extension WalkCommand {
             // The manifest's record prints with the bundle's own residue; only a record that could not be written is said here.
             if let setup, bundle.manifest.deviceSetup == nil {
                 lines += (lines.isEmpty ? [] : [""]) + setup.lines + ["⚠ the setup above is not recorded in the bundle's manifest — rewriting it failed"]
+            }
+            if !parallelLines.isEmpty {
+                lines += (lines.isEmpty ? [] : [""]) + parallelLines
+            }
+            for (label, other) in zip(otherDeviceLabels, otherDevices) where !other.notes.isEmpty {
+                lines += (lines.isEmpty ? [] : [""]) + ["\(label):"] + other.notes
             }
             return lines
         }

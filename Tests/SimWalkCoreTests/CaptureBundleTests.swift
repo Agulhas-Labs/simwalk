@@ -577,7 +577,7 @@ struct CaptureBundleTests {
     }
 
     static func placeArtefacts(for capture: CaptureManifest.StateCapture, in bundleURL: URL) throws {
-        for path in [capture.screenshotPath, capture.axTreePath] {
+        for path in [capture.screenshotPath, capture.axTreePath] + [capture.appleAudit?.path].compactMap(\.self) {
             try Data("stub".utf8).write(to: CaptureBundleLayout.url(forRelativePath: path, in: bundleURL))
         }
     }

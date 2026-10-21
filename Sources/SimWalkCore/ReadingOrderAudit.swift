@@ -17,7 +17,7 @@ import Foundation
 /// A control is one element whatever it contains: its children are what it says.
 ///
 /// So is a labelled container that speaks for its text (SimWalk#105). A SwiftUI `.accessibilityElement(children: .combine)` is an `Other` labelled "Step 3 of 4, Setup" whose children are the StaticTexts "3" and "Setup": VoiceOver stops on the parent once and reads its label, so the order of the children inside it is never swiped. A non-control node with a non-blank label is one element, and is not descended into, when it has at least one text-carrying leaf, every such leaf's text (label, else value; trimmed) occurs in the node's own label, and no descendant is an enabled control. Anything short of that is collected child by child: text the label does not carry is a stop of its own, and a control inside is a stop of its own.
-public struct ReadingOrderAudit: LabelAuditRule {
+public struct ReadingOrderAudit: PerTreeLabelAuditRule {
     public static let name = AuditRuleName.readingOrder
     public static var findingNoun: String {
         "element"
@@ -39,7 +39,7 @@ public struct ReadingOrderAudit: LabelAuditRule {
 
     public init() {}
 
-    public func notApplicableReason(over captures: [BundleAuditScope.Capture]) -> String {
+    public func notApplicableReason(over captures: [BundleAuditScope.Capture], result _: LabelRuleResult) -> String {
         !captures.isEmpty && captures.allSatisfy { Self.isRightToLeft($0.stateSlug) } ? "only right-to-left states" : "no elements on any screen"
     }
 

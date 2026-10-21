@@ -40,6 +40,8 @@ public extension LiveSessionRequest {
         case read
         /// Take one route step, exactly as a walk takes it, and read the screen it landed on.
         case step
+        /// End the app and launch it again exactly as the session launched it — same state, arguments, environment and appearance — and read the screen it settles on: how `discover` gets back to a screen it has no back button to.
+        case relaunch
         /// Stop serving: the runner answers, writes its exit record, and returns, which ends the `xcodebuild` run.
         case end
     }

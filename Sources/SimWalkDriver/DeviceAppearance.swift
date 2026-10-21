@@ -92,28 +92,40 @@ public extension DeviceAppearance {
         case cutShort
     }
 
-    /// What a walk did with the device's appearance on the way out.
+    /// What a walk, an `inspect`, or a session did with the device's appearance on the way out.
     enum Handback: Equatable, Sendable {
-        /// Put back to what the walk found, and read back as that.
+        /// Put back to what was found, and read back as that.
         case restored(Walkbook.Theme)
-        /// Not read before the walk, so there was nothing known to put back — and nothing the check could attribute an appearance refusal by.
+        /// Not read before the handback's holder started, so there was nothing known to put back — and nothing the check could attribute an appearance refusal by.
         case unknown
-        /// Read before the walk and could not be put back; the payload says what it was and why.
+        /// Read before the holder started and could not be put back; the payload says what it was and why.
         case failed(found: Walkbook.Theme, reason: String)
         /// Set, but not confirmed back — the write succeeded and only the read-back is missing, not `failed`, since a cut-short read is no answer rather than a wrong one (SimWalk#30); the payload says what was set and why the read did not confirm it.
         case unconfirmed(found: Walkbook.Theme, reason: String)
+        /// Read before the session and not put back: another holder took the device during the handback (SimWalk#128), and a write now would land under it; the payload is what it was.
+        case leftToAnotherHolder(found: Walkbook.Theme)
 
-        /// The line printed under a walk's answer, or `nil` when the device was simply put back.
-        public func note(udid: String) -> String? {
+        /// The line printed under an answer, or `nil` when the device was simply put back.
+        ///
+        /// `actor` names what handed the device back (`this walk`, `this session`, `this inspect`), so the line never calls an `inspect` or a session a walk.
+        ///
+        /// `completedBy` names what will finish a handback another holder interrupted, when something will; `nil` leaves the line telling the user to run the command, since nothing else will.
+        public func note(udid: String, by actor: String, completedBy: String? = nil) -> String? {
             switch self {
             case .restored:
                 nil
             case .unknown:
-                "appearance: `simctl ui` did not report \(udid)'s appearance before the walk, so the walk could not put it back, and a light state beside a dark one that did not apply was refused rather than kept"
+                "appearance: `simctl ui` did not report \(udid)'s appearance before \(actor) started, so \(actor) could not put it back, and a light state beside a dark one that did not apply was refused rather than kept"
             case let .failed(found, reason):
-                "appearance: \(udid) was \(found.rawValue) before the walk and could not be put back (\(reason)) — run: \(DeviceAppearance.command(found, udid: udid))"
+                "appearance: \(udid) was \(found.rawValue) before \(actor) started and could not be put back (\(reason)) — run: \(DeviceAppearance.command(found, udid: udid))"
             case let .unconfirmed(found, reason):
-                "appearance: \(udid) was \(found.rawValue) before the walk and this walk could not confirm it was put back (\(reason)) — if it did not hold, run: \(DeviceAppearance.command(found, udid: udid))"
+                "appearance: \(udid) was \(found.rawValue) before \(actor) started and \(actor) could not confirm it was put back (\(reason)) — if it did not hold, run: \(DeviceAppearance.command(found, udid: udid))"
+            case let .leftToAnotherHolder(found):
+                if let completedBy {
+                    "appearance: \(udid) was \(found.rawValue) before \(actor) started, and another holder took it during the handback, so it was left as that holder has it — \(completedBy) puts it back once that holder is done"
+                } else {
+                    "appearance: \(udid) was \(found.rawValue) before \(actor) started, and another holder took it during the handback, so it was left as that holder has it — once it is done, run: \(DeviceAppearance.command(found, udid: udid))"
+                }
             }
         }
 
@@ -128,6 +140,8 @@ public extension DeviceAppearance {
                 "a device appearance that could not be put back"
             case .unconfirmed:
                 "a device appearance not confirmed put back"
+            case .leftToAnotherHolder:
+                "a device appearance left to another holder that took the device during the handback"
             }
         }
     }

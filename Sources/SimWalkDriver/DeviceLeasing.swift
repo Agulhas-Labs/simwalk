@@ -126,11 +126,31 @@ public struct DeviceLeasing {
         guard cloned.succeeded, !udid.isEmpty else {
             throw SimulatorError.simctlFailed(command: "clone \(source)", reason: cloned.failureLine)
         }
+        let made = Simulator(udid: udid, name: name, osVersion: original.osVersion, isBooted: false, runtimeIdentifier: original.runtimeIdentifier, deviceTypeIdentifier: original.deviceTypeIdentifier)
+        return try leaseCreated(made, clonedFrom: source, ttl: ttl, holderPID: holderPID, now: now)
+    }
+
+    /// Creates a new device of `deviceType` on `runtime`, named `"<name> (SimWalk lease)"`, and leases it as a device the lease created, so its release deletes it.
+    ///
+    /// The device is deleted again, by the UDID `simctl create` answered with, when its lease cannot be written.
+    public func create(named name: String, deviceType: String, runtime: String, ttl: TimeInterval, holderPID: Int32, now: Date) throws -> Grant {
+        let named = "\(name) (SimWalk lease)"
+        let created = try shell.run("/usr/bin/xcrun", ["simctl", "create", named, deviceType, runtime])
+        let udid = created.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard created.succeeded, !udid.isEmpty else {
+            throw SimulatorError.simctlFailed(command: "create \(deviceType) \(runtime)", reason: created.failureLine)
+        }
+        let made = Simulator(udid: udid, name: named, osVersion: Simulator.version(fromRuntime: runtime), isBooted: false, runtimeIdentifier: runtime, deviceTypeIdentifier: deviceType)
+        return try leaseCreated(made, clonedFrom: nil, ttl: ttl, holderPID: holderPID, now: now)
+    }
+
+    /// Leases a device just made, as one the lease created; a lease that cannot be written deletes the device rather than leave it nobody's.
+    private func leaseCreated(_ made: Simulator, clonedFrom source: String?, ttl: TimeInterval, holderPID: Int32, now: Date) throws -> Grant {
         do {
-            let lease = try LeaseError.mapping { try store.acquire(udid: udid, ttl: ttl, holderPID: holderPID, now: now, createdDevice: true, clonedFrom: source) }
-            return Grant(simulator: Simulator(udid: udid, name: name, osVersion: original.osVersion, isBooted: false, runtimeIdentifier: original.runtimeIdentifier), lease: lease)
+            let lease = try LeaseError.mapping { try store.acquire(udid: made.udid, ttl: ttl, holderPID: holderPID, now: now, createdDevice: true, clonedFrom: source) }
+            return Grant(simulator: made, lease: lease)
         } catch {
-            try? deleteDevice(udid)
+            try? deleteDevice(made.udid)
             throw error
         }
     }

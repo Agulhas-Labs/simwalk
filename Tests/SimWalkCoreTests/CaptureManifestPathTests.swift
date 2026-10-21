@@ -66,6 +66,69 @@ struct CaptureManifestPathTests {
     }
 
     @Test
+    func aClaimedAuditRecordThatIsAbsentIsReportedMissingWithItsPath() throws {
+        let directory = try TemporaryDirectory()
+        let manifest = try Self.manifestWithCaptureJSON(
+            screenshot: "screens/today/light/screen.png",
+            axTree: "screens/today/light/ax-tree.json",
+            theme: "light",
+            auditPath: "screens/today/light/apple-audit.json"
+        )
+        try FileManager.default.createDirectory(at: directory.url.appendingPathComponent("screens/today/light"), withIntermediateDirectories: true)
+        for name in ["screen.png", "ax-tree.json"] {
+            try Data("x".utf8).write(to: directory.url.appendingPathComponent("screens/today/light/\(name)"))
+        }
+
+        let problems = CaptureManifestValidator.missingArtefactProblems(for: manifest, in: directory.url)
+
+        #expect(problems == [.artefactMissing(screenID: "today", stateSlug: "light", expectedPath: "screens/today/light/apple-audit.json")])
+    }
+
+    @Test
+    func aClaimedAuditRecordThatIsPresentOrUnclaimedAddsNoMissingProblem() throws {
+        let directory = try TemporaryDirectory()
+        try FileManager.default.createDirectory(at: directory.url.appendingPathComponent("screens/today/light"), withIntermediateDirectories: true)
+        for name in ["screen.png", "ax-tree.json", "apple-audit.json"] {
+            try Data("x".utf8).write(to: directory.url.appendingPathComponent("screens/today/light/\(name)"))
+        }
+        let audited = try Self.manifestWithCaptureJSON(
+            screenshot: "screens/today/light/screen.png",
+            axTree: "screens/today/light/ax-tree.json",
+            theme: "light",
+            auditPath: "screens/today/light/apple-audit.json"
+        )
+        let unaudited = try Self.manifestWithCaptureJSON(
+            screenshot: "screens/today/light/screen.png",
+            axTree: "screens/today/light/ax-tree.json",
+            theme: "light"
+        )
+
+        #expect(CaptureManifestValidator.missingArtefactProblems(for: audited, in: directory.url).isEmpty)
+        #expect(CaptureManifestValidator.missingArtefactProblems(for: unaudited, in: directory.url).isEmpty)
+        #expect(CaptureManifestValidator.problems(in: audited).isEmpty)
+        #expect(CaptureManifestValidator.problems(in: unaudited).isEmpty)
+    }
+
+    @Test
+    func anAuditRecordPathThatIsNotTheLayoutsIsReportedMisfiled() throws {
+        let manifest = try Self.manifestWithCaptureJSON(
+            screenshot: "screens/today/light/screen.png",
+            axTree: "screens/today/light/ax-tree.json",
+            theme: "light",
+            auditPath: "screens/today/dark/apple-audit.json"
+        )
+
+        let problems = CaptureManifestValidator.problems(in: manifest)
+
+        #expect(problems == [.misfiledArtefact(
+            screenID: "today",
+            stateSlug: "light",
+            stated: "screens/today/dark/apple-audit.json",
+            expected: "screens/today/light/apple-audit.json"
+        )])
+    }
+
+    @Test
     func twoScreenRecordsDifferingOnlyByCaseAreRefusedAsACollision() {
         var manifest = CaptureBundleTests.manifest()
         var shouted = manifest.screens[0]
@@ -83,7 +146,10 @@ struct CaptureManifestPathTests {
     }
 
     /// Builds a manifest through the *decoder*, which is the path a hand-made manifest takes — the layout-deriving initialiser is not available to it.
-    private static func manifestWithCaptureJSON(screenshot: String, axTree: String, theme: String) throws -> CaptureManifest {
+    private static func manifestWithCaptureJSON(screenshot: String, axTree: String, theme: String, auditPath: String? = nil) throws -> CaptureManifest {
+        let audit = auditPath.map {
+            #", "appleAudit": { "path": "\#($0)", "milliseconds": 5, "issueCount": 0, "failed": false }"#
+        } ?? ""
         let json = """
         {
           "formatVersion": 1, "walkName": "w", "appBundleID": "a", "appBuildHash": "b",
@@ -93,7 +159,7 @@ struct CaptureManifestPathTests {
           "screens": [
             { "id": "today", "outcome": { "captured": {} }, "routeTaken": [],
               "captures": [
-                { "state": { "theme": "\(theme)" }, "screenshotPath": "\(screenshot)", "axTreePath": "\(axTree)" }
+                { "state": { "theme": "\(theme)" }, "screenshotPath": "\(screenshot)", "axTreePath": "\(axTree)"\(audit) }
               ] }
           ]
         }

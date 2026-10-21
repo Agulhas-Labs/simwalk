@@ -199,7 +199,7 @@ public extension DeviceSetup {
             let over = statusBarFound.isEmpty ? "" : " over an override the device already had (\(statusBarFound.joined(separator: ", "))), which the handback clears rather than restores"
             return privacy.map { "privacy \($0.action) \($0.service)" }
                 + (statusBar ? ["status bar clean\(over) (set, unverified: the app's tree does not carry SpringBoard's status bar)"] : [])
-                + (increaseContrastFound.map { ["Increase Contrast enabled, found \($0) (set, unverified: nothing captured reports it)"] } ?? [])
+                + (increaseContrastFound.map { ["\(CaptureManifest.SetupRecord.increaseContrastPrefix), found \($0) (set, unverified: nothing captured reports it)"] } ?? [])
         }
 
         /// The setup in one line, for the answer and the manifest.

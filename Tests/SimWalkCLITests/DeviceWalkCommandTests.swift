@@ -717,8 +717,22 @@ extension DeviceWalkCommandTests {
         let thrown = try #require(#expect(throws: DeviceWalkRefusal.self) { try fixture.answer(phone) })
 
         #expect(phone.summary == ["list", "lockState", "appearance"])
-        #expect(thrown.description.contains("appearance not handed back: the lease on \(Self.udid) is no longer this walk's"))
-        #expect(thrown.description.contains("Increase Contrast not handed back"))
+        #expect(thrown.description.contains("the lease on \(Self.udid) lapsed before anything on the phone was changed"))
+        #expect(!thrown.description.contains("not handed back"))
+    }
+
+    @Test
+    func aRefusalMarksTheSuffixedOutputItselfAndNotAFileInsideIt() {
+        let refusal = DeviceWalkRefusal.failed("/x/out.simwalk is taken; see /x/out.simwalk/manifest.json", suffixedOutput: "/x/out.simwalk", usageFailureKind: .inputRefused, handback: [])
+
+        #expect(refusal.description == "/x/out.simwalk (suffix added) is taken; see /x/out.simwalk/manifest.json")
+    }
+
+    @Test
+    func aRefusalDoesNotMarkALongerNameThatMerelyStartsWithTheOutput() {
+        let refusal = DeviceWalkRefusal.failed("/x/out.simwalk-2 and /x/out.simwalk.tmp are taken", suffixedOutput: "/x/out.simwalk", usageFailureKind: .inputRefused, handback: [])
+
+        #expect(refusal.description == "/x/out.simwalk-2 and /x/out.simwalk.tmp are taken")
     }
 
     @Test

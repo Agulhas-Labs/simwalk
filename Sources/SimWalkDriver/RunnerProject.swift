@@ -14,7 +14,7 @@ import SimWalkCore
 ///
 /// 1. `SIMWALK_RUNNER_PROJECT`, named explicitly.
 /// 2. The checkout a development build lives in — a binary under `<checkout>/.build/`, which by construction was built from that working tree, edits and all. A packaged build has no checkout (`compiledCheckout` is `nil`), so it is never a development build and this route does not exist for it.
-/// 3. The snapshot paired with this binary's SHA-256 in the `RunnerStore`. A packaged binary that has none yet — the first walk after `brew upgrade` or `npm update`, which swaps the binary and ships a new tree beside it without running `install-hook` — installs the tree shipped beside it (`ShippedRunner`), when that tree is stamped for this very binary, and walks with that. **Only the shipped tree**: a walk never snapshots a checkout (SimWalk#16), whose contents at the moment of the walk are exactly the skew the store exists to prevent.
+/// 3. The snapshot paired with this binary's SHA-256 in the `RunnerStore`. A packaged binary that has none yet — the first walk after `brew upgrade`, which swaps the binary and ships a new tree beside it without running `install-hook` — installs the tree shipped beside it (`ShippedRunner`), when that tree is stamped for this very binary, and walks with that. **Only the shipped tree**: a walk never snapshots a checkout (SimWalk#16), whose contents at the moment of the walk are exactly the skew the store exists to prevent.
 public struct RunnerProject {
     /// The runner a walk from `executable` builds, or a refusal naming everywhere that was looked.
     ///

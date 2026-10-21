@@ -66,7 +66,7 @@ struct AXTreeCapture {
     /// Spelled out rather than taken from `String(describing:)`, which prints raw enum case names that differ from the vocabulary anyone debugging a screen is looking at.
     ///
     /// **Every type the SDK defines is named**, because the core decides by name: `ScreenIdentifier` reads an identifier only on a container type it names, so a control written as a bare number — a segmented control as `Type37`, a menu item as `Type54` — could be told from a container only by the core knowing every number. Only a type a later SDK adds falls back to its numeric code, which the core then treats as no container at all — an honest number rather than an invented name. Bundles written before every type was named hold the popover, keyboard and search field as `Type18`, `Type19` and `Type45`, which the core still reads as those types.
-    private static func name(of type: XCUIElement.ElementType) -> String {
+    static func name(of type: XCUIElement.ElementType) -> String {
         names[type] ?? "Type\(type.rawValue)"
     }
 

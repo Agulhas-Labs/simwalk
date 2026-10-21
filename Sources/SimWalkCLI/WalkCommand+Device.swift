@@ -38,6 +38,9 @@ extension WalkCommand {
         guard !stock else {
             throw DeviceWalkRefusal.stockOnDevice
         }
+        guard parallel == nil else {
+            throw DeviceWalkRefusal.parallelOnDevice
+        }
         return .device(device)
     }
 
@@ -46,12 +49,12 @@ extension WalkCommand {
     }
 
     private func deviceWalk(udid: String?) -> DeviceWalk {
-        DeviceWalk(walkbook: walkbook, requestedUDID: udid, lease: lease, team: team, runnerBundleID: runnerBundleId, app: appPath, output: output, screens: screens, settle: settle, motion: motion)
+        DeviceWalk(walkbook: walkbook, requestedUDID: udid, lease: lease, team: team, runnerBundleID: runnerBundleId, app: appPath, output: output, screens: screens, settle: settle, motion: motion, appleAudit: appleAudit)
     }
 
     /// A walk of whichever target `--device` or `--lease` names, answered as `walk` answers: the simulator's served answer, or the device walk's.
     ///
-    /// The device path takes none of the simulator path's telemetry, pause or nonce: it has no progress file and its waits are the runner's own.
+    /// The device path takes none of the simulator path's pause or nonce, and its progress file holds only what `begin` and the end write plus the device it resolved (marked `physical`); its waits are the runner's own.
     ///
     /// `firstLaunch` is the walk's one preflight, made before its first `simctl` call on either path (SimWalk#136).
     func walked(
@@ -62,13 +65,18 @@ extension WalkCommand {
         now: @escaping () -> Date = { Date() },
         telemetry: WalkTelemetry? = nil,
         firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
+        junit: JUnitOutput? = nil,
         animationsLibrary: AnimationsLibrary? = nil,
+        interruption: Cancellation? = nil,
+        provisioning: (Shell) -> SlimWalkProvisioning = { SlimWalkProvisioning(shell: $0) },
         note: (String) -> Void = { _ in }
     ) throws -> Answer {
         let target = try target(shell: shell, leases: leases, firstLaunch: firstLaunch)
         guard case let .device(walk) = target else {
-            return try performWalk(shell: shell, now: now, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, firstLaunch: firstLaunch, animationsLibrary: animationsLibrary, note: note).servedAnswer()
+            return try performWalk(shell: shell, now: now, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, firstLaunch: firstLaunch, provisioning: provisioning, animationsLibrary: animationsLibrary, interruption: interruption, note: note).servedAnswer(junit: junit)
         }
-        return try walk.answer(shell: shell, builds: builds, resolveRunner: resolveRunner, leases: leases, holderPID: ProcessInfo.processInfo.processIdentifier, now: now())
+        var reporting = walk
+        reporting.junit = junit
+        return try reporting.answer(shell: shell, builds: builds, resolveRunner: resolveRunner, leases: leases, holderPID: ProcessInfo.processInfo.processIdentifier, now: now(), telemetry: telemetry)
     }
 }

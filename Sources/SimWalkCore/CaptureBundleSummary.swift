@@ -30,6 +30,7 @@ public struct CaptureBundleSummary {
     public func answer(appending extra: [String] = []) -> Answer {
         var residue = bundle.manifest.screens.enumerated().map { Self.screenLine($0.element, position: $0.offset + 1) }
         residue.append(Self.settleLine(bundle.manifest))
+        residue += Self.appleAuditLines(bundle.manifest)
         residue += Self.appearanceSettleLines(bundle.manifest)
         // What the host set on the device for the walk and put back after it — the record, so `bundle inspect` says it a week later.
         residue += bundle.manifest.deviceSetup.map { [""] + $0.lines } ?? []
@@ -105,6 +106,26 @@ public struct CaptureBundleSummary {
     private static func settleLine(_ manifest: CaptureManifest) -> String {
         let threshold = manifest.settleQuietMilliseconds.map { "\($0)ms" } ?? "unrecorded (this bundle predates the runner recording it)"
         return "settle: the accessibility tree had to hold still for \(threshold) before each capture — animations it cannot see (chart draw-in, cross-fades, image decode) are not covered"
+    }
+
+    /// What the walk recorded of Apple's accessibility audit, or nothing when it audited no state (E1a).
+    ///
+    /// Rendered from the manifest, so every answer that summarises the bundle says it a week later. The cost rides on the line because it is why the audit is opt-in: the walk took that much longer.
+    static func appleAuditLines(_ manifest: CaptureManifest) -> [String] {
+        let entries = manifest.appleAuditEntries
+        guard !entries.isEmpty else { return [] }
+        let sorted = entries.map(\.milliseconds).sorted()
+        let seconds = { (milliseconds: Int) in String(format: "%.1f", Double(milliseconds) / 1000) }
+        let issues = entries.reduce(0) { $0 + $1.issueCount }
+        let failed = entries.filter(\.failed).count
+        let states = entries.count == 1 ? "1 state" : "\(entries.count) states"
+        // A call that threw has no audit cost to report, so a run where every call threw states no timings.
+        if failed == entries.count {
+            return ["apple audit: \(states) asked, none completed (\(failed) failed) — opt-in (appleAudit / --apple-audit)"]
+        }
+        let failure = failed == 0 ? "" : ", \(failed) failed"
+        let issueCount = issues == 1 ? "1 issue" : "\(issues) issues"
+        return ["apple audit: \(states), p50 \(seconds(sorted[(sorted.count - 1) / 2])) s, max \(seconds(sorted[sorted.count - 1])) s — opt-in (appleAudit / --apple-audit); \(issueCount) recorded\(failure)"]
     }
 
     /// The settle the walk made and the screens it walked again (SimWalk#26), or nothing when it made none.
@@ -230,7 +251,7 @@ public struct CaptureBundleSummary {
     /// A captured screen's route is the answer to "how was this reached", which a bundle records and nothing surfaced; an unreachable one prints both routes, because how far it got and what it was reaching for are different facts and the gap between them is where the failure is.
     ///
     /// **`position` leads the line** — this screen's 1-based place in this listing — because it is the number `bundle screen`'s own `<step>` counts from, and after a `--screens` walk or a walkbook reorder that number is not the walkbook's own position for the screen, only this bundle's.
-    private static func screenLine(_ screen: CaptureManifest.ScreenRecord, position: Int) -> String {
+    static func screenLine(_ screen: CaptureManifest.ScreenRecord, position: Int) -> String {
         switch screen.outcome {
         case .captured:
             // A capture filed as identical to its base says so on the line (SimWalk#18): two states, one picture,

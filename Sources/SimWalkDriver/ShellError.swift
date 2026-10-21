@@ -14,6 +14,8 @@ public enum ShellError: Error, Equatable, CustomStringConvertible {
     ///
     /// An Xcode's `simctl` script runs it first, and it waits on an administrator password nobody is shown (SimWalk#136). Thrown only on that evidence, read from the stalled tree before it was stopped.
     case stalledOnFirstLaunch(command: String, seconds: TimeInterval)
+    /// The shell's ``ChildStop`` stopped the command while it ran, or had stopped before it was started, so it was never run.
+    case stopped
 
     public var description: String {
         switch self {
@@ -23,6 +25,8 @@ public enum ShellError: Error, Equatable, CustomStringConvertible {
             "`\(command)` did not finish within \(Int(seconds.rounded()))s and was stopped"
         case let .stalledOnFirstLaunch(command, seconds):
             "`\(command)` did not finish within \(Int(seconds.rounded()))s and was stopped: it was waiting on `xcodebuild -runFirstLaunch` — \(XcodeFirstLaunch.cause); \(XcodeFirstLaunch.fix)"
+        case .stopped:
+            "the command was stopped, or never started, because the work it belonged to was stopped"
         }
     }
 }

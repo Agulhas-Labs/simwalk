@@ -29,6 +29,11 @@ public struct Answer: Equatable, Sendable {
         self.weighing = weighing
     }
 
+    /// This answer with one more qualification on its verdict, everything else as it was.
+    public func qualified(by qualification: String) -> Answer {
+        Answer(header: header, verdict: verdict.adding(qualification: qualification), residue: residue, weighing: weighing)
+    }
+
     /// The whole answer, as a face prints it.
     public var text: String {
         rendered.text

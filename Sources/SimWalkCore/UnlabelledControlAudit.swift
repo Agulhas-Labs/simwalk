@@ -15,7 +15,7 @@ import Foundation
 /// **The inner control SwiftUI nests inside a labelled one is not examined.** A `Menu` row is a labelled `Button` with an unlabelled, unidentified `Button` of the same frame inside it (SimWalk#112); a `Toggle` is a labelled `Switch` with the platform's own unlabelled `Switch` inside it (SimWalk#102). No SwiftUI modifier reaches the inner one, and VoiceOver stops on the outer, so the inner is that control's part, not a second control. It is excused only when the enclosing control has a label (an identifier alone is no voice) and its frame contains the inner one's within a point; a control that merely sits somewhere inside a labelled one, outside its frame, is still examined.
 ///
 /// **The bars are examined.** A `TabBar` or `NavigationBar` control with no label is a real defect (an unlabelled toolbar or back button), so this rule does not skip them, unlike the geometry rules.
-public struct UnlabelledControlAudit: LabelAuditRule {
+public struct UnlabelledControlAudit: PerTreeLabelAuditRule {
     public static let name = AuditRuleName.unlabelledControl
     public static var findingNoun: String {
         "control"

@@ -24,6 +24,15 @@ public enum AnswerVerdict: Equatable, Sendable {
         qualifications.isEmpty ? .unqualified(detail) : .qualified(qualifications, detail: detail)
     }
 
+    /// This verdict with one more qualification named: an unqualified one becomes qualified, a qualified one gains the clause last, a refusal stays as it is.
+    public func adding(qualification: String) -> AnswerVerdict {
+        switch self {
+        case let .unqualified(detail): .qualified([qualification], detail: detail)
+        case let .qualified(qualifications, detail): .qualified(qualifications + [qualification], detail: detail)
+        case .refused: self
+        }
+    }
+
     /// One qualification clause — `2 captures taken before the tree settled` — or nothing at all when there is none of that kind to state.
     ///
     /// Here rather than on each summary, where it was two verbatim copies: a clause that is *absent* when its count is zero is the contract's third rule in one line, and a second copy is where one of them starts printing `0 screens unreachable`.

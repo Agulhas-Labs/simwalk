@@ -16,6 +16,8 @@ import SimWalkCore
 ///
 /// **`refusalClosing` is a line a thrown error's output ends with**, for the one caller whose answers all end with it: `device walk`, the alias, says it is `walk --device` now on a refusal as it does on an answer (SimWalk#116). It is not part of the logged reason.
 ///
+/// **`junit` is a `--junit` file the call writes once the answer exists**: the report the body left on it, or one `<error>` case carrying the refusal line. It never changes the exit code, except that a write that fails after a run qualifies the answer.
+///
 /// **`log` is optional, and `usage` is why.** A verb that reads the log must not write to it, or a machine whose usage is checked daily reports checking as its most-used verb — but it still owes a caller the other three guarantees, so it goes through here with `nil` rather than around here with none of them. Passing no log suppresses the record and nothing else.
 ///
 /// **The call is attributed to a Claude Code session when a hook says whose it is (SimWalk#14).** A process run from an agent's shell has no session of its own, so it claims the slip ``CallAttribution`` holds for its own arguments — as the call *starts*, since a walk runs for minutes and the slip is claimable for two — and the line it logs carries that session. Beside a log only: the slip lives next to the log it tags, and `usage`, which logs nothing, claims nothing. `arguments` is the process's own `argv` in normal use, and a parameter so a test can state it.
@@ -32,6 +34,7 @@ struct TimedCall {
         arguments: [String] = Array(CommandLine.arguments.dropFirst()),
         isStdoutPiped: () -> Bool = StandardStreams.isStdoutPiped,
         refusalClosing closing: String? = nil,
+        junit: JUnitOutput? = nil,
         body: () throws -> Answer
     ) throws {
         let started = ContinuousClock.now
@@ -39,17 +42,21 @@ struct TimedCall {
             CallAttribution(beside: $0).take(arguments: arguments, workingDirectory: FileManager.default.currentDirectoryPath)
         }
         let call = Call(tool: tool, target: target, started: started, session: session)
-        let answer: Answer
+        var answer: Answer
         do {
             answer = try body()
         } catch {
             let reason = String(describing: error)
-            emitError(([AnswerVerdict.refused(reason).line] + [closing].compactMap(\.self)).joined(separator: "\n"))
+            let unwritten = junit?.finish(refusal: reason)
+            emitError(([AnswerVerdict.refused(reason).line] + [closing, unwritten].compactMap(\.self)).joined(separator: "\n"))
             record(log, of: call, err: reason, saving: nil, kind: .of(error) ?? defaultFailureKind)
             // Lost focus is the one refusal a caller should retry, so it alone has an exit of its own.
             let exitCode = error is MirrorFocusRefusal ? AnswerVerdict.notFrontmostExitCode : AnswerVerdict.refusedExitCode
             warnIfPiped(exitCode: exitCode, isStdoutPiped: isStdoutPiped, emitError: emitError)
             throw ExitCode(exitCode)
+        }
+        if let junit {
+            answer = junit.finish(answer)
         }
         emit(answer.text)
         record(log, of: call, err: nil, saving: answer.saving)

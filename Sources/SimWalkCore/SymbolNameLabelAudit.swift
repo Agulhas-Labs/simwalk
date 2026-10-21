@@ -13,7 +13,7 @@ import Foundation
 /// Single words that are also real labels — `plus`, `minus`, `heart`, `star`, `camera`, `trash`, `pencil`, `gear` — are **deliberately not matched**. `pounds` and `kilograms` sit on a real app's buttons and are correct, and the same shape as `plus`; a rule that read them as symbols would be wrong on a screen that is right, which is the failure a conservative rule exists to avoid. The cost is a missed `plus`; the choice is that a finding from this rule should be true.
 ///
 /// Disabled controls are not examined, like the other label rules: Apple's Settings labels its disabled disclosure buttons `chevron`, and it is the reference for a screen with nothing to find.
-public struct SymbolNameLabelAudit: LabelAuditRule {
+public struct SymbolNameLabelAudit: PerTreeLabelAuditRule {
     public static let name = AuditRuleName.symbolNameLabel
     public static var findingNoun: String {
         "control"

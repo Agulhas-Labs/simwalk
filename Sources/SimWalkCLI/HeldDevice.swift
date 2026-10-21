@@ -18,7 +18,7 @@ struct HeldDevice {
     static func take(for walk: WalkCommand, shell: Shell, leases: LeaseStore, now: Date) throws -> HeldDevice {
         let (simulator, lease) = try leased(device: walk.device, token: walk.lease, shell: shell, leases: leases, now: now)
         do {
-            return try HeldDevice(simulator: simulator, lease: lease, claim: LeaseError.mapping { try WalkClaim.take(udid: simulator.udid, in: leases) })
+            return try HeldDevice(simulator: simulator, lease: lease, claim: LeaseError.takingClaim(udid: simulator.udid, in: leases))
         } catch {
             lease.release()
             throw error

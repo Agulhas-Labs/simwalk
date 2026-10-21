@@ -175,4 +175,29 @@ struct RunnerInvocationTests {
         #expect((environment[MotionOptIn.hostEnvironmentKey] != nil) == motion)
         #expect([asking, silent].map { MotionOptIn.records($0, in: runnerSide) } == [true, motion])
     }
+
+    /// `--apple-audit` reaches the runner as the key its own read takes back: a walk without the flag sets nothing, so the walkbook's own key decides.
+    @Test(arguments: [true, false])
+    func aWalkTellsTheRunnerToAuditOnlyWhenAsked(appleAudit: Bool) throws {
+        var runnerEnvironments: [[String: String]] = []
+        let shell = Shell(script: { executable, _, environment in
+            if executable.hasSuffix("xcodebuild") {
+                runnerEnvironments.append(environment)
+            }
+            return Shell.Result(status: 0, standardOutput: "", standardError: "")
+        })
+        let runner = RunnerInvocation(projectPath: "/runner/SimWalkRunner.xcodeproj", derivedDataPath: "/runner/dd", shell: shell)
+        let simulator = Simulator(udid: "UDID-1", name: "iPhone 17 Pro", osVersion: "26.5", isBooted: true)
+
+        try runner.walk(walkbookPath: "/book.json", outputPath: "/out.simwalk", buildHash: "a1b2", logFilePath: nil, appleAudit: appleAudit, on: simulator)
+
+        let environment = try #require(runnerEnvironments.first)
+        let runnerSide = Dictionary(uniqueKeysWithValues: environment.compactMap { key, value in
+            key.hasPrefix("TEST_RUNNER_") ? (String(key.dropFirst("TEST_RUNNER_".count)), value) : nil
+        })
+        let silent = Walkbook(name: "w", appBundleID: "x.y", screens: [])
+
+        #expect((environment[AppleAuditOptIn.hostEnvironmentKey] != nil) == appleAudit)
+        #expect(AppleAuditOptIn.records(silent, in: runnerSide) == appleAudit)
+    }
 }

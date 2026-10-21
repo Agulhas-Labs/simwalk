@@ -80,6 +80,19 @@ public enum LeaseError: Error, Equatable, CustomStringConvertible {
         }
     }
 
+    /// Takes a walk claim on `udid`, refusing as the lease store itself does when the claim cannot be written.
+    ///
+    /// `WalkClaim.take` throws what `FileManager` and `Data.write` throw — Cocoa errors, never a `LeaseStoreError` — so `mapping` alone let them through to be logged under a call site's default kind, `runnerFailed`, for a refusal that is the machine's store and not the runner. They become `storeFailed` naming the lease store's directory, which classifies as `toolError`.
+    public static func takingClaim(udid: String, in leases: LeaseStore) throws -> WalkClaim {
+        do {
+            return try mapping { try WalkClaim.take(udid: udid, in: leases) }
+        } catch let error as LeaseError {
+            throw error
+        } catch {
+            throw LeaseError.storeFailed(path: leases.directory.path, reason: "a walk claim for \(udid) could not be written under it: \(error.localizedDescription)")
+        }
+    }
+
     /// A lease's expiry as its refusal prints it: the subject of the line, not its provenance.
     public static func time(_ date: Date) -> String {
         date.formatted(.iso8601)

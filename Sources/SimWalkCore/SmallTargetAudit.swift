@@ -13,7 +13,7 @@ import Foundation
 /// - **A control nested inside another control, or inside a text field, is part of that one.** The `Dictate` button in Settings' search field is 17×22 and is the field's accessory; the field is the target.
 /// - **An inline link is left out.** A `Link` sitting in a run of text (inside a `StaticText` or `TextView`, or overlapping one beside it) is as tall as a line of type by construction; padding a sentence is not the fix.
 /// - **A disabled, zero-sized or off-screen control never fires.** Off-screen is judged against the root frame.
-public struct SmallTargetAudit: LabelAuditRule {
+public struct SmallTargetAudit: PerTreeLabelAuditRule {
     public static let name = AuditRuleName.smallTarget
     public static var findingNoun: String {
         "control"

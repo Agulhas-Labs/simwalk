@@ -12,15 +12,19 @@ public struct LabelRuleResult: Equatable, Sendable {
     public var examined: Int
     /// What it objected to.
     public var findings: [LabelFinding]
+    /// How many captures the rule could not check, for a rule that needs more than the tree (a screenshot it could not read); the answer says so beside the count.
+    public var unchecked: Int
 
-    public init(examined: Int = 0, findings: [LabelFinding] = []) {
+    public init(examined: Int = 0, findings: [LabelFinding] = [], unchecked: Int = 0) {
         self.examined = examined
         self.findings = findings
+        self.unchecked = unchecked
     }
 
     /// Two results as one, in order.
     mutating func absorb(_ other: LabelRuleResult) {
         examined += other.examined
         findings += other.findings
+        unchecked += other.unchecked
     }
 }

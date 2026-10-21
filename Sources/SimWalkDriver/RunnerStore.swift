@@ -72,7 +72,7 @@ public struct RunnerStore {
     /// The same pairing as a checkout's, minus git: the files are the ones the release listed, each checked against its listed hash as it is copied, the commit is the one the release stamped, and the tree is never dirty — it is a release, as built. The binding's `checkout` records the shipped root, so a reader tracing a runner back finds where it came from.
     public func install(shipped: ShippedRunner, binaryHash: String, repoint: Bool = false) throws -> Installation {
         let files = shipped.files()
-        let content = Self.contentHash(of: files, in: shipped.root)
+        let content = Self.contentHash(of: files, listed: shipped.hashes)
         return try pair(commit: shipped.commit, content: content, files: files, from: shipped.root, binaryHash: binaryHash, repoint: repoint, listed: shipped.hashes)
     }
 
@@ -148,18 +148,22 @@ public struct RunnerStore {
                 try manager.setAttributes([.posixPermissions: permissions], ofItemAtPath: destination.path)
             }
         }
-        if manager.fileExists(atPath: snapshot.path) {
-            if Self.contentHash(ofSnapshotAt: snapshot) == content {
-                return
+        // The check and the replace are one step (SimWalk#139 item 2): two copies that both found a stale snapshot would
+        // otherwise each replace it, the second moving away the fresh one the first had put in place and may be building.
+        try ExclusiveFileLock(file: snapshotsDirectory).withLock {
+            if manager.fileExists(atPath: snapshot.path) {
+                if Self.contentHash(ofSnapshotAt: snapshot) == content {
+                    return
+                }
+                let stale = snapshotsDirectory.appendingPathComponent(".stale-\(UUID().uuidString)", isDirectory: true)
+                try manager.moveItem(at: snapshot, to: stale)
+                try? manager.removeItem(at: stale)
             }
-            let stale = snapshotsDirectory.appendingPathComponent(".stale-\(UUID().uuidString)", isDirectory: true)
-            try manager.moveItem(at: snapshot, to: stale)
-            try? manager.removeItem(at: stale)
-        }
-        do {
-            try manager.moveItem(at: partial, to: snapshot)
-        } catch where manager.fileExists(atPath: snapshot.path) {
-            // Another install of the same content got there first; its snapshot is this one.
+            do {
+                try manager.moveItem(at: partial, to: snapshot)
+            } catch where manager.fileExists(atPath: snapshot.path) {
+                // Another install of the same content got there first; its snapshot is this one.
+            }
         }
     }
 
@@ -167,12 +171,25 @@ public struct RunnerStore {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
     }
 
-    /// One hash over every file's path and bytes, in path order — what names a dirty tree's snapshot, and what a snapshot is checked against before it is reused.
+    /// One hash over every file's path and the SHA-256 of its bytes, in path order — what names a dirty tree's snapshot, and what a snapshot is checked against before it is reused.
     private static func contentHash(of files: [String], in root: URL) -> String {
+        contentHash(of: files) { file in
+            ShippedRunner.sha256(of: (try? Data(contentsOf: root.appendingPathComponent(file))) ?? Data())
+        }
+    }
+
+    /// The same hash from the per-file hashes a release listed, without reading the tree (SimWalk#141 item 3).
+    ///
+    /// **A shipped tree's content is what `RUNNER_FILES` says, not what is on disk.** Hashed from the tree, a tree changed after release would hash to its changed bytes, and a snapshot already holding those same bytes would be reused and paired without the copy that checks each file against its listed hash. Hashed from the listing, such a snapshot does not match, so it is copied again, and the copy refuses the changed file.
+    private static func contentHash(of files: [String], listed: [String: String]) -> String {
+        contentHash(of: files) { listed[$0] ?? "" }
+    }
+
+    private static func contentHash(of files: [String], fileHash: (String) -> String) -> String {
         var digest = SHA256()
         for file in files {
             digest.update(data: Data(file.utf8) + Data([0]))
-            digest.update(data: (try? Data(contentsOf: root.appendingPathComponent(file))) ?? Data())
+            digest.update(data: Data(fileHash(file).utf8))
         }
         return digest.finalize().map { String(format: "%02x", $0) }.joined()
     }
@@ -197,7 +214,7 @@ public extension RunnerStore {
     struct Binding: Codable, Equatable, Sendable {
         /// The commit the snapshot was taken at — `<sha>` for a clean tree, `<sha>-dirty.<content hash>` for one with changes on disk.
         public let commit: String
-        /// The SHA-256 over the snapshot's paths and bytes — what a snapshot on disk is checked against before it is reused, and what a re-install is compared with.
+        /// The SHA-256 over the snapshot's paths and each file's SHA-256 — what a snapshot on disk is checked against before it is reused, and what a re-install is compared with.
         public let contentHash: String
         /// The snapshot's directory.
         public let snapshot: String

@@ -21,6 +21,16 @@ struct SimulatorTests {
         #expect(devices[2].osVersion == "17.4")
     }
 
+    /// A parallel walk takes its extra devices of shard 0's device type, so the type is read from the list, and a list that leaves it out reads as unknown rather than failing.
+    @Test
+    func aDevicesTypeIsReadFromTheListAndUnknownWhereTheListOmitsIt() throws {
+        let json = #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"udid":"A-1","name":"iPhone 17","state":"Shutdown","deviceTypeIdentifier":"com.apple.CoreSimulator.SimDeviceType.iPhone-17"},{"udid":"A-2","name":"iPhone 17","state":"Shutdown"}]}}"#
+
+        let devices = try Simulator.parseDevices(Data(json.utf8))
+
+        #expect(devices.map(\.deviceTypeIdentifier) == ["com.apple.CoreSimulator.SimDeviceType.iPhone-17", nil])
+    }
+
     /// A runtime identifier is not a version, and the manifest records the version.
     @Test
     func aRuntimeIdentifierIsReducedToItsVersion() {

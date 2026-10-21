@@ -282,6 +282,10 @@ public extension CaptureManifest {
         ///
         /// **A sibling list rather than a field on a `routeTaken` step**, because those decode strictly and a field there would be a format bump; `step` indexes `routeTaken`. **`nil` is an older bundle, not "nothing bound"**: the writer files a list — empty where no step bound an element — so a reader can tell a route that bound nothing from a bundle that never said, as `launchResets` cannot (its absence means no reset). Inside format 8 for the reason `launchResets` is: a record decodes leniently, so an older reader ignores the key.
         public private(set) var boundElements: [BoundElement]?
+        /// The device that captured this screen, written only by a parallel walk.
+        ///
+        /// `nil` in every serial walk, whose one device is ``CaptureManifest/device``, so a serial manifest's JSON is unchanged. Inside format 8 for the reason `launchResets` is: a record decodes leniently, so an older reader ignores the key.
+        public var capturedOn: CapturingDevice?
 
         public init(
             id: String,
@@ -330,6 +334,17 @@ public extension CaptureManifest {
                 launchResets: launchResets,
                 boundElements: boundElements
             )
+        }
+    }
+
+    /// The device a parallel walk captured a screen on, named and identified as the walk listed it.
+    struct CapturingDevice: Codable, Equatable, Sendable {
+        public var name: String
+        public var udid: String
+
+        public init(name: String, udid: String) {
+            self.name = name
+            self.udid = udid
         }
     }
 
@@ -478,6 +493,10 @@ public extension CaptureManifest {
         ///
         /// **Recorded only when asked for** — a screen's `"measure"` or a performance budget (`MeasureOptIn`) — and only by a device walk, so absent means "not measured", never "no cost". Inside format 8, as `motion` is.
         public private(set) var performance: Performance?
+        /// Where this state's Apple accessibility audit record is, and what it came to (`AppleAuditRecord`); `nil` where the walk did not audit.
+        ///
+        /// **Recorded only when asked for** — the walkbook's `"appleAudit": true`, or `--apple-audit` (`AppleAuditOptIn`) — so absent means "not audited", never "clean". **Inside format 8, no bump**, as `capturedAt` and `motion` are: a capture decodes leniently, so a reader that predates it ignores the key and loses only the record.
+        public private(set) var appleAudit: AppleAuditEntry?
 
         /// Deliberately **not public**, so the bundle-path rule cannot be bypassed by restating a path — a caller outside the module gets only the layout-deriving initialiser below.
         ///
@@ -492,7 +511,8 @@ public extension CaptureManifest {
             unverifiedAxes: [String]? = nil,
             capturedAt: Date? = nil,
             motion: Motion? = nil,
-            performance: Performance? = nil
+            performance: Performance? = nil,
+            appleAudit: AppleAuditEntry? = nil
         ) {
             self.capturedAt = capturedAt.map(Timestamp.millisecondRounded)
             self.state = state
@@ -504,6 +524,7 @@ public extension CaptureManifest {
             self.unverifiedAxes = unverifiedAxes
             self.motion = motion
             self.performance = performance
+            self.appleAudit = appleAudit
         }
 
         /// Builds the record for a captured state with both paths derived from `CaptureBundleLayout`, so a writer cannot invent a path a reader will not look in.
@@ -516,7 +537,8 @@ public extension CaptureManifest {
             unverifiedAxes: [String]? = nil,
             capturedAt: Date? = nil,
             motion: Motion? = nil,
-            performance: Performance? = nil
+            performance: Performance? = nil,
+            appleAudit: AppleAuditRecord? = nil
         ) {
             self.capturedAt = capturedAt.map(Timestamp.millisecondRounded)
             self.state = state
@@ -528,6 +550,7 @@ public extension CaptureManifest {
             self.unverifiedAxes = unverifiedAxes?.isEmpty == true ? nil : unverifiedAxes
             self.motion = motion
             self.performance = performance
+            self.appleAudit = appleAudit.map { AppleAuditEntry(screenID: screenID, stateSlug: state.slug, record: $0) }
         }
 
         /// Reads `axTreeSettled` under either spelling, because format 1 wrote it as `settled`.
@@ -549,6 +572,7 @@ public extension CaptureManifest {
             capturedAt = try container.decodeIfPresent(Date.self, forKey: .capturedAt)
             motion = try container.decodeIfPresent(Motion.self, forKey: .motion)
             performance = try container.decodeIfPresent(Performance.self, forKey: .performance)
+            appleAudit = try container.decodeIfPresent(AppleAuditEntry.self, forKey: .appleAudit)
         }
 
         /// This record with `capturedAt` set, unless it already carries one — how `CaptureBundleWriter.finalise` stamps, as a fallback, a capture that arrived without its read time.
@@ -587,6 +611,7 @@ extension CaptureManifest.StateCapture {
         case capturedAt
         case motion
         case performance
+        case appleAudit
     }
 
     /// Format 1's spelling, read but never written.

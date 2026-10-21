@@ -30,6 +30,7 @@ struct MCPToolInvocationTests {
             "settle": 800,
             "motion": true,
             "animations": true,
+            "stock": true,
             "screenIDs": ["today", "steps-detail"],
             "verbose": true,
         ])
@@ -43,6 +44,7 @@ struct MCPToolInvocationTests {
             "--settle=800",
             "--motion",
             "--animations",
+            "--stock",
             "--screens=today", "--screens=steps-detail",
             "--verbose",
             "--", "example.json",

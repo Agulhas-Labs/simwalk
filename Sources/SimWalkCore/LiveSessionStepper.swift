@@ -62,6 +62,16 @@ public struct LiveSessionStepper: Sendable {
         }
     }
 
+    /// Answers one `relaunch` request: `launch` ends the app and starts it again as the session started it, then the screen is watched until it holds still and read.
+    ///
+    /// The sheet baseline starts over, since the app it was kept for is gone.
+    public mutating func relaunch(_ request: LiveSessionRequest, screen: some TreeSource, launch: () throws -> Void, read: () throws -> LiveScreen) throws -> LiveSessionResponse {
+        baseline = SystemSheetBaseline()
+        try launch()
+        try settle(screen)
+        return try LiveSessionResponse(n: request.n, action: .relaunch, screen: read())
+    }
+
     /// Watches `screen` until it has held still for the quiet period, or the budget is spent on a screen still moving — as a walk waits before it captures.
     ///
     /// A navigating step lands once the hierarchy has *left* its screen, which is before a pop or a push has finished; read then, the after-screen is mid-transition and its hash is one no later read will have (measured on RouteFixture: every `back` answered with its read still changing).

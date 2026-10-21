@@ -248,7 +248,7 @@ public struct CaptureManifestValidator {
     ) -> [CaptureManifestProblem] {
         manifest.screens.flatMap { screen in
             screen.captures.flatMap { capture in
-                [capture.screenshotPath, capture.axTreePath].compactMap { path -> CaptureManifestProblem? in
+                ([capture.screenshotPath, capture.axTreePath] + [capture.appleAudit?.path].compactMap(\.self)).compactMap { path -> CaptureManifestProblem? in
                     let url = CaptureBundleLayout.url(forRelativePath: path, in: bundleURL)
                     guard !fileManager.fileExists(atPath: url.path) else { return nil }
                     return .artefactMissing(screenID: screen.id, stateSlug: capture.state.slug, expectedPath: path)
@@ -283,11 +283,16 @@ public struct CaptureManifestValidator {
     private static func misfiledArtefactProblems(in screen: CaptureManifest.ScreenRecord) -> [CaptureManifestProblem] {
         screen.captures.flatMap { capture -> [CaptureManifestProblem] in
             let slug = capture.state.slug
-            let expected = [
+            var expected = [
                 CaptureBundleLayout.screenshotPath(screenID: screen.id, stateSlug: slug),
                 CaptureBundleLayout.axTreePath(screenID: screen.id, stateSlug: slug),
             ]
-            return zip([capture.screenshotPath, capture.axTreePath], expected).compactMap { stated, expected in
+            var stated = [capture.screenshotPath, capture.axTreePath]
+            if let audit = capture.appleAudit {
+                expected.append(CaptureBundleLayout.appleAuditPath(screenID: screen.id, stateSlug: slug))
+                stated.append(audit.path)
+            }
+            return zip(stated, expected).compactMap { stated, expected in
                 guard stated != expected else { return nil }
                 return .misfiledArtefact(screenID: screen.id, stateSlug: slug, stated: stated, expected: expected)
             }

@@ -72,6 +72,7 @@ public struct RunnerInvocation {
         logFilePath: String?,
         settleMilliseconds: Int? = nil,
         motion: Bool = false,
+        appleAudit: Bool = false,
         animationsOffLibrary: String? = nil,
         deviceAppearance: Walkbook.Theme? = nil,
         deviceLocale: String? = nil,
@@ -113,6 +114,11 @@ public struct RunnerInvocation {
         // own `motion` decides, so every existing invocation is unchanged.
         if motion {
             environment[MotionOptIn.hostEnvironmentKey] = MotionOptIn.walkWideValue
+        }
+        // `--apple-audit`: the runner audits every state after its capture. Absent means the walkbook's own
+        // `appleAudit` decides, so every existing invocation is unchanged.
+        if appleAudit {
+            environment[AppleAuditOptIn.hostEnvironmentKey] = AppleAuditOptIn.walkWideValue
         }
         // The animations-off library's path (SimWalk#154), which the runner inserts into the app's launch environment. Absent means the
         // app launches as it is: `--animations`, a walk that records motion, and every device walk.
@@ -217,6 +223,7 @@ public struct RunnerInvocation {
         nonce: String,
         settleMilliseconds: Int? = nil,
         motion: Bool = false,
+        appleAudit: Bool = false,
         deviceAppearance: Walkbook.Theme? = nil,
         runnerCommit: String? = nil,
         performance: MeasuredPerformance = MeasuredPerformance(),
@@ -245,6 +252,11 @@ public struct RunnerInvocation {
         }
         if motion {
             environment[MotionOptIn.hostEnvironmentKey] = MotionOptIn.walkWideValue
+        }
+        // `--apple-audit`: the runner audits every state after its capture. Absent means the walkbook's own
+        // `appleAudit` decides, so every existing invocation is unchanged.
+        if appleAudit {
+            environment[AppleAuditOptIn.hostEnvironmentKey] = AppleAuditOptIn.walkWideValue
         }
         // The measure runs' records, which the runner files on each capture: the manifest stays its single write (SimWalk#67, M4).
         if !performance.isEmpty {

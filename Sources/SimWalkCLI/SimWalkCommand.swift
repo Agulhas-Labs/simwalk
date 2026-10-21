@@ -29,6 +29,7 @@ struct SimWalkCommand: AsyncParsableCommand {
             PruneCommand.self,
             LeaseCommand.self,
             SessionCommand.self,
+            DiscoverCommand.self,
             MirrorCommand.self,
             DeviceCommand.self,
             HookCommand.self,

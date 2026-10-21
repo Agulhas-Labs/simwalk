@@ -7,7 +7,7 @@ import Foundation
 import SimWalkTestSupport
 import Testing
 
-/// `walk_status` read from the progress files alone: the precedence table's rows 1–11 (`Docs/Reference.md`, "Bounded walks").
+/// `walk_status` read from the progress files alone: the precedence table's rows 1–12 (`Docs/Reference.md`, "Bounded walks").
 ///
 /// Also the handle grammar, the dead-process rule and the shapes of the answers. No test sleeps: the wait runs on a fake clock.
 struct WalkStatusReaderTests {
@@ -44,6 +44,21 @@ struct WalkStatusReaderTests {
 
         #expect(started < Date())
         #expect(WalkProcessProbe.system.startTime(Int32.max) == nil)
+    }
+
+    /// A real zombie: a child that has exited and is not yet reaped, as a server killed mid-walk is until its parent reaps it.
+    @Test
+    func theSystemProbeFindsNoProcessAtAZombiePid() throws {
+        var pid: pid_t = 0
+        let name = strdup("true")
+        defer { free(name) }
+        let spawned = posix_spawn(&pid, "/usr/bin/true", nil, nil, [name, nil], nil)
+        try #require(spawned == 0)
+        defer { _ = waitpid(pid, nil, 0) }
+        var info = siginfo_t()
+        try #require(waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) == 0)
+
+        #expect(WalkProcessProbe.system.startTime(pid) == nil)
     }
 
     // MARK: Rows 1–6
@@ -226,7 +241,7 @@ struct WalkStatusReaderTests {
         }
     }
 
-    // MARK: Rows 8–11
+    // MARK: Rows 8–12
 
     @Test
     func row8APassedWalkIsOkWithItsCounts() async throws {
@@ -297,7 +312,27 @@ struct WalkStatusReaderTests {
     }
 
     @Test
-    func row11AnEndedWalkWithNoResultFileIsRefused() async throws {
+    func row11AFinishedPhysicalDeviceWalkIsOkAndNotAnError() async throws {
+        let fixture = try Fixture()
+        try fixture.write(fixture.progress(phase: .done, device: WalkProgress.Device(name: "iPhone", udid: "UDID", osVersion: "26.5", physical: true)))
+
+        let status = await fixture.status(Self.handle)
+
+        #expect(status == WalkStatus(text: "ok — the walk s@4242-1700000000123 on a physical device finished; a device walk keeps no result file", isError: false))
+    }
+
+    @Test
+    func row12ASimulatorWalkWithNoResultFileIsRefused() async throws {
+        let fixture = try Fixture()
+        try fixture.write(fixture.progress(phase: .done, device: WalkProgress.Device(name: "iPhone 17", udid: "UDID", osVersion: "26.5")))
+
+        let status = await fixture.status(Self.handle)
+
+        #expect(status == WalkStatus(text: "refused — the walk s@4242-1700000000123 ended but its result file was not written", isError: true))
+    }
+
+    @Test
+    func row12AnEndedWalkWithNoResultFileIsRefused() async throws {
         let fixture = try Fixture()
         try fixture.write(fixture.progress(phase: .done))
 
@@ -349,11 +384,13 @@ private extension WalkStatusReaderTests {
             pid: Int32 = 4242,
             startedAt: Date = WalkStatusReaderTests.startedAt,
             resultPath: String? = nil,
-            error: String? = nil
+            error: String? = nil,
+            device: WalkProgress.Device? = nil
         ) -> WalkProgress {
             var progress = WalkProgress(tool: tool, phase: phase, pid: pid, startedAt: startedAt)
             progress.resultPath = resultPath
             progress.error = error
+            progress.device = device
             return progress
         }
 

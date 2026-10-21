@@ -11,6 +11,6 @@ struct BundleCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "bundle",
         abstract: "Work with capture bundles written by a walk.",
-        subcommands: [BundleInspectCommand.self, BundleAuditCommand.self, BundleDiffCommand.self, BundleOracleCommand.self, BundleCoverageCommand.self, BundleScreenCommand.self]
+        subcommands: [BundleInspectCommand.self, BundleAuditCommand.self, BundleDiffCommand.self, BundleOracleCommand.self, BundleCoverageCommand.self, BundleScreenCommand.self, BundleLabelsCommand.self]
     )
 }

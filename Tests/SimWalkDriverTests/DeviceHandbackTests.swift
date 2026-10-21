@@ -62,7 +62,42 @@ struct DeviceHandbackTests {
 
         #expect(handback == .failed(found: .light, reason: "it did not read back as light"))
         #expect(handback.qualification == "a device appearance that could not be put back")
-        #expect(handback.note(udid: "UDID-1")?.contains("xcrun simctl ui UDID-1 appearance light") == true)
+        #expect(handback.note(udid: "UDID-1", by: "this walk")?.contains("xcrun simctl ui UDID-1 appearance light") == true)
+    }
+
+    /// SimWalk#159: every caller that hands the appearance back names itself in the line, so an `inspect` or a session is never called a walk.
+    @Test(arguments: ["this walk", "this session", "this inspect"])
+    func theAppearanceLinesNameWhatHandedTheDeviceBack(actor: String) {
+        let unknown = DeviceAppearance.Handback.unknown.note(udid: "UDID-1", by: actor)
+        let failed = DeviceAppearance.Handback.failed(found: .light, reason: "boom").note(udid: "UDID-1", by: actor)
+        let unconfirmed = DeviceAppearance.Handback.unconfirmed(found: .light, reason: "cut short").note(udid: "UDID-1", by: actor)
+        let left = DeviceAppearance.Handback.leftToAnotherHolder(found: .light).note(udid: "UDID-1", by: actor)
+
+        #expect(unknown?.contains("before \(actor) started, so \(actor) could not put it back") == true)
+        #expect(failed?.contains("was light before \(actor) started and could not be put back (boom)") == true)
+        #expect(unconfirmed?.contains("was light before \(actor) started and \(actor) could not confirm it was put back (cut short)") == true)
+        #expect(left?.contains("was light before \(actor) started, and another holder took it") == true)
+        for line in [unknown, failed, unconfirmed, left].compactMap(\.self) {
+            #expect(actor == "this walk" || !line.contains("walk"))
+            #expect(actor == "this session" || !line.contains("session"))
+        }
+    }
+
+    /// SimWalk#159: the appearance's actor follows `appearanceBy` when given — `session end` puts the appearance back itself even where accessibility's restore was `session list`'s.
+    @Test
+    func theAppearanceLineFollowsAppearanceByWhenGiven() {
+        let handback = DeviceHandback(
+            accessibility: AccessibilityPreference.Restoration(udid: "UDID-1", state: .restored),
+            appearance: .failed(found: .light, reason: "boom")
+        )
+
+        let split = handback.notes(by: "`session list`", appearanceBy: "this session")
+        let same = handback.notes(by: "this inspect")
+
+        #expect(split.first?.contains("`session list` switched it back on") == true)
+        #expect(split.contains { $0.hasPrefix("appearance:") && $0.contains("before this session started") })
+        #expect(same.contains { $0.hasPrefix("appearance:") && $0.contains("before this inspect started") })
+        #expect(handback.notes.contains { $0.hasPrefix("appearance:") && $0.contains("before this walk started") })
     }
 
     /// SimWalk#79: `session end` hands the device back too, and its line names the session — a walk's names the walk.
@@ -190,6 +225,110 @@ struct DeviceHandbackTests {
         #expect(DeviceHandback.ResetCheck.unknown.combined(with: .didNotHold(read: .dark)) == .didNotHold(read: .dark))
         #expect(DeviceHandback.ResetCheck.held.combined(with: .held) == .held)
         #expect(DeviceHandback.ResetCheck.notChecked.combined(with: .notChecked) == .notChecked)
+    }
+
+    /// SimWalk#128: a holder that takes the device while the handback waits out the teardown budget has nothing written under it.
+    ///
+    /// The busy question, free when the handback began, is asked again after the wait, before each write, and each part's note says why it was left.
+    @Test
+    func aDeviceTakenDuringTheTeardownWaitHasNeitherWriteMade() {
+        var vectors: [[String]] = []
+        var elapsed: TimeInterval = 0
+
+        let handback = DeviceHandback.perform(
+            udid: "UDID-1",
+            found: .light,
+            runnerFinished: false,
+            isDeviceBusy: { $0.timeIntervalSince1970 >= 5 },
+            run: { _, arguments in
+                vectors.append(arguments)
+                return Shell.Result(status: 0, standardOutput: arguments.contains("appearance") ? "light\n" : "1\n", standardError: "")
+            },
+            pause: { elapsed += $0 },
+            now: { Date(timeIntervalSince1970: elapsed) }
+        )
+
+        #expect(elapsed >= 10)
+        #expect(!vectors.contains { $0.contains("write") })
+        #expect(!vectors.contains(DeviceAppearance.setArguments(.light, udid: "UDID-1")))
+        #expect(handback.accessibility.state == .leftToAnotherHolder)
+        #expect(handback.appearance == .leftToAnotherHolder(found: .light))
+        #expect(handback.notes.filter { $0.contains("another holder took") }.count == 2)
+        #expect(handback.qualifications.contains("a device appearance left to another holder that took the device during the handback"))
+    }
+
+    /// A handback left to another holder says what finishes it when something will, and keeps the run-by-hand advice when nothing will.
+    @Test
+    func theLeftToAnotherHolderNotesNameWhatCompletesThemOnlyWhenTold() {
+        let handback = DeviceHandback(
+            accessibility: AccessibilityPreference.Restoration(udid: "UDID-1", state: .leftToAnotherHolder),
+            appearance: .leftToAnotherHolder(found: .light)
+        )
+
+        let byHand = handback.notes(by: "this session")
+        let completed = handback.notes(by: "this session", completedBy: "`simwalk session end s1`")
+
+        #expect(byHand == handback.notes(by: "this session", completedBy: nil))
+        #expect(byHand.filter { $0.contains("once it is done") && $0.contains("run: ") }.count == 2)
+        #expect(completed.filter { $0.contains("run: ") }.isEmpty)
+        #expect(completed.contains { $0.hasPrefix("accessibility:") && $0.hasSuffix("— `simwalk session end s1` switches it back on once that holder is done") })
+        #expect(completed.contains { $0.hasPrefix("appearance:") && $0.hasSuffix("— `simwalk session end s1` puts it back once that holder is done") })
+    }
+
+    /// A session whose own lease lapsed during the handback leaves the undone parts to no holder: `omittingUndone` drops their notes and qualifications, whichever actor named them, and only theirs.
+    @Test
+    func omittingUndoneDropsThePartsLeftToAnotherHolderAndNothingElse() {
+        let undone = DeviceHandback(
+            accessibility: AccessibilityPreference.Restoration(udid: "UDID-1", state: .leftToAnotherHolder),
+            appearance: .leftToAnotherHolder(found: .light)
+        ).replacingReset(.unknown)
+        let done = DeviceHandback(
+            accessibility: AccessibilityPreference.Restoration(udid: "UDID-1", state: .restored),
+            appearance: .restored(.light)
+        )
+
+        let notes = undone.notes(by: "`session list`", appearanceBy: "this session", omittingUndone: true)
+
+        #expect(notes.count == 1)
+        #expect(notes.first?.contains("reading the device back gave no answer") == true)
+        #expect(undone.qualifications(omittingUndone: true) == [DeviceHandback.ResetCheck.unknown.qualification].compactMap(\.self))
+        #expect(undone.qualifications(omittingUndone: false) == undone.qualifications)
+        #expect(undone.qualifications.count > 1)
+        #expect(done.notes(by: "this session", omittingUndone: true) == done.notes(by: "this session"))
+        #expect(done.qualifications(omittingUndone: true) == done.qualifications)
+    }
+
+    /// SimWalk#128: the appearance write asks again too — a holder that takes the device after accessibility was switched back on still has its appearance left alone.
+    @Test
+    func aDeviceTakenAfterTheAccessibilityWriteHasNoAppearanceWrite() {
+        var vectors: [[String]] = []
+        var accessibility = "0"
+        var asked = 0
+        var elapsed: TimeInterval = 0
+
+        let handback = DeviceHandback.perform(
+            udid: "UDID-1",
+            found: .dark,
+            runnerFinished: false,
+            isDeviceBusy: { _ in
+                asked += 1
+                return asked > 1
+            },
+            run: { _, arguments in
+                vectors.append(arguments)
+                if arguments.contains("write") {
+                    accessibility = "1"
+                }
+                return Shell.Result(status: 0, standardOutput: arguments.contains("appearance") ? "dark\n" : "\(accessibility)\n", standardError: "")
+            },
+            pause: { elapsed += $0 },
+            now: { Date(timeIntervalSince1970: elapsed) }
+        )
+
+        #expect(handback.accessibility.state == .restored)
+        #expect(asked == 2)
+        #expect(!vectors.contains(DeviceAppearance.setArguments(.dark, udid: "UDID-1")))
+        #expect(handback.appearance == .leftToAnotherHolder(found: .dark))
     }
 
     /// A clock that moves a second each time it is asked, so a restore's budget runs out in a test rather than in wall time.

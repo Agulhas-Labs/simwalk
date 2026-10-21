@@ -12,6 +12,12 @@ import SwiftUI
 struct RouteFixtureApp: App {
     @State private var path: [Route] = []
 
+    init() {
+        if ProcessInfo.processInfo.arguments.contains("-RouteFixtureResetErased") {
+            UserDefaults.standard.removeObject(forKey: "RouteFixtureErased")
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             if ProcessInfo.processInfo.arguments.contains("-RouteFixtureTabs") {

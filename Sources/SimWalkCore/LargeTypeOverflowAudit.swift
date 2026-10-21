@@ -11,7 +11,7 @@ import Foundation
 /// A text run is a `StaticText` with a label. Two runs overlap when they share more than a point in both directions; runs with identical frames are one element listed twice and are left alone, as in `duplicateLabel`. Only siblings are compared: a label inside a card and the card's title are laid out by different containers.
 ///
 /// **A run whose frame is its parent's is left out of the overlap comparison, on both sides** (SimWalk#100). SwiftUI reports a `.frame(maxWidth: .infinity)` text, and a Button's `StaticText` children, by the container's frame rather than the glyphs', so such a run's frame says nothing about where its text is: it would "overlap" the chevron that sits inside the row by design, or the sibling stacked above it. It is still examined and still checked against the screen's width. Frames match within the same one-point tolerance on x, y, width and height. **The price is a miss** (SimWalk#118 item 5): a badge drawn by `.overlay` on such a text has nothing left to be compared against, so a badge covering its text at large type is not flagged.
-public struct LargeTypeOverflowAudit: LabelAuditRule {
+public struct LargeTypeOverflowAudit: PerTreeLabelAuditRule {
     public static let name = AuditRuleName.largeTypeOverflow
     public static var findingNoun: String {
         "text run"
@@ -35,7 +35,12 @@ public struct LargeTypeOverflowAudit: LabelAuditRule {
         stateSlug.split(separator: "-").contains { $0.hasPrefix("dt_") && $0.contains("accessibility") }
     }
 
-    public func notApplicableReason(over captures: [BundleAuditScope.Capture]) -> String {
+    /// Whether a state slug names no Dynamic Type size, so the capture was taken at the default one.
+    static func isDefaultSize(_ stateSlug: String) -> Bool {
+        !stateSlug.split(separator: "-").contains { $0.hasPrefix("dt_") }
+    }
+
+    public func notApplicableReason(over captures: [BundleAuditScope.Capture], result _: LabelRuleResult) -> String {
         captures.contains { Self.isAccessibilitySize($0.stateSlug) } ? "no text runs on any screen" : "no accessibility type-size state"
     }
 

@@ -44,6 +44,27 @@ struct WalkDeviceRoutingTests {
         #expect(answer.verdict == .unqualified("1 of 1 screens captured · 1 capture"))
     }
 
+    /// A device walk keeps no result file, so its progress file is the only place a poll can learn that the device was a physical one (SimWalk#152 item 3).
+    @Test
+    func aDeviceWalkRecordsItsDeviceAsPhysicalInTheProgressFile() throws {
+        let fixture = try Fixture()
+        let keep = try TemporaryDirectory()
+        let machine = machine(keep: keep)
+        let url = keep.url.appendingPathComponent("progress.json")
+        let telemetry = WalkTelemetry(writer: ProgressWriter(url: url, clock: { Date() }, pid: 1), resultURL: nil)
+        telemetry.begin(tool: "walk")
+
+        let answer = try command(fixture, ["--device", Self.udid, "--team", "TEAM"]).walked(shell: machine.shell, runner: fixture.source(), builds: fixture.builds, leases: fixture.leases, telemetry: telemetry)
+        telemetry.endUnended(by: answer)
+
+        let progress = try WalkProgress.decoder().decode(WalkProgress.self, from: Data(contentsOf: url))
+
+        #expect(progress.phase == .done)
+        #expect(progress.resultPath == nil)
+        #expect(progress.device?.udid == Self.udid)
+        #expect(progress.device?.physical == true)
+    }
+
     @Test
     func aSimulatorUDIDStaysOnTheSimulatorPathAndReadsNoPhone() throws {
         let fixture = try Fixture()

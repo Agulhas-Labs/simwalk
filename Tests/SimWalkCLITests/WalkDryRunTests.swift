@@ -5,6 +5,7 @@
 import ArgumentParser
 import Fieldwork
 import Foundation
+import SimulatorServices
 @testable import SimWalkCLI
 import SimWalkCore
 import SimWalkDriver
@@ -170,6 +171,30 @@ struct WalkDryRunTests {
         #expect(outcome.report == report)
         #expect(outcome.handback?.accessibility.state == .restored)
         #expect(!contents.contains { $0.hasSuffix(".\(CaptureBundleLayout.directoryExtension)") })
+    }
+
+    /// `prepare` provisions a created device for a dry run as for a walk, so the answer carries the device note a walk's does (SimWalk#155).
+    @Test
+    func adryRunOnACreatedDeviceSaysWhatItDidToTheDevice() throws {
+        let directory = try TemporaryDirectory()
+        let leases = Self.leases(in: directory)
+        let overrideRoot = directory.url.appendingPathComponent("override-root", isDirectory: true)
+        let udid = "11111111-2222-3333-4444-0000000000A1"
+        let lease = try leases.acquire(udid: udid, ttl: 60, holderPID: 41, now: Date(timeIntervalSince1970: 0), createdDevice: true, clonedFrom: "SOURCE-1")
+        let staged = directory.url.appendingPathComponent("staged-report.json")
+        let output = directory.url.appendingPathComponent("probe.json")
+        let appPath = try Self.fakeApp(in: directory)
+        try RouteProbeFixture.report(of: Self.book(), buildHash: AppBuildIdentity.hash(ofAppAt: appPath)).write(to: staged, of: Self.book())
+        let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: 0, writes: (staged, output), booted: false, udid: udid)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", output.path, "--lease", lease.token, "--app-path", appPath, "--stock", "--dry-run"])
+
+        let outcome = try WalkDryRun.perform(
+            command, shell: Shell(script: script.run), pause: { _ in }, now: script.now, nonce: { RouteProbeFixture.nonce }, runner: { Self.runner }, builds: Self.builds(in: directory), leases: leases,
+            provisioning: { SlimWalkProvisioning(shell: $0, overrides: DisabledServicesOverride(root: overrideRoot)) }
+        )
+
+        #expect(outcome.deviceNote == "device: stock: --stock")
+        #expect(outcome.answer().text.contains("device: stock: --stock"))
     }
 
     /// The report on disk after the runner names another build, or started before this run launched its runner: another dry run's, which a second run to the same path reads when its own runner could not write (SimWalk#36).

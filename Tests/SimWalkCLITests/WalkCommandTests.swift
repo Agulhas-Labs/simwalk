@@ -1416,7 +1416,7 @@ struct WalkCommandTests {
     }
 
     /// A walkbook's setup: every change it can make, so each test sees every vector.
-    private static var setupJSON: String {
+    static var setupJSON: String {
         #""setup":{"privacy":{"grant":["location"]},"statusBar":"clean","increaseContrast":true},"#
     }
 
@@ -1736,15 +1736,15 @@ struct WalkCommandTests {
             }
             return try script.run(executable, arguments, environment)
         }
-        var refusal: (any Error)?
+        var storeFailedPath: String?
 
         do {
             _ = try command.performWalk(shell: shell, pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: leases)
-        } catch {
-            refusal = error
+        } catch let LeaseError.storeFailed(path, _) {
+            storeFailedPath = path
         }
 
-        #expect((refusal as NSError?)?.domain == NSCocoaErrorDomain)
+        #expect(storeFailedPath == leases.directory.path)
         #expect(!ranRunner)
         #expect(leases.all().isEmpty)
     }
@@ -2208,6 +2208,8 @@ extension WalkCommandTests {
         private let failing: [String]
         /// Whether `simctl list` reports the device booted — somebody else's, as far as a walk can tell — or shut down, for this walk to boot.
         private let booted: Bool
+        /// The device `simctl list` reports; a test of the override directory needs one named like a UUID, which that directory keys on.
+        private let udid: String
         /// Whether the settle's wait for the boot wedges: it outlives its bound, and from then on every call to the device would hang — one made with a bound times out, one made without is recorded in `unboundedAfterWedge`.
         private let wedging: Bool
         private var wedged = false
@@ -2228,8 +2230,10 @@ extension WalkCommandTests {
             ignoringAppearanceWritesAfterRetry: Bool = false,
             failing: [String] = [],
             booted: Bool = true,
+            udid: String = "UDID-1",
             wedging: Bool = false
         ) {
+            self.udid = udid
             self.booted = booted
             self.wedging = wedging
             self.appPath = appPath
@@ -2319,7 +2323,7 @@ extension WalkCommandTests {
         }
 
         private func answer(_ arguments: [String]) -> Shell.Result {
-            let devices = #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"udid":"UDID-1","name":"iPhone 17 Pro","state":""# + (booted ? "Booted" : "Shutdown") + #""}]}}"#
+            let devices = #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"udid":"\#(udid)","name":"iPhone 17 Pro","state":""# + (booted ? "Booted" : "Shutdown") + #""}]}}"#
             let output: String
             var status: Int32 = 0
             switch arguments {

@@ -92,7 +92,7 @@ struct InspectCommand: ParsableCommand {
         // no token). A claim and not a lease: a lease would change who may use the device while it is read, and whether two
         // callers share a device is the lease's question. Not before the build, which does not touch the device, so a cold
         // build does not keep a session's handback off a device nothing is changing (SimWalk#128).
-        let claim = try LeaseError.mapping { try WalkClaim.take(udid: simulator.udid, in: leases) }
+        let claim = try LeaseError.takingClaim(udid: simulator.udid, in: leases)
         defer { claim.release() }
         // Read before the runner, so the handback has something to put back; a read stalled behind `xcodebuild -runFirstLaunch` refuses (SimWalk#136).
         let foundAppearance = try DeviceAppearance.read(udid: simulator.udid, run: run)
@@ -148,7 +148,7 @@ struct InspectCommand: ParsableCommand {
         let query = LiveScreenQuery(
             screen,
             qualifiedBy: (runnerFailure == nil ? [] : ["a runner failure this read survived"]) + (handback?.qualifications ?? []),
-            notes: [survived].compactMap(\.self) + (handback?.notes ?? [])
+            notes: [survived].compactMap(\.self) + (handback?.notes(by: "this inspect") ?? [])
         )
         do {
             return try query.answer(match: match)

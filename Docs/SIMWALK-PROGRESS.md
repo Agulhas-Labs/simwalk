@@ -45,6 +45,7 @@ To find the right files:
 
 Every key except `schemaVersion`, `tool`, `phase`, `pid`, `startedAt` and `updatedAt` may be `null` or absent. `logPath` is set from the first write, so it is there from `booting` on, even for a run that is refused while preparing.
 
+- `device`: the device the run is on. `device.physical` is present and `true` only for a physical iPhone or iPad; it is absent for a simulator.
 - `tool`: `walk`, `walk --dry-run` or `session`.
 - `phase`: `idle`, `booting`, `installing`, `building`, `launching`, `running`, `matching`, `done` or `failed`. A walk moves through them in that order. `done` and `failed` are final and stay until the next run.
   - `building` is the runner's build. `launching` runs from the end of that build until the runner reports `running`. It covers the setup in the walkbook (permissions, status bar and the like) and starting the runner and the app. `running` means the runner is walking screens. `matching` is the tool reading the capture bundle back.
@@ -87,7 +88,7 @@ In bounded mode (`Docs/Reference.md`, "Bounded walks") the MCP tool `walk_status
 handle: `<stem>@<pid>-<startedAtMs>`, where the stem is the progress-file stem (`<session>` or
 `<session>.<slot>`), `pid` is the file's `pid` and `startedAtMs` its `startedAt` in epoch milliseconds. A
 reader checks both against the file, because the stem is re-claimed by the next walk. The answer for each
-case, in precedence order (rows 1–11), is in `Docs/Reference.md`; it is not restated here.
+case, in precedence order (rows 1–12), is in `Docs/Reference.md`; it is not restated here.
 
 - Dead process: "process alive" means the `pid` exists and its process start time is not later than
   the file's `startedAt`, so a reused pid is not taken for the walk's process. The 30-second rule above

@@ -34,6 +34,8 @@ public struct LiveScreen: Codable, Equatable, Sendable {
     public let settled: Bool?
     /// The device screen's size in pixels — what a screenshot of it would be, and what this read is priced against; `nil` when it could not be read.
     public let screenPixels: Pixels?
+    /// The system alert SpringBoard draws over the app, which the app's own tree never shows; absent when none covers it, and absent from every read made before the field existed.
+    public let systemAlert: SystemAlert?
 
     public init(
         formatVersion: Int = LiveScreen.currentFormatVersion,
@@ -45,7 +47,8 @@ public struct LiveScreen: Codable, Equatable, Sendable {
         appState: AppState,
         tree: AXNode?,
         settled: Bool?,
-        screenPixels: Pixels?
+        screenPixels: Pixels?,
+        systemAlert: SystemAlert? = nil
     ) {
         self.formatVersion = formatVersion
         self.appBundleID = appBundleID
@@ -58,6 +61,7 @@ public struct LiveScreen: Codable, Equatable, Sendable {
         screenIdentity = tree.map { ScreenIdentity.of($0).digest }
         self.settled = settled
         self.screenPixels = screenPixels
+        self.systemAlert = systemAlert
     }
 }
 
@@ -80,6 +84,19 @@ public extension LiveScreen {
         public init(width: Int, height: Int) {
             self.width = width
             self.height = height
+        }
+    }
+
+    /// A system alert over the app: its title and the buttons it offers, which a reader lists and never taps.
+    struct SystemAlert: Codable, Equatable, Sendable {
+        /// The alert's title, or `nil` when it has none.
+        public let title: String?
+        /// Its buttons, in the order SpringBoard's tree lists them.
+        public let buttons: [Button]
+
+        public init(title: String?, buttons: [Button]) {
+            self.title = title
+            self.buttons = buttons
         }
     }
 
@@ -113,5 +130,19 @@ public extension LiveScreen {
             throw LiveScreenError.fromAnotherRun(path: url.path)
         }
         return screen
+    }
+}
+
+public extension LiveScreen.SystemAlert {
+    /// One button of the alert.
+    struct Button: Codable, Equatable, Sendable {
+        public let label: String
+        /// Where it is drawn.
+        public let frame: AXNode.Frame
+
+        public init(label: String, frame: AXNode.Frame) {
+            self.label = label
+            self.frame = frame
+        }
     }
 }

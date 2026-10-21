@@ -55,10 +55,18 @@ public extension ScreenSection {
         public var shape: String
         /// Where the run is drawn.
         public var frame: AXNode.Frame
+        /// The frame of the list cell the run sits in — a `Cell` in the tree, a table's or a list's row — or `nil` outside one.
+        public var cell: AXNode.Frame?
+        /// The text as drawn, figures and all — the shape for a run built from a shape alone.
+        ///
+        /// Never compared across captures, which read the shape; it tells two runs at one frame apart, where `12:05` over `13:45` is a collision and their shapes are one.
+        public var text: String
 
-        public init(shape: String, frame: AXNode.Frame) {
+        public init(shape: String, frame: AXNode.Frame, cell: AXNode.Frame? = nil, text: String? = nil) {
             self.shape = shape
             self.frame = frame
+            self.cell = cell
+            self.text = text ?? shape
         }
     }
 }

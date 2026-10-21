@@ -27,6 +27,20 @@ struct FirstLaunchPreflightWiringTests {
         machine.expectRefusedFirst(refusal)
     }
 
+    /// A simulator walk whose preflight passes goes on to make `simctl` calls of its own, and none of them asks `xcrun --find simctl` again.
+    @Test
+    func aPassingPreflightIsMadeOncePerWalk() throws {
+        let machine = try Machine(installed: "1051.9")
+        let command = try WalkCommand.parse([machine.walkbook(), "--output", machine.output, "--device", "iPhone 17"])
+
+        // The stub shell fails every other call, so the walk itself may end in an error; only the preflight's calls are counted.
+        _ = try? command.walked(shell: machine.shell, runner: { Machine.runner }, builds: machine.builds, leases: machine.leases, firstLaunch: machine.check)
+
+        #expect(machine.calls.filter { $0 == ["--find", "simctl"] }.count == 1)
+        // Two `simctl list` calls: the route check's, and the one after `prepare`'s own ask, so the second ask was reached.
+        #expect(machine.calls.filter { $0.starts(with: ["simctl", "list"]) }.count >= 2)
+    }
+
     /// `walk --dry-run` with no `--device`: its preparation is a walk's, so taken through the dry run itself, where the runner can be named.
     @Test
     func aDryRunIsRefusedBeforeAnySimctlCall() throws {
@@ -100,7 +114,7 @@ struct FirstLaunchPreflightWiringTests {
 }
 
 extension FirstLaunchPreflightWiringTests {
-    /// A machine where first launch is pending: the scripted shell's record of every call, and the check pointed at the stub CoreSimulator.
+    /// A machine where first launch is pending by default: the scripted shell's record of every call, and the check pointed at the stub CoreSimulator.
     final class Machine {
         static let runner = RunnerSource(projectPath: "/runner/SimWalkRunner.xcodeproj", commit: "c0ffee", origin: .installed)
 
@@ -108,11 +122,12 @@ extension FirstLaunchPreflightWiringTests {
         let check: XcodeFirstLaunch.Check
         private(set) var calls: [[String]] = []
 
-        init() throws {
+        /// `installed` is the CoreSimulator version on disk; the default is behind the stub `simctl`'s, so first launch is pending.
+        init(installed: String = "1051.1") throws {
             directory = try TemporaryDirectory()
             try Data("#!/bin/sh\nEXPECTED_VERSION=\"1051.9\"\nexec simctl \"$@\"\n".utf8).write(to: directory.url.appendingPathComponent("simctl"))
             let info = directory.url.appendingPathComponent("Info.plist")
-            try PropertyListSerialization.data(fromPropertyList: ["CFBundleVersion": "1051.1"], format: .xml, options: 0).write(to: info)
+            try PropertyListSerialization.data(fromPropertyList: ["CFBundleVersion": installed], format: .xml, options: 0).write(to: info)
             check = XcodeFirstLaunch.Check(xcrun: "/stub/xcrun", coreSimulatorInfo: info)
         }
 
@@ -123,6 +138,10 @@ extension FirstLaunchPreflightWiringTests {
         var shell: Shell {
             Shell(timedScript: { [self] _, arguments, _, _ in
                 calls.append(arguments)
+                if arguments.starts(with: ["simctl", "list"]) {
+                    let devices = #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"udid":"SIM-1","name":"iPhone 17","state":"Shutdown"}]}}"#
+                    return Shell.Result(status: 0, standardOutput: devices, standardError: "")
+                }
                 guard arguments == ["--find", "simctl"] else {
                     return Shell.Result(status: 1, standardOutput: "", standardError: "not on this machine\n")
                 }

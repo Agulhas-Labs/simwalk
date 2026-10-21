@@ -55,7 +55,7 @@ is cut off. **Beside other sessions, take a lease:**
 
 **Driving the binary for anything but real use (a test, a review, a probe of a refusal): set
 `SIMWALK_USAGE_LOG=<scratch>/usage.jsonl`**, so the calls land in a log you own. **In a repo with
-walkbooks, driving the simulator by hand** (`simctl io … screenshot`, `simctl ui … appearance`, `axe tap`)
+walkbooks, driving the simulator by hand** (`simctl io … screenshot`, `simctl ui … appearance`, a third-party simulator CLI's `tap`)
 **is refused once per 30 minutes, never on a context's first such call** (that goes through, and so does its
 re-run): the second, different call is refused, naming the `simwalk walk` that captures every screen instead;
 for a one-off capture, run the simulator command it names again and it goes through. **For AX probing, read the tree instead of a

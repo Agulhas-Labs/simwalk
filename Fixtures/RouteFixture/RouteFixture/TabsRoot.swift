@@ -25,6 +25,7 @@ private struct HubScreen: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                NavigationLink("Danger zone") { DangerScreen() }
                 ForEach(1 ... 20, id: \.self) { Text("Hub row \($0)") }
                 NavigationLink("Open form", value: HubRoute.form)
             }
@@ -128,5 +129,19 @@ private struct NestedScreen: View {
             .accessibilityIdentifier("nested-outer")
             .navigationTitle("Nested")
         }
+    }
+}
+
+/// A destructive button and the state it sets, for `simwalk discover` to leave alone: `Erased: no` after a crawl means the crawl never tapped `Erase All`. Launching with `-RouteFixtureResetErased` clears the flag.
+private struct DangerScreen: View {
+    @AppStorage("RouteFixtureErased") private var erased = false
+
+    var body: some View {
+        List {
+            Button("Erase All", role: .destructive) { erased = true }
+            Text(erased ? "Erased: yes" : "Erased: no")
+        }
+        .accessibilityIdentifier("danger-screen")
+        .navigationTitle("Danger zone")
     }
 }

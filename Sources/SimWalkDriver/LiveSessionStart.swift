@@ -70,7 +70,7 @@ public struct LiveSessionStart {
         let diagnosis = effects.diagnose(layout)
         // When `store.write(record)` threw, `recorded` never ran, and this start's own claim, still held, would read as another holder and keep the handback from ever being made. Releasing is idempotent: a claim is removed only while it is still this one's.
         effects.recorded()
-        let report = LiveSessionStop(record: record, store: store, processes: processes, isDeviceBusy: effects.isDeviceBusy).perform(run: effects.run, pause: effects.pause, now: effects.now)
+        let report = LiveSessionStop(record: record, store: store, processes: processes, isDeviceBusy: effects.isDeviceBusy, holder: effects.holder).perform(run: effects.run, pause: effects.pause, now: effects.now)
         throw LiveSessionHostError.neverReady(reason: reason, lines: report.lines + report.qualifications.map { "⚠ \($0)" } + diagnosis)
     }
 
@@ -111,6 +111,8 @@ public extension LiveSessionStart {
         public let recorded: () -> Void
         /// Asked by the stop of a start that never became ready, before it hands the device back: whether another holder is on the device, which leaves the handback undone (SimWalk#128).
         public let isDeviceBusy: (Date) -> Bool
+        /// Asked once ``isDeviceBusy`` has answered busy: whose the device is, named as `end` names it (``LiveSessionStop/Holder/on(udid:session:store:processes:leases:now:)``).
+        public let holder: (Date) -> LiveSessionStop.Holder
 
         public init(
             command: @escaping (LiveSessionLayout) -> RunnerCommand,
@@ -120,7 +122,8 @@ public extension LiveSessionStart {
             now: @escaping () -> Date,
             spawned: @escaping (Int32) -> Void = { _ in },
             recorded: @escaping () -> Void = {},
-            isDeviceBusy: @escaping (Date) -> Bool = { _ in false }
+            isDeviceBusy: @escaping (Date) -> Bool = { _ in false },
+            holder: @escaping (Date) -> LiveSessionStop.Holder = { _ in .another("a walk or another session") }
         ) {
             self.command = command
             self.diagnose = diagnose
@@ -130,6 +133,7 @@ public extension LiveSessionStart {
             self.spawned = spawned
             self.recorded = recorded
             self.isDeviceBusy = isDeviceBusy
+            self.holder = holder
         }
     }
 }

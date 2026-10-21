@@ -107,6 +107,93 @@ struct AXSegmenterTests {
         #expect(sections.map(\.key) == ["Anchor watch"])
     }
 
+    /// The demo app's account screen in Arabic (2026-10-20) carries its scroll indicator twice at one frame directly under the collection view, its value wrapped in direction marks: still an indicator, so no text run and nothing for the overlap rule to read as text over text.
+    @Test
+    func aRightToLeftScrollIndicatorIsNotText() {
+        let indicator = AXNode(
+            type: "Other",
+            frame: AXNode.Frame(x: 384, y: 101, width: 30, height: 695.67),
+            label: "شريط تمرير رأسي, صفحة واحدة",
+            value: "\u{200F}0\u{200E}%\u{200E}",
+            children: [AXNode(type: "Other", frame: AXNode.Frame(x: 384, y: 786.67, width: 3, height: 7))]
+        )
+        let content = AXNode(type: "CollectionView", frame: Self.frame(y: 100, height: 700), children: Self.stack.children + [indicator, indicator])
+        let capture = SegmentedCapture(tree: Self.screen([content]), screenshotPath: "screens/account/light-loc_ar-rtl/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.first?.textRuns.map(\.shape) == ["Anchor watch", "Drag alarm, {n} m"])
+        #expect(OverlapRule().flags(reference: capture, run: capture).isEmpty)
+    }
+
+    /// The Settings sidebar (2026-10-20) carries its scroll indicator twice at one frame inside the collection view, below the stack's level: no text run there either.
+    @Test
+    func aScrollIndicatorInsideASectionIsNotText() {
+        let indicator = AXNode(
+            type: "Other",
+            frame: AXNode.Frame(x: 407, y: 116, width: 30, height: 778),
+            label: "Vertical scroll bar, 2 pages",
+            value: "0%",
+            children: [AXNode(type: "Other", frame: AXNode.Frame(x: 434, y: 119, width: 3, height: 525))]
+        )
+        let heading = Self.stack.children[0]
+        let list = AXNode(type: "CollectionView", frame: Self.frame(y: 140, height: 700), children: [Self.stack.children[1], indicator, indicator])
+        let content = AXNode(type: "Other", frame: Self.frame(y: 100, height: 740), children: [heading, list])
+        let capture = SegmentedCapture(tree: Self.screen([content]), screenshotPath: "screens/root/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).map(\.shape) == ["Anchor watch", "Drag alarm, {n} m"])
+        #expect(OverlapRule().flags(reference: capture, run: capture).isEmpty)
+    }
+
+    /// An indicator written in Arabic-Indic digits and the Arabic percent sign, `٥٠٪`, is an indicator too.
+    @Test
+    func anArabicIndicPercentageIndicatorIsNotText() {
+        let indicator = AXNode(
+            type: "Other",
+            frame: AXNode.Frame(x: 384, y: 101, width: 30, height: 695.67),
+            label: "شريط تمرير رأسي, صفحتان",
+            value: "\u{200F}\u{0665}\u{0660}\u{066A}"
+        )
+        let content = AXNode(type: "ScrollView", frame: Self.frame(y: 100, height: 700), children: Self.stack.children + [indicator])
+        let capture = SegmentedCapture(tree: Self.screen([content]), screenshotPath: "screens/account/light-loc_ar-rtl/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).map(\.shape) == ["Anchor watch", "Drag alarm, {n} m"])
+    }
+
+    /// Every locale's percent format is an indicator's value: a space between figure and sign (French, German), the sign first (Turkish), Persian digits.
+    @Test(arguments: ["0\u{00A0}%", "50\u{202F}%", "%0", "\u{06F0}\u{066A}"])
+    func aLocalePercentageIndicatorIsNotText(value: String) {
+        let indicator = AXNode(type: "Other", frame: AXNode.Frame(x: 384, y: 101, width: 30, height: 695.67), label: "Vertical scroll bar, 2 pages", value: value)
+        let content = AXNode(type: "ScrollView", frame: Self.frame(y: 100, height: 700), children: Self.stack.children + [indicator])
+        let capture = SegmentedCapture(tree: Self.screen([content]), screenshotPath: "screens/account/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).map(\.shape) == ["Anchor watch", "Drag alarm, {n} m"])
+    }
+
+    /// A value that only looks like a percentage — no figure, a sign at both ends, a decimal point — keeps the element content.
+    @Test(arguments: ["%", "%5%", "5.5%", "5 % 5"])
+    func aNonPercentageValueIsNotAnIndicator(value: String) {
+        let element = AXNode(type: "Other", frame: AXNode.Frame(x: 384, y: 101, width: 30, height: 695.67), label: "Scroll bar", value: value)
+        let content = AXNode(type: "ScrollView", frame: Self.frame(y: 100, height: 700), children: Self.stack.children + [element])
+        let capture = SegmentedCapture(tree: Self.screen([content]), screenshotPath: "screens/account/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).map(\.shape).contains("Scroll bar"))
+    }
+
+    /// A combined row whose value is a percentage — SwiftUI's `Battery` with `80%`, one `Other` — is content in a list cell or a card: only an element directly under a scrolling container can be its indicator.
+    @Test
+    func aPercentageRowInACellOrACardIsText() {
+        let battery = AXNode(type: "Other", frame: AXNode.Frame(x: 32, y: 196, width: 326, height: 20), label: "Battery", value: "80%")
+        let cell = AXNode(type: "Cell", frame: AXNode.Frame(x: 16, y: 180, width: 358, height: 52), children: [battery])
+        let inList = AXNode(type: "CollectionView", frame: Self.frame(y: 100, height: 700), children: Self.stack.children + [cell])
+        let inCard = AXNode(type: "Other", frame: Self.frame(y: 100, height: 700), children: Self.stack.children + [
+            AXNode(type: "Other", frame: AXNode.Frame(x: 16, y: 180, width: 358, height: 52), children: [battery]),
+        ])
+
+        for content in [inList, inCard] {
+            let capture = SegmentedCapture(tree: Self.screen([content]), screenshotPath: "screens/device/light/screen.png", segmenter: AXSegmenter())
+            #expect(capture.contentSections.flatMap(\.textRuns).map(\.shape) == ["Anchor watch", "Drag alarm, {n} m", "Battery"])
+        }
+    }
+
     /// A text's shape writes every number `{n}`, signed, grouped or timed.
     @Test
     func aShapeWritesEveryNumberAsAPlaceholder() {

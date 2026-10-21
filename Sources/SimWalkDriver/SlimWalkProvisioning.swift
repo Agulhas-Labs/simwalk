@@ -10,7 +10,8 @@ import SimulatorServices
 /// **Only a device SimWalk created is ever touched.** The override file is keyed by UDID and outlives `simctl erase`, so a device somebody else made would keep a slim set nobody told its owner about. `createdByWalk` is the lease's own record that the device is a clone made for a lease.
 public struct SlimWalkProvisioning {
     private let shell: Shell
-    private let overrides: DisabledServicesOverride
+    /// Where this provisioning writes and removes each device's override: the machine's own, or a test's scratch root.
+    public let overrides: DisabledServicesOverride
     private let profileLookup: (String) -> ServiceProfile?
 
     public init(
@@ -40,14 +41,14 @@ public struct SlimWalkProvisioning {
     public func beforeBoot(_ simulator: Simulator, createdByWalk: Bool, stockRequested: Bool, appPath: String?) throws -> Provisioned {
         guard createdByWalk else {
             guard stockRequested else { return Provisioned(simulator: simulator, decision: nil) }
-            let off = try overrides.labels(for: simulator.udid).count
+            let off = try disabledLabels(for: simulator.udid, createdByWalk: false).count
             if off > 0 {
                 throw SlimWalkError.stockOnForeignDevice(udid: simulator.udid, off: off)
             }
             return Provisioned(simulator: simulator, decision: nil)
         }
         if simulator.isBooted {
-            guard stockRequested, try !overrides.labels(for: simulator.udid).isEmpty else { return Provisioned(simulator: simulator, decision: nil) }
+            guard stockRequested, try !disabledLabels(for: simulator.udid, createdByWalk: true).isEmpty else { return Provisioned(simulator: simulator, decision: nil) }
             try shutDown(simulator.udid)
             try overrides.remove(for: simulator.udid)
             let down = Simulator(udid: simulator.udid, name: simulator.name, osVersion: simulator.osVersion, isBooted: false, runtimeIdentifier: simulator.runtimeIdentifier)
@@ -93,6 +94,16 @@ public struct SlimWalkProvisioning {
             return "device: not slim: the runtime did not apply the override (\(applied.count) of \(planned.count) read back)"
         }
         return "device: \(decision.text)"
+    }
+
+    /// The labels the device's override switches off; a file that is there and cannot be read is ``SlimWalkError/overrideUnreadable(path:reason:createdByWalk:)``, a missing one is none.
+    private func disabledLabels(for udid: String, createdByWalk: Bool) throws -> Set<String> {
+        let path = try overrides.directory(for: udid).appendingPathComponent("disabled.plist").path
+        do {
+            return try overrides.labels(for: udid)
+        } catch {
+            throw SlimWalkError.overrideUnreadable(path: path, reason: error.localizedDescription, createdByWalk: createdByWalk)
+        }
     }
 
     private func shutDown(_ udid: String) throws {

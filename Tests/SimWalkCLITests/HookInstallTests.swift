@@ -549,6 +549,7 @@ struct HookInstallTests {
         #expect(kept.verdict.isQualified)
         #expect(kept.text.contains("runner: kept"))
         #expect(kept.text.contains("--repoint-runner"))
+        #expect(kept.text.contains("Rebuild and install"))
         #expect(repointed.text.contains("runner: repointed"))
         #expect(scratch.runner.binding(forBinary: Self.binaryHash)?.commit == moved)
     }
@@ -584,6 +585,23 @@ struct HookInstallTests {
 
         #expect(answer.text.contains("runner: c0c0c0c0 snapshotted at"))
         #expect(scratch.runner.binding(forBinary: Self.binaryHash)?.commit == String(repeating: "c0", count: 20))
+    }
+
+    /// A packaged binary whose shipped runner has moved on is kept on the runner it was installed with, and the advice is `--repoint-runner` — a package has nothing to rebuild.
+    @Test
+    func apackagedKeptRunnerNamesRepointRunnerNotARebuild() throws {
+        let scratch = try Scratch()
+        let first = try ShippedTreeFixture(in: scratch.directory, commit: String(repeating: "c0", count: 20), stampedFor: Self.binaryHash)
+        let later = try TemporaryDirectory()
+        let second = try ShippedTreeFixture(in: later, commit: String(repeating: "d1", count: 20), stampedFor: Self.binaryHash)
+        _ = try Self.install(scratch, runnerSource: Self.packaged(executable: first.binary))
+
+        let kept = try Self.install(scratch, runnerSource: Self.packaged(executable: second.binary))
+
+        #expect(kept.text.contains("runner: kept"))
+        #expect(kept.text.contains("the shipped runner beside it is"))
+        #expect(kept.text.contains("--repoint-runner"))
+        #expect(!kept.text.contains("Rebuild"))
     }
 
     /// A packaged binary whose shipped tree was stamped for another binary refuses, naming the path and both hashes and that there is no checkout.
@@ -645,23 +663,53 @@ struct HookInstallTests {
         let binary = try Self.executableFile(at: scratch.url.appendingPathComponent("prefix/bin/simwalk"))
 
         #expect(ExecutablePath.resolve(arguments: ["/opt/tools/../tools/simwalk"], environment: [:]) == "/opt/tools/simwalk")
-        #expect(ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": "/usr/bin:\(binary.deletingLastPathComponent().path)"]) == binary.standardizedFileURL.path)
+        #expect(ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": "/usr/bin:\(binary.deletingLastPathComponent().path)"], processExecutable: binary) == binary.standardizedFileURL.path)
     }
 
-    /// The first executable `simwalk` on PATH wins, and empty, relative and non-executable entries are not candidates.
+    /// The first `simwalk` on PATH that is the running binary wins; entries that are empty, relative or not executable are not candidates (SimWalk#139).
     @Test
     func theFirstMatchOnPathWinsAndUnusableEntriesAreSkipped() throws {
         let scratch = try TemporaryDirectory()
-        let first = try Self.executableFile(at: scratch.url.appendingPathComponent("first/simwalk"))
-        let second = try Self.executableFile(at: scratch.url.appendingPathComponent("second/simwalk"))
+        let running = try Self.executableFile(at: scratch.url.appendingPathComponent("running/simwalk"))
         let plain = scratch.url.appendingPathComponent("plain/simwalk")
         try FileManager.default.createDirectory(at: plain.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("not executable".utf8).write(to: plain)
+        let link = try Self.link(to: running, in: scratch.url.appendingPathComponent("link", isDirectory: true))
+        let workingDirectory = scratch.url.appendingPathComponent("cwd", isDirectory: true)
+        // The relative entries really hold a `simwalk` that is the running binary, so only the absolute-entry rule keeps them out.
+        try Self.link(to: running, in: workingDirectory.appendingPathComponent("relative", isDirectory: true))
+        try Self.link(to: running, in: workingDirectory)
 
-        let both = [plain.deletingLastPathComponent().path, first.deletingLastPathComponent().path, second.deletingLastPathComponent().path]
-        #expect(ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": both.joined(separator: ":")]) == first.standardizedFileURL.path)
-        let unusable = ["", "first", "."] + [second.deletingLastPathComponent().path]
-        #expect(ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": unusable.joined(separator: ":")]) == second.standardizedFileURL.path)
+        let both = [plain.deletingLastPathComponent().path, link.deletingLastPathComponent().path, running.deletingLastPathComponent().path]
+        #expect(ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": both.joined(separator: ":")], processExecutable: running) == link.standardizedFileURL.path)
+        let unusable = ["", "relative", "."] + [running.deletingLastPathComponent().path]
+        #expect(ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": unusable.joined(separator: ":")], processExecutable: running, workingDirectory: workingDirectory) == running.standardizedFileURL.path)
+    }
+
+    /// A different `simwalk` earlier on PATH than the running one is passed over: registering it would pair the runner with the running binary's hash (SimWalk#139).
+    @Test
+    func aDifferentSimwalkEarlierOnPathIsNotRegisteredInPlaceOfTheRunningOne() throws {
+        let scratch = try TemporaryDirectory()
+        let other = try Self.executableFile(at: scratch.url.appendingPathComponent("other/simwalk"))
+        let running = try Self.executableFile(at: scratch.url.appendingPathComponent("running/simwalk"))
+        let link = try Self.link(to: running, in: scratch.url.appendingPathComponent("link", isDirectory: true))
+        let path = [other.deletingLastPathComponent().path, link.deletingLastPathComponent().path]
+
+        let resolved = ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": path.joined(separator: ":")], processExecutable: running)
+
+        #expect(resolved == link.standardizedFileURL.path)
+    }
+
+    /// With no PATH entry being the running binary, the answer is the running binary itself.
+    @Test
+    func whenNoPathEntryIsTheRunningBinaryItIsRegisteredByItsOwnPath() throws {
+        let scratch = try TemporaryDirectory()
+        let other = try Self.executableFile(at: scratch.url.appendingPathComponent("other/simwalk"))
+        let running = scratch.url.appendingPathComponent("running/simwalk")
+
+        let resolved = ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": other.deletingLastPathComponent().path], processExecutable: running)
+
+        #expect(resolved == running.standardizedFileURL.path)
     }
 
     /// A package manager's bin directory holds a link into its versioned tree; the registration names the link, which survives an upgrade, not the tree it points at.
@@ -672,7 +720,7 @@ struct HookInstallTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fixture.binary.path)
         let link = try fixture.link(in: scratch)
 
-        let resolved = ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": link.deletingLastPathComponent().path])
+        let resolved = ExecutablePath.resolve(arguments: ["simwalk"], environment: ["PATH": link.deletingLastPathComponent().path], processExecutable: fixture.binary)
 
         #expect(resolved == link.standardizedFileURL.path)
         #expect(resolved != fixture.binary.standardizedFileURL.path)
@@ -702,6 +750,15 @@ struct HookInstallTests {
         }
 
         #expect(url.resolvingSymlinksInPath().path == fixture.tree.appendingPathComponent("SimWalk.md").resolvingSymlinksInPath().path)
+    }
+
+    /// A `simwalk` symlink to `target` in `directory`, made if need be.
+    @discardableResult
+    private static func link(to target: URL, in directory: URL) throws -> URL {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let link = directory.appendingPathComponent("simwalk")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        return link
     }
 
     private static func executableFile(at url: URL) throws -> URL {

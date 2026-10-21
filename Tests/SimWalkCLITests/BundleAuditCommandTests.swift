@@ -21,9 +21,10 @@ struct BundleAuditCommandTests {
         let bundle = try CaptureBundleFixture.write(in: directory, captures: [
             CaptureBundleFixture.Capture(screenID: "progress", state: Walkbook.CaptureState(theme: .light), tree: CaptureBundleFixture.screen(rowType: "Button")),
         ])
+        try CaptureBundleFixture.decodeScreenshots(of: bundle)
         let recorder = StreamRecorder()
 
-        try Self.command(for: bundle).run(log: Self.log(in: directory), emit: recorder.emit, emitError: recorder.emitError)
+        try BundleAuditCommand.parse([bundle.url.path]).run(log: Self.log(in: directory), emit: recorder.emit, emitError: recorder.emitError)
 
         #expect(recorder.out.count == 1)
         #expect(recorder.err.isEmpty)

@@ -77,7 +77,7 @@ public struct BundleDiffRendering {
             return ["\(screen.id): not compared — reference \(reference), run \(run)"]
         }
         let unpaired = screen.unpairedStates.map { "\(screen.id)/\($0.slug): \($0.side.rawValue) only — \($0.screenshotPath)" }
-        return unpaired + stateLines(of: screen, crops: crops) + shiftLines(of: screen)
+        return unpaired + stateLines(of: screen, crops: crops) + shiftLines(of: screen) + appleLines(of: screen)
     }
 
     /// One line per layout shift on one side only, then a note for each state whose shifts could not be compared; a shift flag has no crop, so `bundle screen --match` is how to find its element.
@@ -87,6 +87,59 @@ public struct BundleDiffRendering {
         }
         let notes = (screen.shiftNotes ?? []).map { "  \(screen.id)/\($0.slug): motion not compared: no shift record on \($0.missingSide.rawValue)" }
         return flags + notes
+    }
+
+    /// One line per Apple audit issue the run has and the reference lacks, then a note for each state whose audits could not be compared; no crop, since the record's frame is read after the audit and need not match the screenshot.
+    static func appleLines(of screen: ScreenDiff) -> [String] {
+        let flags = (screen.appleFlags ?? []).map { flag in
+            "  apple  \(flag.rule)  \(screen.id)/\(flag.slug): \(appleElementText(flag)) — \(flag.compactDescription), not in reference"
+        }
+        let notes = appleNoteGroups(of: screen).map { "  \(screen.id)/\($0.slug): apple audit not compared: \($0.reason)" }
+        return flags + notes
+    }
+
+    /// The state's notes as one line each: the reason when one side could not be read, or both sides' when each could not.
+    static func appleNoteGroups(of screen: ScreenDiff) -> [(slug: String, reason: String)] {
+        let notes = screen.appleNotes ?? []
+        return notes.map(\.slug).reduce(into: [String]()) {
+            if !$0.contains($1) {
+                $0.append($1)
+            }
+        }.map { slug in
+            let own = notes.filter { $0.slug == slug }
+            guard own.count > 1, let first = own.first, own.allSatisfy({ $0.reason == first.reason }) else {
+                return (slug, own.map(appleReasonText).joined(separator: "; "))
+            }
+            let both = switch first.reason {
+            case .notAudited: "neither side has an audit record"
+            case .failed: "both sides' audits failed"
+            case .unreadable: "both sides' audit records could not be read"
+            }
+            return (slug, both)
+        }
+    }
+
+    /// The one line for a pair of bundles of which only one was audited at all, in place of a note for every state; `nil` when both were or neither was.
+    static func appleBundleLine(_ diff: BundleDiff) -> [String] {
+        diff.appleNotAudited.map { ["apple audit: not compared — the \($0.rawValue) was not audited"] } ?? []
+    }
+
+    /// `StaticText 'General'`; `(no element)` for an issue Apple names no element for.
+    static func appleElementText(_ flag: ScreenDiff.AppleFlag) -> String {
+        switch (flag.elementType, flag.name) {
+        case let (type?, name?): "\(type) '\(name)'"
+        case let (type?, nil): type
+        default: "(no element)"
+        }
+    }
+
+    static func appleReasonText(_ note: ScreenDiff.AppleNote) -> String {
+        let side = "the \(note.side.rawValue)"
+        return switch note.reason {
+        case .notAudited: "\(side) has no audit record"
+        case .failed: "\(side)'s audit failed"
+        case .unreadable: "\(side)'s audit record could not be read"
+        }
     }
 
     /// `Button 'Row 2'`: the type and the name a reader would look it up by; `Cell in 'Groceries'` for an anonymous element, which has only the name of what holds it.
@@ -129,7 +182,7 @@ public struct BundleDiffRendering {
     /// The screens compared with every state clean, named once.
     static func cleanLine(_ diff: BundleDiff) -> [String] {
         let clean = diff.screens.filter { screen in
-            screen.isCompared && screen.unpairedStates.isEmpty && (screen.shiftFlags ?? []).isEmpty && (screen.shiftNotes ?? []).isEmpty && screen.states.allSatisfy { $0.isCompared && $0.flags.isEmpty }
+            screen.isCompared && screen.unpairedStates.isEmpty && (screen.shiftFlags ?? []).isEmpty && (screen.shiftNotes ?? []).isEmpty && (screen.appleFlags ?? []).isEmpty && (screen.appleNotes ?? []).isEmpty && screen.states.allSatisfy { $0.isCompared && $0.flags.isEmpty }
         }
         return clean.isEmpty ? [] : ["no form difference: \(clean.map(\.id).joined(separator: ", "))"]
     }

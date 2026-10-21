@@ -56,6 +56,44 @@ struct OverlapRuleTests {
         #expect(flags.first?.crops.map(\.side) == [.run, .run])
     }
 
+    /// The Settings sidebar's `Dictate` button, exposed twice at one frame, is one element, not text over text; different text at that frame still collides.
+    @Test
+    func oneRunExposedTwiceIsNotAnOverlap() {
+        let dictate = AXNode.Frame(x: 379.7, y: 893, width: 17.3, height: 22)
+        let twice = Self.capture([Self.card("Search", [
+            ScreenSection.TextRun(shape: "Dictate", frame: dictate),
+            ScreenSection.TextRun(shape: "Dictate", frame: dictate),
+        ])])
+        let stacked = Self.capture([Self.card("Search", [
+            ScreenSection.TextRun(shape: "Dictate", frame: dictate),
+            ScreenSection.TextRun(shape: "Search", frame: dictate),
+        ])])
+
+        #expect(OverlapRule().flags(reference: twice, run: twice).isEmpty)
+        #expect(OverlapRule().flags(reference: stacked, run: stacked).map(\.finding) == [.overlappingRuns(first: "Dictate", second: "Search", alsoInReference: true)])
+    }
+
+    /// Two times drawn at one frame, `12:05` over `13:45`, share the shape `{n}:{n}` but not their text: a collision, not one element exposed twice.
+    ///
+    /// Segmented from a tree, so each run carries the text it was drawn with.
+    @Test
+    func twoTimesAtOneFrameAreAnOverlap() {
+        let time = AXNode.Frame(x: 16, y: 140, width: 48, height: 22)
+        let card = AXNode(type: "Other", frame: AXNode.Frame(x: 0, y: 100, width: 402, height: 80), children: [
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 16, y: 100, width: 140, height: 24), label: "Departures"),
+            AXNode(type: "StaticText", frame: time, label: "12:05"),
+            AXNode(type: "StaticText", frame: time, label: "13:45"),
+        ])
+        let tree = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874), label: "Logbook", children: [
+            AXNode(type: "Window", frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874), children: [card]),
+        ])
+        let capture = SegmentedCapture(tree: tree, screenshotPath: "screens/departures/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(OverlapRule().flags(reference: capture, run: capture).map(\.finding) == [
+            .overlappingRuns(first: "{n}:{n}", second: "{n}:{n}", alsoInReference: true),
+        ])
+    }
+
     static func run(_ shape: String, y: Double, height: Double) -> ScreenSection.TextRun {
         ScreenSection.TextRun(shape: shape, frame: AXNode.Frame(x: 22, y: y, width: 120, height: height))
     }

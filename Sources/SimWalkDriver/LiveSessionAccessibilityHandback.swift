@@ -16,7 +16,7 @@ import SimWalkCore
 public struct LiveSessionAccessibilityHandback {
     /// Each stopped session's handback by id: restored by this call, or as an earlier `list` recorded it.
     ///
-    /// A session still running, or one whose device something else is using and no record, has none.
+    /// A session still running, or one whose device something else is using and no record, has none. One whose device another holder took during the restore reads `.leftToAnotherHolder` and is left unrecorded, for a later `list` or `end` to hand back.
     public static func perform(
         store: LiveSessionStore,
         processes: any LiveSessionProcesses,
@@ -29,7 +29,13 @@ public struct LiveSessionAccessibilityHandback {
         let records = store.all().compactMap(\.record).filter { $0.device == nil }
         let stopped = records.filter { !processes.isRunning($0) }
         // A dead session's own caller still holds the lease it started under; that is not another holder of the device.
-        let busy = busyDevices(of: records, store: store, processes: processes, leases: leases, now: now(), ownLeases: ownLeases(of: stopped))
+        // Asked afresh each time — before each device, and inside its restore after the teardown wait, before each write
+        // (SimWalk#128): the restores before it, and its own wait, can each run the whole teardown budget.
+        let own = ownLeases(of: stopped)
+        let isBusy = { (udid: String, date: Date) -> Bool in
+            let current = store.all().compactMap(\.record).filter { $0.device == nil }
+            return busyDevices(of: current, store: store, processes: processes, leases: leases, now: date, ownLeases: own).contains(udid)
+        }
         let recorded = Dictionary(uniqueKeysWithValues: stopped.compactMap { record in
             Record.read(from: store.layout(id: record.id).accessibilityHandback).map { (record.id, $0) }
         })
@@ -40,18 +46,27 @@ public struct LiveSessionAccessibilityHandback {
                 bySession[record.id] = earlier.restoration
                 continue
             }
-            guard !busy.contains(record.udid) else { continue }
-            let unrecorded = stopped.filter { $0.udid == record.udid && recorded[$0.id] == nil }
-            let handback = byDevice[record.udid] ?? restore(
-                udid: record.udid,
-                stoppedAt: latest(unrecorded.map { LiveSessionChannel(layout: store.layout(id: $0.id)).latestStop() }),
-                run: run,
-                pause: pause,
-                now: now
-            )
-            byDevice[record.udid] = handback
-            // A session `end` removed meanwhile has nowhere to record it, and needs no record.
-            try? handback.write(to: store.layout(id: record.id).accessibilityHandback)
+            let handback: Record
+            if let made = byDevice[record.udid] {
+                handback = made
+            } else {
+                guard !isBusy(record.udid, now()) else { continue }
+                let unrecorded = stopped.filter { $0.udid == record.udid && recorded[$0.id] == nil }
+                handback = restore(
+                    udid: record.udid,
+                    stoppedAt: latest(unrecorded.map { LiveSessionChannel(layout: store.layout(id: $0.id)).latestStop() }),
+                    isDeviceBusy: { isBusy(record.udid, $0) },
+                    run: run,
+                    pause: pause,
+                    now: now
+                )
+                byDevice[record.udid] = handback
+            }
+            // A device another holder took during the restore was not handed back: no record, so a later `list` or `end`
+            // tries again. A session `end` removed meanwhile has nowhere to record it, and needs no record.
+            if handback.restoration.state != .leftToAnotherHolder {
+                try? handback.write(to: store.layout(id: record.id).accessibilityHandback)
+            }
             bySession[record.id] = handback.restoration
         }
         return bySession
@@ -61,9 +76,12 @@ public struct LiveSessionAccessibilityHandback {
     ///
     /// `session end` asks the same question before it touches a device, so the two cannot disagree about whose device it is.
     ///
-    /// `ownLeases` maps a device to the lease token of the session being handed back: the caller who started that session with `--lease` still holds that lease, and it is not another holder. Only a held lease carrying exactly that token is exempt; a lease with another token, or one that cannot be read, still counts. A walk's ``WalkClaim`` is exempt under no token, and a `session start`'s claims are read from the store's `.claims` directory rather than for `records`' devices, so a start on a device no record names is seen too (SimWalk#128).
-    public static func busyDevices(of records: [LiveSessionRecord], store: LiveSessionStore, processes: any LiveSessionProcesses, leases: LeaseStore, now: Date, ownLeases: [String: String] = [:]) -> Set<String> {
-        let leased = Set(leases.held(now: now).filter { udid, lease in lease.map { $0.token != ownLeases[udid] } ?? true }.keys)
+    /// `ownLeases` maps a device to the lease tokens of the sessions being handed back: the caller who started a session with `--lease` still holds that lease, and it is not another holder. Only a held lease carrying exactly one of those tokens is exempt; a lease with another token, or one that cannot be read, still counts, and so does one under such a token that is no longer held — a release deleting the device, or a clone whose lease has lapsed and awaits deletion — since `simctl` against a device on its way out is no handback. A walk's ``WalkClaim`` is exempt under no token, and a `session start`'s claims are read from the store's `.claims` directory rather than for `records`' devices, so a start on a device no record names is seen too (SimWalk#128).
+    public static func busyDevices(of records: [LiveSessionRecord], store: LiveSessionStore, processes: any LiveSessionProcesses, leases: LeaseStore, now: Date, ownLeases: [String: Set<String>] = [:]) -> Set<String> {
+        let leased = Set(leases.held(now: now).filter { udid, lease in
+            guard let lease, ownLeases[udid]?.contains(lease.token) == true else { return true }
+            return !isLive(lease, on: udid, leases: leases, now: now)
+        }.keys)
         let claimed = LiveSessionClaim.heldDevices(in: store, isAlive: processes.isAlive)
         let walked = WalkClaim.walkedDevices(in: leases, isAlive: processes.isAlive)
         return Set(records.filter { processes.isRunning($0) }.map(\.udid)).union(claimed).union(leased).union(walked)
@@ -79,13 +97,20 @@ public struct LiveSessionAccessibilityHandback {
             processes: processes,
             leases: leases,
             now: now,
-            ownLeases: session.leaseToken.map { [udid: $0] } ?? [:]
+            ownLeases: session.leaseToken.map { [udid: [$0]] } ?? [:]
         ).contains(udid)
     }
 
-    /// The lease token each of `records` was started under, by device; a record with none exempts nothing, so an older record stays conservative.
-    public static func ownLeases(of records: [LiveSessionRecord]) -> [String: String] {
-        Dictionary(records.compactMap { record in record.leaseToken.map { (record.udid, $0) } }, uniquingKeysWith: { first, _ in first })
+    /// Whether `lease` is the lease `udid` is held under now: the device's lease file carries its token, and it has neither expired nor lost its holder.
+    ///
+    /// A release in progress has renamed the file to a tombstone, and a lapsed clone's lease is not held; both are on their way to `simctl delete`.
+    static func isLive(_ lease: DeviceLease, on udid: String, leases: LeaseStore, now: Date) -> Bool {
+        leases.isHeld(lease, now: now) && (try? leases.lease(onDevice: udid))??.token == lease.token
+    }
+
+    /// The lease tokens `records` were started under, by device — every one, since two stopped sessions on a device may hold different leases and either may be the one still held; a record with none exempts nothing, so an older record stays conservative.
+    public static func ownLeases(of records: [LiveSessionRecord]) -> [String: Set<String>] {
+        Dictionary(records.compactMap { record in record.leaseToken.map { (record.udid, [$0]) } }, uniquingKeysWith: { $0.union($1) })
     }
 
     /// The latest the runner of a session seen not running can have stopped: ``LiveSessionChannel/latestStop()``, else the stop its recorded restore covers — that restore began after the runner was seen stopped — else `nil`, unknown.
@@ -103,12 +128,13 @@ public struct LiveSessionAccessibilityHandback {
     private static func restore(
         udid: String,
         stoppedAt: Date?,
+        isDeviceBusy: @escaping (Date) -> Bool,
         run: (String, [String]) throws -> Shell.Result,
         pause: (TimeInterval) -> Void,
         now: () -> Date
     ) -> Record {
         let began = now()
-        let restoration = AccessibilityPreference.restore(udid: udid, stoppedAt: stoppedAt, run: run, pause: pause, now: now)
+        let restoration = AccessibilityPreference.restore(udid: udid, stoppedAt: stoppedAt, isDeviceBusy: isDeviceBusy, run: run, pause: pause, now: now)
         return Record(restoration: restoration, coveredStop: min(stoppedAt ?? began, began))
     }
 
@@ -128,6 +154,8 @@ public struct LiveSessionAccessibilityHandback {
             "\(stopped), and `session list` could not switch \(subject) back on for \(restoration.udid) (\(reason)) — an in-process accessibility suite on this device reads empty trees until you run: \(command)"
         case let .unconfirmed(reason):
             "\(stopped), and `session list` could not confirm \(subject) back on for \(restoration.udid) (\(reason)) — if an in-process accessibility suite on this device reads empty trees, run: \(command)"
+        case .leftToAnotherHolder:
+            "\(stopped); another holder took \(restoration.udid) during the handback, so \(subject) was left as that holder has it — the next `session list` or `session end` switches it back on once that holder is done"
         }
     }
 }
