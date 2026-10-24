@@ -14,12 +14,15 @@ public struct PhaseTimings: Codable, Equatable, Sendable {
     public var runMs: Int?
     /// The whole run, start to end — the result's, which the progress file leaves out until the end.
     public var totalMs: Int?
+    /// Each shard's marks and the merge, for a `--parallel` walk; absent for a serial one.
+    public var parallel: ParallelTimings?
 
-    public init(bootMs: Int? = nil, installMs: Int? = nil, buildMs: Int? = nil, runMs: Int? = nil, totalMs: Int? = nil) {
+    public init(bootMs: Int? = nil, installMs: Int? = nil, buildMs: Int? = nil, runMs: Int? = nil, totalMs: Int? = nil, parallel: ParallelTimings? = nil) {
         self.bootMs = bootMs
         self.installMs = installMs
         self.buildMs = buildMs
         self.runMs = runMs
         self.totalMs = totalMs
+        self.parallel = parallel
     }
 }

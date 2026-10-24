@@ -219,7 +219,7 @@ struct BundleDiffTests {
     static let light = Walkbook.CaptureState(theme: .light)
     static let darkLarge = Walkbook.CaptureState(theme: .dark, dynamicTypeSize: "UICTContentSizeCategoryAccessibilityL")
 
-    /// The whole diff on a screen reached by a `scrollTo`: every section on the run side shifted down 40 pt is no flag, and on a screen reached by a tap it is a box flag on the first section's top.
+    /// The whole diff on a screen reached by a `scrollTo` or a `swipe`: every section on the run side shifted down 40 pt is no flag, and on a screen reached by a tap it is a box flag on the first section's top.
     @Test
     func aScrolledScreenIsNotFlaggedForWhereTheScrollLeftIt() throws {
         let tree = try Self.tree("segmenter-summary-light")
@@ -235,9 +235,11 @@ struct BundleDiffTests {
         }
 
         let scrolled = try diff(route: [.tab(label: "Log"), .scrollTo(label: "Underway")])
+        let swiped = try diff(route: [.tab(label: "Log"), .swipe(label: nil, direction: "up")])
         let tapped = try diff(route: [.tab(label: "Log")])
 
         #expect(scrolled.flagCount == 0)
+        #expect(swiped.flagCount == 0)
         #expect(tapped.screens.first?.states.first?.flags.map(\.rule) == ["box"])
     }
 

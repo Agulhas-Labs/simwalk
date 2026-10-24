@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		906267AA733B54A5242B86F2 /* AXTreeCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B734CB4CB59FE1621E8B1153 /* AXTreeCapture.swift */; };
+		7C9A5E3F4DB16A8CAE2F3B45 /* StepPerformer+Replace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DAB6F405EC27B9DBF3A4C56 /* StepPerformer+Replace.swift */; };
+		A1B2C3D4E5F60718293A4B5C /* StepPerformer+Points.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F60718293A4B5C6D /* StepPerformer+Points.swift */; };
 		5A7E3C1D2B9F4E6A8C0D1F23 /* StepPerformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B8F4D2E3CA05F7B9D1E2A34 /* StepPerformer.swift */; };
 		A1B2C3D4E5F600010A1B2C3D /* BarClearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5A600020B1C2D3E /* BarClearance.swift */; };
 		A1B2C3D4E5F600080A1B2C3D /* TargetResolution.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5A600090B1C2D3E /* TargetResolution.swift */; };
@@ -20,6 +22,8 @@
 
 /* Begin PBXFileReference section */
 		26C81E5006661E4467B5CBED /* HostReachabilityProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostReachabilityProbe.swift; sourceTree = "<group>"; };
+		8DAB6F405EC27B9DBF3A4C56 /* StepPerformer+Replace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StepPerformer+Replace.swift"; sourceTree = "<group>"; };
+		B2C3D4E5F60718293A4B5C6D /* StepPerformer+Points.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StepPerformer+Points.swift"; sourceTree = "<group>"; };
 		6B8F4D2E3CA05F7B9D1E2A34 /* StepPerformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepPerformer.swift; sourceTree = "<group>"; };
 		B1C2D3E4F5A600020B1C2D3E /* BarClearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarClearance.swift; sourceTree = "<group>"; };
 		B1C2D3E4F5A600090B1C2D3E /* TargetResolution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TargetResolution.swift; sourceTree = "<group>"; };
@@ -59,6 +63,8 @@
 				26C81E5006661E4467B5CBED /* HostReachabilityProbe.swift */,
 				AE513C3A365B0A5060941C9A /* Info.plist */,
 				6B8F4D2E3CA05F7B9D1E2A34 /* StepPerformer.swift */,
+				8DAB6F405EC27B9DBF3A4C56 /* StepPerformer+Replace.swift */,
+				B2C3D4E5F60718293A4B5C6D /* StepPerformer+Points.swift */,
 				B1C2D3E4F5A600020B1C2D3E /* BarClearance.swift */,
 				B1C2D3E4F5A600090B1C2D3E /* TargetResolution.swift */,
 				B1C2D3E4F5A600100B1C2D3E /* TabLocator.swift */,
@@ -148,6 +154,8 @@
 				906267AA733B54A5242B86F2 /* AXTreeCapture.swift in Sources */,
 				DBA0F1E855C6A2A5412D72A5 /* HostReachabilityProbe.swift in Sources */,
 				5A7E3C1D2B9F4E6A8C0D1F23 /* StepPerformer.swift in Sources */,
+				7C9A5E3F4DB16A8CAE2F3B45 /* StepPerformer+Replace.swift in Sources */,
+				A1B2C3D4E5F60718293A4B5C /* StepPerformer+Points.swift in Sources */,
 				A1B2C3D4E5F600010A1B2C3D /* BarClearance.swift in Sources */,
 				A1B2C3D4E5F600080A1B2C3D /* TargetResolution.swift in Sources */,
 				A1B2C3D4E5F6000F0A1B2C3D /* TabLocator.swift in Sources */,

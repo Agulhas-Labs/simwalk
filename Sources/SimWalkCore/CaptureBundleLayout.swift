@@ -152,6 +152,33 @@ public struct CaptureBundleLayout {
         "\(screenDirectory(screenID: screenID))/\(stateSlug)"
     }
 
+    /// The screen and state whose directory `path` is: the exact inverse of `stateDirectory(screenID:stateSlug:)`, so `nil` for any path that function cannot derive.
+    ///
+    /// The screen comes back as its slug, the only form of its id on disk. It is how a bundle whose manifest was never finalised names its captures: by their directories alone (SimWalk#190).
+    public static func state(atStateDirectory path: String) -> (screenSlug: String, stateSlug: String)? {
+        let components = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard components.count == 3, components[0] == screensDirectoryName, !components[2].isEmpty else { return nil }
+        let state = (screenSlug: components[1], stateSlug: components[2])
+        return stateDirectory(screenID: state.screenSlug, stateSlug: state.stateSlug) == path ? state : nil
+    }
+
+    /// Every state under `bundleURL` whose directory holds an Apple audit record, in path order, read from the directories with no manifest.
+    ///
+    /// **A bundle whose manifest was never finalised still holds its audits' records** (SimWalk#190): the runner files each beside its capture and the manifest last, so a runner stopped or crashed after an audit leaves the records and nothing that lists them. A directory the layout cannot derive is not a state and is left out.
+    public static func appleAuditStates(in bundleURL: URL, fileManager: FileManager = .default) -> [(screenSlug: String, stateSlug: String)] {
+        let screens = (try? fileManager.contentsOfDirectory(atPath: url(forRelativePath: screensDirectoryName, in: bundleURL).path)) ?? []
+        let directories = screens.flatMap { screen in
+            let screenPath = "\(screensDirectoryName)/\(screen)"
+            let states = (try? fileManager.contentsOfDirectory(atPath: url(forRelativePath: screenPath, in: bundleURL).path)) ?? []
+            return states.map { "\(screenPath)/\($0)" }
+        }
+        return directories.sorted().compactMap { directory in
+            state(atStateDirectory: directory).flatMap { state in
+                fileManager.fileExists(atPath: url(forRelativePath: appleAuditPath(screenID: state.screenSlug, stateSlug: state.stateSlug), in: bundleURL).path) ? state : nil
+            }
+        }
+    }
+
     /// The bundle-relative path of one state's screenshot.
     public static func screenshotPath(screenID: String, stateSlug: String) -> String {
         "\(stateDirectory(screenID: screenID, stateSlug: stateSlug))/\(screenshotFileName)"

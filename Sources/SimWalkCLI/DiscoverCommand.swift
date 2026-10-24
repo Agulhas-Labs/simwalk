@@ -85,7 +85,6 @@ struct DiscoverCommand: ParsableCommand {
         now: @escaping () -> Date = { Date() },
         id: () -> String = { String(UUID().uuidString.prefix(8)).lowercased() },
         runner: (() throws -> RunnerSource)? = nil,
-        logFileURL: URL = UsageLog.standard().fileURL,
         builds: RunnerBuilds,
         leases: LeaseStore = .standard(),
         store: LiveSessionStore = .standard(),
@@ -102,7 +101,7 @@ struct DiscoverCommand: ParsableCommand {
         guard !FileManager.default.fileExists(atPath: url.path) else { throw DiscoverError.outputExists(path: output) }
         let sessionID = id()
         let started = try start.perform(
-            shell: shell, pause: pause, now: now, id: { sessionID }, runner: runner, logFileURL: logFileURL, builds: builds, leases: leases, store: store,
+            shell: shell, pause: pause, now: now, id: { sessionID }, runner: runner, builds: builds, leases: leases, store: store,
             processes: processes, environment: environment, cancellation: cancellation, deviceHello: deviceHello, animationsLibrary: animationsLibrary, note: note
         )
         let end = SessionEnding {
@@ -112,8 +111,10 @@ struct DiscoverCommand: ParsableCommand {
         let crawled: Answer
         do {
             guard let record = store.record(id: sessionID) else { throw LiveSessionHostError.unknownSession(id: sessionID) }
-            let session = LiveDiscoverySession(record: record, store: store, processes: processes, leases: leases, shell: shell, deviceSend: deviceSend, cancellation: cancellation, pause: pause, now: now)
-            crawled = try crawl(session, header: started.header, url: url)
+            crawled = try withoutActuallyEscaping(note) { escaping in
+                let session = LiveDiscoverySession(record: record, store: store, processes: processes, leases: leases, shell: shell, deviceSend: deviceSend, cancellation: cancellation, pause: pause, now: now, note: escaping)
+                return try crawl(session, header: started.header, url: url)
+            }
         } catch {
             _ = try? end.once()
             throw error

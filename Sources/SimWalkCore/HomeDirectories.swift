@@ -33,6 +33,11 @@ public struct HomeDirectories {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".simwalk", isDirectory: true)
     }
 
+    /// `<account home>/Library/Logs/DiagnosticReports`, where the Mac writes its crash reports, a simulator app's among them (SimWalk#243): the system writes them there whatever `HOME` says.
+    public static func diagnosticReports() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DiagnosticReports", isDirectory: true)
+    }
+
     /// `SIMWALK_HOME` when it is an absolute path, else `<user home>/.simwalk`.
     public static func simwalk(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
         if let path = absolute(environment[simwalkVariable]) {

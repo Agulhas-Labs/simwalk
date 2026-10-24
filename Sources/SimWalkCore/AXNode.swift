@@ -20,6 +20,10 @@ public struct AXNode: Codable, Equatable, Sendable {
     public var identifier: String?
     /// Its value, for elements that carry one.
     public var value: String?
+    /// The placeholder a text-entry element shows when it is empty, which for a SwiftUI `TextField` is often its only name (SimWalk#212).
+    ///
+    /// Recorded for `TextField`, `SecureTextField`, `TextView` and `SearchField` only, and only when non-empty, so every other node's bytes are unchanged. An optional key an older reader ignores, so neither the tree nor the manifest format changed.
+    public var placeholder: String?
     /// Whether the element carries the selected trait — the one thing that separates the active segment of a picker from its four siblings.
     ///
     /// Recorded because a bundle that drops it cannot tell "selection is not exposed to VoiceOver" from "selection is exposed and the capture did not record it". A real audit filed the first against an app that was doing the second, and it cost a fix round to refute (SimWalk#2).
@@ -37,6 +41,7 @@ public struct AXNode: Codable, Equatable, Sendable {
         label: String? = nil,
         identifier: String? = nil,
         value: String? = nil,
+        placeholder: String? = nil,
         isSelected: Bool = false,
         isEnabled: Bool = true,
         children: [AXNode] = []
@@ -46,6 +51,7 @@ public struct AXNode: Codable, Equatable, Sendable {
         self.label = label
         self.identifier = identifier
         self.value = value
+        self.placeholder = placeholder
         self.isSelected = isSelected
         self.isEnabled = isEnabled
         self.children = children
@@ -63,6 +69,7 @@ public struct AXNode: Codable, Equatable, Sendable {
         try container.encodeIfPresent(label, forKey: .label)
         try container.encodeIfPresent(identifier, forKey: .identifier)
         try container.encodeIfPresent(value, forKey: .value)
+        try container.encodeIfPresent(placeholder, forKey: .placeholder)
         if isSelected {
             try container.encode(isSelected, forKey: .isSelected)
         }
@@ -81,6 +88,7 @@ public struct AXNode: Codable, Equatable, Sendable {
         label = try container.decodeIfPresent(String.self, forKey: .label)
         identifier = try container.decodeIfPresent(String.self, forKey: .identifier)
         value = try container.decodeIfPresent(String.self, forKey: .value)
+        placeholder = try container.decodeIfPresent(String.self, forKey: .placeholder)
         isSelected = try container.decodeIfPresent(Bool.self, forKey: .isSelected) ?? false
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         children = try container.decodeIfPresent([AXNode].self, forKey: .children) ?? []
@@ -156,6 +164,13 @@ public extension AXNode {
         [self] + children.flatMap(\.flattened)
     }
 
+    /// Every node in tree order, this one first, less any keyboard and everything under it.
+    ///
+    /// The keyboard is input laid over the screen, not the screen being judged (an input view the app draws itself included): its keys and its suggestion words are not the app's labels or layout, and the words change from one walk to the next, so a rule that judges the app reads the tree through this and not ``flattened``. The capture itself keeps the keyboard, as a user sees it.
+    var flattenedLeavingOutKeyboard: [AXNode] {
+        ScreenIdentifier.isKeyboard(self) ? [] : [self] + children.flatMap(\.flattenedLeavingOutKeyboard)
+    }
+
     /// Every node carrying text, with its frame: the "text runs" half of what a capture promises.
     var textRuns: [AXNode] {
         flattened.filter { node in
@@ -187,6 +202,7 @@ extension AXNode {
         case label
         case identifier
         case value
+        case placeholder
         case isSelected
         case isEnabled
         case children

@@ -48,6 +48,120 @@ struct BundleAuditTests {
         #expect(text.contains("by 6 rules, 2 not applicable"))
     }
 
+    /// SimWalk#142: an overlap finding names no frames, so the screen's block ends with the command that lists them, off-screen runs included.
+    @Test
+    func aScreenWithAnOverlapEndsWithTheCommandThatShowsTheFrames() throws {
+        let directory = try TemporaryDirectory()
+        let xxxl = Walkbook.CaptureState(theme: .light, dynamicTypeSize: "UICTContentSizeCategoryAccessibilityXXXL")
+        let children = [
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 100, width: 300, height: 497), label: "Time, not walks, copied weeks"),
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 300, width: 300, height: 240), label: "Found 6 Jan"),
+        ]
+        let bundle = try Fixture.write(in: directory, captures: [Self.capture(xxxl, children)])
+        let text = try BundleAuditSummary(BundleAudit(bundle, rules: [.largeTypeOverflow]).run(), of: bundle).render()
+
+        let line = text.split(separator: "\n").last { $0.contains("→ simwalk bundle screen") }.map(String.init)
+        let expected = "→ simwalk bundle screen \(bundle.url.path) 1 --state \(xxxl.slug) --tree --all --match 'Time, not walks, cop'"
+
+        #expect(line?.trimmingCharacters(in: .whitespaces) == expected, "\(text)")
+        #expect(text.contains("y 100–597 (497 pt) overlaps 'Found 6 Jan' y 300–540 (240 pt)"), "\(text)")
+    }
+
+    private static let ax1 = Walkbook.CaptureState(theme: .light, dynamicTypeSize: "UICTContentSizeCategoryAccessibilityM")
+    private static let ax5 = Walkbook.CaptureState(theme: .light, dynamicTypeSize: "UICTContentSizeCategoryAccessibilityXXXL")
+
+    private static func overlapping(tall: Double, width: Double = 300) -> [AXNode] {
+        [
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 100, width: width, height: tall), label: "Time, not walks, copied weeks"),
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 300, width: 300, height: 240), label: "Found 6 Jan"),
+        ]
+    }
+
+    /// SimWalk#219: rows merge across states only when their notes agree.
+    @Test
+    func aRunThatOverlapsAtTwoSizesWithDifferentExtentsPrintsARowForEach() throws {
+        let directory = try TemporaryDirectory()
+        let bundle = try Fixture.write(in: directory, captures: [Self.capture(Self.ax1, Self.overlapping(tall: 250)), Self.capture(Self.ax5, Self.overlapping(tall: 497))])
+        let text = try BundleAuditSummary(BundleAudit(bundle, rules: [.largeTypeOverflow]).run(), of: bundle).render()
+
+        #expect(text.contains("y 100–350 (250 pt) overlaps 'Found 6 Jan' y 300–540 (240 pt) [\(Self.ax1.slug)]"), "\(text)")
+        #expect(text.contains("y 100–597 (497 pt) overlaps 'Found 6 Jan' y 300–540 (240 pt) [\(Self.ax5.slug)]"), "\(text)")
+        #expect(text.contains("[largeTypeOverflow] 2 found"), "\(text)")
+    }
+
+    /// SimWalk#219: a first state that only runs past the width does not hide a later state's overlap or its follow-up.
+    @Test
+    func anOverlapInALaterStateIsNotHiddenBehindAnEarlierWidthNote() throws {
+        let directory = try TemporaryDirectory()
+        let wide = [AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 100, width: 600, height: 40), label: "Time, not walks, copied weeks")]
+        let bundle = try Fixture.write(in: directory, captures: [Self.capture(Self.ax1, wide), Self.capture(Self.ax5, Self.overlapping(tall: 497, width: 600))])
+        let text = try BundleAuditSummary(BundleAudit(bundle, rules: [.largeTypeOverflow]).run(), of: bundle).render()
+
+        #expect(text.contains("overlaps 'Found 6 Jan'"), "\(text)")
+        #expect(text.contains("→ simwalk bundle screen \(bundle.url.path) 1 --state \(Self.ax5.slug) --tree --all"), "\(text)")
+    }
+
+    /// SimWalk#219: the note joins the row key for `largeTypeOverflow` alone; a small target whose size differs by state is still one finding.
+    @Test
+    func aSmallTargetWhoseSizeDiffersByStateIsOneRow() throws {
+        let directory = try TemporaryDirectory()
+        func button(width: Double) -> [AXNode] {
+            [AXNode(type: "Button", frame: AXNode.Frame(x: 16, y: 100, width: width, height: 44), label: "Save")]
+        }
+        let text = try Self.text([Self.capture(Self.light, button(width: 30)), Self.capture(Self.ax1, button(width: 20))], only: [.smallTarget], in: directory)
+
+        #expect(text.contains("[smallTarget] 1 found"), "\(text)")
+    }
+
+    /// SimWalk#219: `bundle screen` refuses a numeric step that is another screen's id, so the follow-up is left out rather than printed refused.
+    @Test
+    func noFollowUpIsPrintedForAPositionAnotherScreensIDSpells() throws {
+        let directory = try TemporaryDirectory()
+        let bundle = try Fixture.writeWalk(in: directory, screens: [
+            Fixture.ScreenSpec(id: "2", captures: [Fixture.Capture(screenID: "2", state: Self.light, tree: Tree.screen([]))]),
+            Fixture.ScreenSpec(id: "settings", captures: [Fixture.Capture(screenID: "settings", state: Self.ax5, tree: Tree.screen(Self.overlapping(tall: 497)))]),
+        ])
+        let text = try BundleAuditSummary(BundleAudit(bundle, rules: [.largeTypeOverflow]).run(), of: bundle).render()
+
+        #expect(text.contains("overlaps 'Found 6 Jan'"), "\(text)")
+        #expect(!text.contains("→ simwalk bundle screen"), "\(text)")
+    }
+
+    /// SimWalk#219: a bundle path with a space and a quote reaches the shell as one word.
+    @Test
+    func aBundlePathWithASpaceAndAQuoteIsQuotedInTheFollowUp() throws {
+        let directory = try TemporaryDirectory()
+        let written = try Fixture.write(in: directory, captures: [Self.capture(Self.ax5, Self.overlapping(tall: 497))])
+        let nested = directory.url.appendingPathComponent("it's a dir")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let moved = nested.appendingPathComponent(written.url.lastPathComponent)
+        try FileManager.default.moveItem(at: written.url, to: moved)
+        let bundle = CaptureBundle(url: moved, manifest: written.manifest)
+        let text = try BundleAuditSummary(BundleAudit(bundle, rules: [.largeTypeOverflow]).run(), of: bundle).render()
+
+        let quoted = "'" + bundle.url.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+
+        #expect(quoted.contains("it'\\''s a dir"))
+        #expect(text.contains("simwalk bundle screen \(quoted) 1 --state"), "\(text)")
+    }
+
+    /// SimWalk#142 review: the follow-up stays one pasteable line — a label's first line only, single-quoted so `!`, `$` and quotes reach `--match` as typed.
+    @Test
+    func theFollowUpCommandQuotesALabelsFirstLineForAShell() throws {
+        let directory = try TemporaryDirectory()
+        let xxxl = Walkbook.CaptureState(theme: .light, dynamicTypeSize: "UICTContentSizeCategoryAccessibilityXXXL")
+        let children = [
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 100, width: 300, height: 497), label: "Hi! It's $5\nper week"),
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 300, width: 300, height: 240), label: "Found 6 Jan"),
+        ]
+        let bundle = try Fixture.write(in: directory, captures: [Self.capture(xxxl, children)])
+        let text = try BundleAuditSummary(BundleAudit(bundle, rules: [.largeTypeOverflow]).run(), of: bundle).render()
+
+        let line = text.split(separator: "\n").last { $0.contains("→ simwalk bundle screen") }.map(String.init)
+
+        #expect(line?.hasSuffix(" --match 'Hi! It'\\''s $5'") == true, "\(text)")
+    }
+
     @Test
     func onlySelectsTheNamedRulesOnceEachInPrintOrder() throws {
         let directory = try TemporaryDirectory()
@@ -111,6 +225,15 @@ struct BundleAuditTests {
         #expect(report.coverage.isComplete)
         #expect(answer.verdict.isQualified)
         #expect(answer.verdict.exitCode == AnswerVerdict.qualifiedExitCode)
+    }
+
+    /// SimWalk#235: captures are read with VoiceOver off, so the verdict says what an unlabelled control is unlabelled under.
+    @Test
+    func theVerdictSaysAnUnlabelledControlIsUnlabelledWithVoiceOverOff() throws {
+        let directory = try TemporaryDirectory()
+        let text = try Self.text([Self.capture(Self.light, [Tree.element("Switch", y: 100)])], only: [.unlabelledControl], in: directory)
+
+        #expect(text.contains("1 control with neither a label nor an identifier with VoiceOver off"))
     }
 
     @Test

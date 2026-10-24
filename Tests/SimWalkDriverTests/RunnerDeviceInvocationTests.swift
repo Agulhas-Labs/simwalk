@@ -5,6 +5,7 @@
 import Foundation
 import SimWalkCore
 @testable import SimWalkDriver
+import SimWalkTestSupport
 import Testing
 
 /// What the driver hands the runner for a walk on a physical device (SimWalk#116).
@@ -76,7 +77,9 @@ struct RunnerDeviceInvocationTests {
     @Test
     func aDeviceBuildCarriesTheTeamSigningAndAnOverrideOnlyWhenGiven() throws {
         let calls = CallLog()
-        let invocation = calls.runner()
+        // A real directory: a build locks the directory it builds into (SimWalk#242).
+        let scratch = try TemporaryDirectory()
+        let invocation = calls.runner(derivedDataPath: scratch.url.path)
 
         try invocation.buildForDevice(udid: "D", team: "TEAM123")
         try invocation.buildForDevice(udid: "D", team: "TEAM123", runnerBundleID: "com.work.runner")
@@ -189,12 +192,12 @@ extension RunnerDeviceInvocationTests {
     final class CallLog {
         var value: [(arguments: [String], environment: [String: String])] = []
 
-        func runner() -> RunnerInvocation {
+        func runner(derivedDataPath: String = "/runner/dd") -> RunnerInvocation {
             let shell = Shell(script: { _, arguments, environment in
                 self.value.append((arguments, environment))
                 return Shell.Result(status: 0, standardOutput: "", standardError: "")
             })
-            return RunnerInvocation(projectPath: "/runner/SimWalkRunner.xcodeproj", derivedDataPath: "/runner/dd", shell: shell)
+            return RunnerInvocation(projectPath: "/runner/SimWalkRunner.xcodeproj", derivedDataPath: derivedDataPath, shell: shell)
         }
     }
 }

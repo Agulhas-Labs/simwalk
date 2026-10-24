@@ -21,10 +21,12 @@ public enum LeaseError: Error, Equatable, CustomStringConvertible {
     /// No shut-down device among those a lease could fall on is free — a name, or a runtime when nothing was named — and a booted one is leased only when named by UDID.
     case noShutDownDevice(among: String)
     case cloneSourceBooted(udid: String)
-    /// A device a lease cloned whose lease has lapsed: it is released — the clone deleted — and never leased again.
+    /// A device whose lease is being released, or a clone whose lease has lapsed, which is released — the clone deleted — and never leased again.
     case awaitingDeletion(udid: String)
     /// A created device that could not be shut down or deleted; the lease is kept so a release can be run again.
     case deviceNotDeleted(udid: String, command: String, reason: String)
+    /// A device the lease found shut down that could not be shut down again on release; the lease is kept so a release can be run again.
+    case deviceNotShutDown(udid: String, reason: String)
     case storeFailed(path: String, reason: String)
     /// A token presented to a physical-device walk whose lease is on a simulator.
     case notPhysicalLease(udid: String)
@@ -48,9 +50,11 @@ public enum LeaseError: Error, Equatable, CustomStringConvertible {
         case let .cloneSourceBooted(udid):
             "\(udid) is booted and simctl clones only a device that is shut down — shut it down first (xcrun simctl shutdown \(udid)) if it is yours to stop"
         case let .awaitingDeletion(udid):
-            "\(udid) is a clone a lease made, and that lease has lapsed or is being released, so the device is deleted rather than leased again — `simwalk prune` deletes it; take another device (`simwalk lease acquire`); nothing on the device was touched"
+            "the lease on \(udid) is being released, or is a clone's that has lapsed, which is deleted rather than leased again — a release a crash left is finished by `simwalk prune`; take another device (`simwalk lease acquire`); nothing on the device was touched"
         case let .deviceNotDeleted(udid, command, reason):
             "\(command) failed: \(reason) — the lease on \(udid) is kept; release it again, or run xcrun simctl shutdown \(udid) && xcrun simctl delete \(udid)"
+        case let .deviceNotShutDown(udid, reason):
+            "simctl shutdown \(udid) failed: \(reason) — the lease found the device shut down, so it is kept until the device is shut down again; release it again, or run xcrun simctl shutdown \(udid) and then release it"
         case let .storeFailed(path, reason):
             "the lease store at \(path) could not be written: \(reason)"
         case let .notPhysicalLease(udid):
@@ -104,7 +108,7 @@ extension LeaseError: UsageFailureClassifiable {
     public var usageFailureKind: UsageFailureKind {
         switch self {
         case .held, .unreadable, .noSuchLease, .expired, .holderExited, .noUnleasedDevice, .noShutDownDevice, .cloneSourceBooted, .awaitingDeletion, .notPhysicalLease: .inputRefused
-        case .deviceNotDeleted: .deviceLeftBad
+        case .deviceNotDeleted, .deviceNotShutDown: .deviceLeftBad
         case .storeFailed: .toolError
         }
     }

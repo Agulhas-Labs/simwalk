@@ -59,7 +59,7 @@ struct SessionStartCommand: ParsableCommand {
 
     /// Resolves the runner, the device and the app as `inspect` does, then starts the session — every effect injectable.
     ///
-    /// Writes the session's progress file beside the usage log at `logFileURL` until the runner takes it over (``SessionStartProgress``); `cancellation` ends it `failed` / `cancelled`, and anything thrown ends it `failed`.
+    /// Writes the session's progress file beside the usage log `environment` names until the runner takes it over (``SessionStartProgress``); `cancellation` ends it `failed` / `cancelled`, and anything thrown ends it `failed`.
     ///
     /// `firstLaunch` is the start's one preflight, made before its first `simctl` call on either path (SimWalk#136).
     func perform(
@@ -68,7 +68,6 @@ struct SessionStartCommand: ParsableCommand {
         now: @escaping () -> Date = { Date() },
         id: () -> String = { String(UUID().uuidString.prefix(8)).lowercased() },
         runner resolveRunner: (() throws -> RunnerSource)? = nil,
-        logFileURL: URL = UsageLog.standard().fileURL,
         builds: RunnerBuilds,
         leases: LeaseStore = .standard(),
         store: LiveSessionStore = .standard(),
@@ -80,6 +79,8 @@ struct SessionStartCommand: ParsableCommand {
         animationsLibrary: WalkCommand.AnimationsLibrary? = nil,
         note: (String) -> Void = { _ in }
     ) throws -> Answer {
+        // The log `environment` names, resolved once for the progress file, the usage lines and the runner alike, so an injected `SIMWALK_USAGE_LOG` moves them all (SimWalk#196).
+        let logFileURL = UsageLog.standard(environment: environment).fileURL
         // Which target, before the simulator path touches anything: a physical device has no progress file, as a device walk has none.
         if let route = try PhysicalDeviceRoute.resolve(device: device, lease: lease, shell: shell, leases: leases, firstLaunch: firstLaunch) {
             let effects = DeviceStartEffects(shell: shell, pause: pause, now: now, runner: resolveRunner, builds: builds, leases: leases, store: store, processes: processes, environment: environment, hello: deviceHello)
@@ -107,9 +108,11 @@ struct SessionStartCommand: ParsableCommand {
             guard simulator.isBooted else {
                 throw LiveSessionHostError.notBooted(name: simulator.name, udid: simulator.udid)
             }
-            guard try simulator.installedAppPath(bundleID: app, shell: shell) != nil else {
+            guard let installedPath = try simulator.installedAppPath(bundleID: app, shell: shell) else {
                 throw SimulatorError.appNotInstalled(bundleID: app, udid: simulator.udid)
             }
+            // SimWalk#166: an iPhone-only app on an iPad runs in compatibility mode, so refuse before the runner is built. A physical iPad is not checked yet.
+            try AppDeviceFamilies.require(bundleID: app, installedAt: installedPath, on: simulator)
             progress.resolved(simulator, app: app)
             let starter = LiveSessionStart(store: store, processes: processes)
             // Held from before the build and the settle until the record is written, so a second start cannot pass the one-session check in between.
@@ -120,7 +123,7 @@ struct SessionStartCommand: ParsableCommand {
             }
             let runner = RunnerInvocation(projectPath: source.projectPath, derivedDataPath: builds.directory(for: source).path, shell: shell)
             runner.coldBuildNote(commit: source.commit).map(note)
-            try runner.build(for: simulator)
+            try runner.build(for: simulator, note: note)
             progress.launching()
 
             // Read before anything changes the device: what the runner puts back on every exit and `end` puts back after it.
@@ -175,7 +178,7 @@ struct SessionStartCommand: ParsableCommand {
                     "step it: simwalk session step \(sessionID) '<route step json>' [--guard <hash>]",
                     "save it: simwalk session save \(sessionID) --screen <id> --into <walkbook.json> [--expect <identifier>] — before end",
                     "end it: simwalk session end \(sessionID) — it ends itself after \(Int(idle)) s without a request",
-                ] + (settled.map { [$0] } ?? [])
+                ] + (settled.map { [$0] } ?? []) + (started.ready.notes ?? []).map { "⚠ \($0)" }
             )
         } catch {
             progress.fail(error)
@@ -231,7 +234,7 @@ struct SessionStartCommand: ParsableCommand {
         do {
             state = try JSONDecoder().decode(Walkbook.CaptureState.self, from: Data(json.utf8))
         } catch {
-            throw LiveSessionHostError.unreadableState(reason: "\(error)")
+            throw LiveSessionHostError.unreadableState(reason: DecodingReason.sentence(for: error))
         }
         if state.environment?.keys.contains(AnimationsOptIn.libraryEnvironmentKey) == true {
             throw LiveSessionHostError.stateSetsAnimations(variable: AnimationsOptIn.libraryEnvironmentKey)

@@ -29,6 +29,29 @@ struct UsageLogTests {
     }
 
     @Test
+    func aParallelBreakdownRoundTripsAndIsAbsentFromEveryOtherLine() throws {
+        let directory = try TemporaryDirectory()
+        let log = UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 0) })
+        let timings = ParallelTimings(
+            shards: [
+                ShardTiming(index: 0, device: "UDID-1", origin: .existingShutDown, readyMs: 5, runnerStartMs: 6, runnerEndMs: 90),
+                ShardTiming(index: 1, device: "UDID-2", origin: .cloned, readyMs: 40, runnerStartMs: nil, runnerEndMs: nil),
+            ],
+            mergeMs: 3
+        )
+
+        log.record(tool: UsageLog.parallelTool, target: "book.json", milliseconds: 95, succeeded: true, parallel: timings)
+        log.record(tool: "walk", target: "book.json", milliseconds: 99, succeeded: true)
+
+        let lines = try Self.lines(of: log)
+        let entry = try JSONDecoder().decode(UsageLog.Entry.self, from: JSONSerialization.data(withJSONObject: lines[0]))
+
+        #expect(entry.parallel == timings)
+        #expect((lines[0]["parallel"] as? [String: Any])?["mergeMs"] as? Int == 3)
+        #expect(lines[1]["parallel"] == nil)
+    }
+
+    @Test
     func aFailedCallRecordsItsReasonAsOneBoundedLine() throws {
         let directory = try TemporaryDirectory()
         let log = UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 0) })

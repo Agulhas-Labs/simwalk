@@ -52,8 +52,13 @@ struct LeaseErrorMappingTests {
         #expect(LeaseError.noSuchLease.description == "no lease carries that token — it was released, or reclaimed after it expired; `simwalk lease list` shows what is held")
     }
 
-    @Test("A lapsed clone points at prune")
+    @Test("A release in progress or a lapsed clone points at prune, and never says a device it only shuts down is deleted")
     func awaitingDeletionDescription() {
-        #expect(LeaseError.awaitingDeletion(udid: "U").description == "U is a clone a lease made, and that lease has lapsed or is being released, so the device is deleted rather than leased again — `simwalk prune` deletes it; take another device (`simwalk lease acquire`); nothing on the device was touched")
+        #expect(LeaseError.awaitingDeletion(udid: "U").description == "the lease on U is being released, or is a clone's that has lapsed, which is deleted rather than leased again — a release a crash left is finished by `simwalk prune`; take another device (`simwalk lease acquire`); nothing on the device was touched")
+    }
+
+    @Test("A device that would not shut down names the shutdown and the release after it")
+    func deviceNotShutDownDescription() {
+        #expect(LeaseError.deviceNotShutDown(udid: "U", reason: "busy").description == "simctl shutdown U failed: busy — the lease found the device shut down, so it is kept until the device is shut down again; release it again, or run xcrun simctl shutdown U and then release it")
     }
 }

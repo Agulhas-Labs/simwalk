@@ -123,6 +123,74 @@ struct RouteProbeSummaryTests {
         #expect(answer.residue.contains { $0.contains("nearby") && $0.contains("names location") })
     }
 
+    /// The dry run never turns the device to a state's orientation, so a state naming an `orientation` is probed without it: a qualification naming the screen, state and key (SimWalk#199).
+    @Test
+    func aScreenWithAStateNamingAnOrientationQualifiesTheAnswer() throws {
+        let json = #"""
+        {"name":"turned","appBundleID":"com.example.probe","screens":[
+          {"id":"home","route":[{"tab":{"label":"Home"}}],"states":[{"theme":"light"},{"theme":"light","orientation":"landscape"}]},
+          {"id":"plain","route":[{"tab":{"label":"Plain"}}],"states":[{"theme":"light"}]}
+        ]}
+        """#
+        let book = try WalkbookLoader.load(from: Data(json.utf8), source: "turned.json")
+        let gaps = RouteProbeSummary.LaunchConditionGap.all(in: book)
+
+        let answer = try RouteProbeSummary(RouteProbeFixture.report(of: book), launchConditionGaps: gaps).answer()
+
+        #expect(gaps == [
+            RouteProbeSummary.LaunchConditionGap(screenID: "home", axis: .orientation, probed: nil, unprobed: [book.screens[0].states[1].slug]),
+        ])
+        #expect(answer.verdict == .qualified(
+            ["1 route probed without the orientation its screen's states name"],
+            detail: "2 of 2 routes resolved · nothing captured"
+        ))
+        #expect(answer.residue.contains { $0.contains("home") && $0.contains("names orientation") && $0.contains("depends on orientation") })
+    }
+
+    /// The dry run aligns the device to a landscape-only app as a walk does, so its answer carries the same note (SimWalk#225).
+    @Test
+    func aProbeFileRecordingTurnedScreensPrintsTheDeviceTurnedNote() throws {
+        let book = try WalkbookLoader.load(from: Data(Self.twoScreens.utf8), source: "turned.json")
+
+        let answer = try RouteProbeSummary(RouteProbeFixture.report(of: book, deviceTurns: ["home"])).answer()
+
+        #expect(answer.residue.contains("⚠ " + DeviceAlignment.note(screens: ["home"])))
+    }
+
+    @Test
+    func aProbeFileRecordingNoTurnPrintsNoDeviceTurnedNote() throws {
+        let book = try WalkbookLoader.load(from: Data(Self.twoScreens.utf8), source: "turned.json")
+
+        for turns: [String]? in [nil, []] {
+            let answer = try RouteProbeSummary(RouteProbeFixture.report(of: book, deviceTurns: turns)).answer()
+
+            #expect(!answer.residue.contains { $0.contains("device turned") })
+        }
+    }
+
+    @Test
+    func aProbeFileAnOlderRunnerWroteDecodesWithoutTheKey() throws {
+        let book = try WalkbookLoader.load(from: Data(Self.twoScreens.utf8), source: "turned.json")
+        let written = try CaptureBundle.encoder().encode(RouteProbeFixture.report(of: book, deviceTurns: ["home"]))
+        var object = try #require(JSONSerialization.jsonObject(with: written) as? [String: Any])
+        object["deviceTurns"] = nil
+        let older = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try CaptureBundle.decoder().decode(RouteProbeReport.self, from: older)
+
+        #expect(decoded.deviceTurns == nil)
+        #expect(!RouteProbeSummary(decoded).answer().residue.contains { $0.contains("device turned") })
+    }
+
+    private static var twoScreens: String {
+        #"""
+        {"name":"turned","appBundleID":"com.example.probe","screens":[
+          {"id":"home","route":[{"tab":{"label":"Home"}}],"states":[{"theme":"light"}]},
+          {"id":"plain","route":[{"tab":{"label":"Plain"}}],"states":[{"theme":"light"}]}
+        ]}
+        """#
+    }
+
     /// A screen whose states share arguments produces no gap.
     @Test
     func astatesSharingArgumentsProduceNoGap() throws {

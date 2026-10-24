@@ -15,10 +15,10 @@ public struct DiscoverResult: Equatable, Sendable {
     /// The bounds the crawl ran under.
     public let depth: Int
     public let maxScreens: Int
-    /// The drafted screens whose list may continue below the rows the app loaded, which were not read (``DiscoverClassifier/listMayContinue(_:)``).
-    public let belowTheFold: [String]
+    /// The drafted screens whose list may continue below the rows read (``DiscoverClassifier/listMayContinue(_:)``), each with why the crawl did not read on: the list was not dragged, or paging stopped short of its end.
+    public let belowTheFold: [OpenList]
 
-    public init(walkbook: Walkbook, skipped: [DiscoverSkip], duplicates: [Duplicate], depth: Int, maxScreens: Int, belowTheFold: [String] = []) {
+    public init(walkbook: Walkbook, skipped: [DiscoverSkip], duplicates: [Duplicate], depth: Int, maxScreens: Int, belowTheFold: [OpenList] = []) {
         self.walkbook = walkbook
         self.skipped = skipped
         self.duplicates = duplicates
@@ -77,7 +77,7 @@ public struct DiscoverResult: Equatable, Sendable {
                 lines.append("\(bound) reached: \(count) affordance\(count == 1 ? "" : "s") not visited")
             }
         }
-        lines += belowTheFold.map { "\($0): the list may continue below the rows the app loaded; rows there were not read" }
+        lines += belowTheFold.map { "\($0.screenID): the list may continue below the rows read; rows there were not read (\($0.why))" }
         lines += duplicates.map { "reached again as \($0.screenID): \($0.route.map(\.description).joined(separator: " → "))" }
         for (screen, entries) in AuditRowFormat.screensInOrder(skipped, screen: \.screenID) {
             lines.append("\(screen): \(entries.count) control\(entries.count == 1 ? "" : "s") not tapped")
@@ -88,6 +88,18 @@ public struct DiscoverResult: Equatable, Sendable {
 }
 
 public extension DiscoverResult {
+    /// A drafted screen whose list was left open.
+    struct OpenList: Equatable, Sendable {
+        public let screenID: String
+        /// Why the rows below were not read, as the line names it.
+        public let why: String
+
+        public init(screenID: String, why: String) {
+            self.screenID = screenID
+            self.why = why
+        }
+    }
+
     /// A route that reached a screen whose form was already drafted.
     struct Duplicate: Equatable, Sendable {
         /// The route that reached it again.

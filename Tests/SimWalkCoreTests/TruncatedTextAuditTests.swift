@@ -24,6 +24,14 @@ struct TruncatedTextAuditTests {
         TruncatedTextAudit(recognizer: FakeRecognizer(recognised: lines)).evaluate([capture(label: label)])
     }
 
+    /// A two-line title: the frame is tall enough for both lines at y 0.1 and 0.15 of an 800-pt screen.
+    private static func evaluateWrapped(_ lines: [MirrorTextLine], label: String) -> LabelRuleResult {
+        let title = AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 60, width: 150, height: 80), label: label)
+        let screen = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 400, height: 800), children: [title])
+        let capture = BundleAuditScope.Capture(screenID: "timeline", stateSlug: "light", tree: screen, screenshotURL: URL(fileURLWithPath: "/nonexistent/screen.png"))
+        return TruncatedTextAudit(recognizer: FakeRecognizer(recognised: lines)).evaluate([capture])
+    }
+
     @Test
     func aPrefixAndAnEllipsisOverALongerLabelFires() {
         let result = Self.evaluate([Self.line("Notific…")])
@@ -61,6 +69,43 @@ struct TruncatedTextAuditTests {
         let result = Self.evaluate([Self.line("Notific...")])
 
         #expect(result.findings.count == 1)
+    }
+
+    /// The recogniser reads a headline's curly quotes and apostrophes as straight ones (SimWalk#232); it does not pin which mark the label uses elsewhere.
+    @Test
+    func aStraightQuoteReadOverACurlyQuoteLabelFires() {
+        let label = "The Verge’s Duo Review: ‘Apple’s Folding Phone Is a Messy, Expensive Good Time’"
+        let lines = [Self.line("The Verge's Duo", y: 0.1), Self.line("Review: 'Apple's Fo...", y: 0.15)]
+
+        let result = Self.evaluateWrapped(lines, label: label)
+
+        #expect(result.findings.count == 1)
+        #expect(result.findings.first?.note == "reads \"The Verge's Duo Review: 'Apple's Fo...\"")
+    }
+
+    /// A row's unread dot read into the first line of its title (SimWalk#232); it does not pin a mark other than `•`.
+    @Test
+    func anUnreadDotReadIntoTheTitlesFirstLineStillFires() {
+        let label = "How We Got Duo Support in NetNewsWire for iOS"
+        let lines = [Self.line("• How We Got Duo", y: 0.1), Self.line("Support in NetNew...", y: 0.15)]
+
+        let result = Self.evaluateWrapped(lines, label: label)
+
+        #expect(result.findings.count == 1)
+    }
+
+    @Test
+    func aCurlyQuoteReadOverAStraightQuoteLabelFires() {
+        let result = Self.evaluate([Self.line("It’s a long ti…")], label: "It's a long time to wait")
+
+        #expect(result.findings.count == 1)
+    }
+
+    @Test
+    func aReadThatDiffersAfterQuoteFoldingIsNotAFinding() {
+        let result = Self.evaluate([Self.line("It's a lone ti…")], label: "It’s a long time to wait")
+
+        #expect(result.findings.isEmpty)
     }
 
     @Test

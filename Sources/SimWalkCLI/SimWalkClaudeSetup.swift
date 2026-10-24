@@ -38,8 +38,8 @@ struct SimWalkClaudeSetup {
     /// The MCP server half of the install.
     static let mcp = ClaudeMcpInstall(server: server)
 
-    /// The agent rule: the `SimWalk.md` that ships beside the binary, loaded on walkbooks, capture bundles and UI-test files.
-    static let rule = ClaudeRuleInstall(tool: .simwalk, shippedFileName: "SimWalk.md", shareDirectory: "simwalk", loadsOn: "a walkbook, capture bundle or UI-test file", installCommand: "simwalk install-hook")
+    /// The agent rule: the `SimWalk.md` that Homebrew and the release tarball ship beside the binary (no script writes it), loaded on walkbooks, capture bundles and UI-test files.
+    static let rule = ClaudeRuleInstall(tool: .simwalk, shippedFileName: "SimWalk.md", shareDirectory: "simwalk", loadsOn: "a walkbook, capture bundle or UI-test file", installCommand: "simwalk install-hook", shippedBy: "Homebrew or the release tarball", writtenBy: nil)
 }
 
 extension FieldworkTool {

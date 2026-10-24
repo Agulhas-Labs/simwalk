@@ -124,12 +124,12 @@ public struct BundleDiffRendering {
         diff.appleNotAudited.map { ["apple audit: not compared — the \($0.rawValue) was not audited"] } ?? []
     }
 
-    /// `StaticText 'General'`; `(no element)` for an issue Apple names no element for.
+    /// `StaticText 'General'`; for an issue with no element, the wording ``AppleElementCase/absentText(unreadable:elementsRead:)`` gives.
     static func appleElementText(_ flag: ScreenDiff.AppleFlag) -> String {
         switch (flag.elementType, flag.name) {
         case let (type?, name?): "\(type) '\(name)'"
         case let (type?, nil): type
-        default: "(no element)"
+        default: AppleElementCase.absentText(unreadable: flag.elementUnreadable, elementsRead: flag.elementsRead == true)
         }
     }
 

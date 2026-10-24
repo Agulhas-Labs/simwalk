@@ -16,6 +16,8 @@ struct UsageFailureKindTests {
 
         #expect(UsageFailureKind.of(noSuchDevice) == .inputRefused)
         #expect(UsageFailureKind.of(appNotInstalled) == .inputRefused)
+        let refusal = DeviceFamilyCheck.Refusal(bundleID: "com.example.app", families: [1], deviceName: "iPad", udid: "UDID-1")
+        #expect(UsageFailureKind.of(SimulatorError.iPhoneOnlyAppOnIPad(refusal)) == .inputRefused)
     }
 
     /// `simctl`, or the machine it runs on, not answering the way the walk needs — nothing any argument could have prevented.

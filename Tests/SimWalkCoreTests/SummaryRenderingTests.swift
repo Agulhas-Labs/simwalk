@@ -442,8 +442,8 @@ struct SummaryRenderingTests {
     func theRunnersFactoryCarriesLaunchResets() {
         let resets = [CaptureManifest.LaunchReset(state: "light", resources: ["location"])]
 
-        let filed = CaptureManifest.ScreenRecord.filed(id: "nearby", outcome: .captured, routeTaken: [], settleQuietMilliseconds: 250, launchResets: resets, boundElements: [])
-        let none = CaptureManifest.ScreenRecord.filed(id: "nearby", outcome: .captured, routeTaken: [], settleQuietMilliseconds: nil, launchResets: [], boundElements: [])
+        let filed = CaptureManifest.ScreenRecord.filed(id: "nearby", outcome: .captured, routeTaken: [], settleQuietMilliseconds: 250, launches: CaptureManifest.ScreenRecord.Launches(resets: resets, deviceTurns: []), boundElements: [])
+        let none = CaptureManifest.ScreenRecord.filed(id: "nearby", outcome: .captured, routeTaken: [], settleQuietMilliseconds: nil, launches: CaptureManifest.ScreenRecord.Launches(resets: [], deviceTurns: []), boundElements: [])
 
         #expect(filed == CaptureManifest.ScreenRecord(id: "nearby", outcome: .captured, routeTaken: [], settleQuietMilliseconds: 250, launchResets: resets, boundElements: []))
         #expect(filed.launchResets == resets)
@@ -469,11 +469,25 @@ struct SummaryRenderingTests {
         #expect(empty.boundElements == [])
     }
 
+    /// A screen whose record names device turns puts the `⚠ device turned` line in the summary, naming the screen and state; a bundle with none has no such line (SimWalk#222).
+    @Test
+    func aDeviceTurnIsDisclosedInTheSummary() {
+        var manifest = CaptureBundleTests.manifest()
+        manifest.screens = [CaptureManifest.ScreenRecord.filed(id: "home", outcome: .captured, routeTaken: [], settleQuietMilliseconds: nil, launches: CaptureManifest.ScreenRecord.Launches(resets: [], deviceTurns: ["light"]), boundElements: [])]
+        let turned = CaptureBundleSummary(CaptureBundle(url: URL(fileURLWithPath: "/tmp/example.simwalk"), manifest: manifest)).render()
+        manifest.screens = [CaptureManifest.ScreenRecord.filed(id: "home", outcome: .captured, routeTaken: [], settleQuietMilliseconds: nil, launches: CaptureManifest.ScreenRecord.Launches(resets: [], deviceTurns: []), boundElements: [])]
+        let none = CaptureBundleSummary(CaptureBundle(url: URL(fileURLWithPath: "/tmp/example.simwalk"), manifest: manifest)).render()
+
+        #expect(turned.contains("⚠ device turned"))
+        #expect(turned.contains("(states: home [light])"))
+        #expect(!none.contains("device turned"))
+    }
+
     /// The runner's `filed` factory carries `boundElements` through, an empty list as empty rather than absent.
     @Test
     func theRunnersFactoryCarriesBoundElements() {
-        let filed = CaptureManifest.ScreenRecord.filed(id: "a", outcome: .captured, routeTaken: [], settleQuietMilliseconds: nil, launchResets: [], boundElements: [Self.cell])
-        let none = CaptureManifest.ScreenRecord.filed(id: "a", outcome: .captured, routeTaken: [], settleQuietMilliseconds: nil, launchResets: [], boundElements: [])
+        let filed = CaptureManifest.ScreenRecord.filed(id: "a", outcome: .captured, routeTaken: [], settleQuietMilliseconds: nil, launches: CaptureManifest.ScreenRecord.Launches(resets: [], deviceTurns: []), boundElements: [Self.cell])
+        let none = CaptureManifest.ScreenRecord.filed(id: "a", outcome: .captured, routeTaken: [], settleQuietMilliseconds: nil, launches: CaptureManifest.ScreenRecord.Launches(resets: [], deviceTurns: []), boundElements: [])
 
         #expect(filed.boundElements == [Self.cell])
         #expect(none.boundElements == [])

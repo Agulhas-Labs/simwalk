@@ -362,6 +362,37 @@ struct WalkbookLoaderRefusalTests {
         #expect(walkbook.screens[0].route == [.tap(label: "Week {n}")])
     }
 
+    /// SimWalk#218: every problem one step can carry is worded for a session without the screen the loader borrows for it.
+    ///
+    /// `atLaunchAfterFirstStep` is left out: a session step is always step 0, which the check allows.
+    @Test
+    func everyProblemASessionStepCanCarryIsWordedWithoutTheBorrowedScreen() {
+        let steps: [Walkbook.RouteStep] = [
+            .tap(label: " "),
+            .type(label: "Name", text: "", replace: false),
+            .longPress(label: "Row", seconds: 99),
+            .swipe(label: nil, direction: "sideways"),
+            .tapPoint(label: nil, point: [1]),
+            .tapPoint(label: "Chart", point: [2, 0.5]),
+            .tapPoint(label: nil, point: [-3, 10]),
+            .tapPoint(label: nil, point: [0.5, 0.5]),
+            .tab(label: "Week {n}"),
+            .systemTap(label: "Allow {n}"),
+            .systemTap(label: "Allow", owner: .springboard),
+            .openURL(url: "not a url"),
+        ]
+
+        for step in steps {
+            let refusals = WalkbookLoader.refusals(inSessionStep: step)
+
+            #expect(!refusals.isEmpty, "\(step) carries no problem")
+            for refusal in refusals {
+                #expect(refusal.hasPrefix("the step "), "\(refusal)")
+                #expect(!refusal.contains("session step"), "\(refusal)")
+            }
+        }
+    }
+
     private static func walkbook(screen: String) -> String {
         #"{"name":"example","appBundleID":"com.example.app","screens":["# + screen + "]}"
     }

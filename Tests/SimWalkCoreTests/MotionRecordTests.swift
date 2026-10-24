@@ -41,7 +41,8 @@ struct MotionRecordTests {
 
         let manifest = try JSONDecoder().decode(CaptureManifest.self, from: Data(json.utf8))
 
-        #expect(manifest.formatVersion == CaptureManifest.currentFormatVersion)
+        #expect(manifest.formatVersion == 8)
+        #expect(CaptureManifest.readableFormatVersions.contains(manifest.formatVersion))
         #expect(manifest.screens[0].captures[0].motion == CaptureManifest.Motion(settleMilliseconds: 500, readIntervalMilliseconds: 250, readCount: 4))
         #expect(manifest.screens[0].captures[1].motion == nil)
     }
@@ -72,12 +73,12 @@ struct MotionRecordTests {
         #expect(bare.motion == nil)
     }
 
-    /// The route's last step tells the watch whether a scroll was asked for: a `scrollTo` or a `systemTap`, never a navigating step or no route.
+    /// The route's last step tells the watch whether a scroll was asked for: a `scrollTo`, a `systemTap` or a `swipe` in any direction, never a navigating step or no route.
     @Test
-    func onlyAScrollToOrASystemTapLeavesTheWatchAfterAScroll() {
-        let steps: [Walkbook.RouteStep?] = [.scrollTo(label: "Row"), .systemTap(label: "Allow", atLaunch: false, owner: nil), .tap(label: "Row"), .openURL(url: "x://y"), nil]
+    func onlyAScrollingStepLeavesTheWatchAfterAScroll() {
+        let steps: [Walkbook.RouteStep?] = [.scrollTo(label: "Row"), .systemTap(label: "Allow", atLaunch: false, owner: nil), .swipe(label: nil, direction: "up"), .swipe(label: "Row", direction: "left"), .tap(label: "Row"), .openURL(url: "x://y"), nil]
 
-        #expect(steps.map { MotionWatch(lastStep: $0, landing: nil).afterScroll } == [true, true, false, false, false])
+        #expect(steps.map { MotionWatch(lastStep: $0, landing: nil).afterScroll } == [true, true, true, true, false, false, false])
     }
 
     /// A screen's `"motion": true` decodes, and a walkbook without it writes no `motion` key, so every walkbook already on disk hashes as it did.

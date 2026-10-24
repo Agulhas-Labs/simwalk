@@ -159,10 +159,12 @@ struct RunnerProjectShippedTests {
         #expect(flock(lock, LOCK_EX) == 0)
         defer { close(lock) }
 
+        let started = DispatchSemaphore(value: 0)
         let finished = DispatchSemaphore(value: 0)
         let failure = Failure()
         let (files, root) = (shipped.files(), shipped.root)
         DispatchQueue.global().async {
+            started.signal()
             do {
                 try RunnerStore(directory: runner).copy(files, from: root, to: snapshot, content: content)
             } catch {
@@ -170,6 +172,8 @@ struct RunnerProjectShippedTests {
             }
             finished.signal()
         }
+        // The copy is running before the window opens, so the window measures the copy rather than when the queue got to it.
+        #expect(started.wait(timeout: .now() + Self.ceiling) == .success)
         #expect(finished.wait(timeout: .now() + 0.4) == .timedOut, "the copy replaced the snapshot while another replace held the lock")
         // The other replacer, holding the lock, moves the stale snapshot away and its own fresh one into place.
         let fresh = directory.url.appendingPathComponent("fresh", isDirectory: true)
@@ -179,7 +183,7 @@ struct RunnerProjectShippedTests {
         try FileManager.default.moveItem(at: fresh, to: snapshot)
         let placed = try FileManager.default.attributesOfItem(atPath: snapshot.path)[.systemFileNumber] as? Int
         #expect(flock(lock, LOCK_UN) == 0)
-        #expect(finished.wait(timeout: .now() + 10) == .success)
+        #expect(finished.wait(timeout: .now() + Self.ceiling) == .success)
 
         let kept = try FileManager.default.attributesOfItem(atPath: snapshot.path)[.systemFileNumber] as? Int
         #expect(failure.error == nil)
@@ -224,6 +228,11 @@ struct RunnerProjectShippedTests {
 
     private static var otherHash: String {
         String(repeating: "5e", count: 32)
+    }
+
+    /// Seconds a wait that succeeds at once allows before it is called failed: far above any scheduling delay, since under a machine load of ~120 a global-queue block missed a 10-second budget (SimWalk#204), and only a hang ever spends it.
+    private static var ceiling: Double {
+        120
     }
 }
 

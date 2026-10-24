@@ -20,7 +20,9 @@ public struct UsageReport {
     ///
     /// `redacting` gates the header's log path independently of whether a `Redactor` ever gets built: an absolute path outside home routinely encodes a username or a review's own directory layout, and a log with nothing to redact must still not print it under `--unredact`'s default.
     public static func render(fileURL: URL, window: UsageWindow? = nil, redacting: Bool = false, redactor makeRedactor: @autoclosure () -> Redactor? = nil) throws -> Answer {
-        let read = try entries(at: fileURL)
+        let logged = try entries(at: fileURL)
+        // A `--parallel` walk's breakdown line is part of its `walk` call, which has a line of its own: counted, it would be a second call, and a second failure when the walk failed.
+        let read = (entries: logged.entries.filter { $0.tool != UsageLog.parallelTool }, malformed: logged.malformed)
         let calls = window.map { window in read.entries.filter { window.contains($0) } } ?? read.entries
         var header = "log: \(Self.reportedLogPath(fileURL, redacting: redacting))"
         // To the second, not the millisecond `Timestamp.string` carries: `window.start` is already floored

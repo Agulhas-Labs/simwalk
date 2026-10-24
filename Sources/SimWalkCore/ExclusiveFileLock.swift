@@ -20,6 +20,11 @@ public struct ExclusiveFileLock: Sendable {
 
     /// Runs `body` once the lock is held, waiting for as long as another holder keeps it, and releases it as `body` returns or throws.
     public func withLock<Value>(_ body: () throws -> Value) throws -> Value {
+        try withLock(whileWaiting: {}, body)
+    }
+
+    /// ``withLock(_:)``, calling `waiting` once before the wait when another holder has the lock, and never when it is free: how a caller says why it has gone quiet (SimWalk#242).
+    public func withLock<Value>(whileWaiting waiting: () -> Void, _ body: () throws -> Value) throws -> Value {
         let descriptor = file.hasDirectoryPath ? open(file.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC) : open(file.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else {
             throw failure()
@@ -28,12 +33,26 @@ public struct ExclusiveFileLock: Sendable {
             flock(descriptor, LOCK_UN)
             close(descriptor)
         }
-        while takeLock(descriptor, LOCK_EX) != 0 {
-            guard errno == EINTR else {
+        if !take(descriptor, LOCK_EX | LOCK_NB) {
+            guard errno == EWOULDBLOCK else {
+                throw failure()
+            }
+            waiting()
+            guard take(descriptor, LOCK_EX) else {
                 throw failure()
             }
         }
         return try body()
+    }
+
+    /// Whether `operation` took the lock, retrying a call a signal interrupted; on `false`, `errno` says why.
+    private func take(_ descriptor: Int32, _ operation: Int32) -> Bool {
+        while takeLock(descriptor, operation) != 0 {
+            guard errno == EINTR else {
+                return false
+            }
+        }
+        return true
     }
 
     private func failure() -> Unavailable {

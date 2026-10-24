@@ -1,0 +1,2 @@
+{"app_name":"xctest","timestamp":"2026-10-21 10:26:00.00 +0100","bug_type":"309","os_version":"macOS 27.0.1 (26A434)","name":"xctest"}
+{"procName":"xctest","procPath":"/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/xctest","captureTime":"2026-10-21 10:26:00.2500 +0100","parentProc":"launchd_sim","coalitionName":"com.apple.CoreSimulator.SimDevice.DEVICE","responsibleProc":"SimulatorTrampoline","exception":{"type":"EXC_CRASH","signal":"SIGABRT"}}

@@ -19,8 +19,54 @@ struct LiveScreenQueryTests {
         let second = try #require(answer.text.range(of: "Get Started · Button · 16,700 370×50"))
 
         #expect(first.lowerBound < second.lowerBound)
-        #expect(answer.text.contains("still need a screenshot (xcrun simctl io UDID-1 screenshot <file>.png)"))
+        #expect(answer.text.contains("still need a screenshot (--screenshot on this read, or screenshot: true over MCP)"))
         #expect(answer.text.contains("1 screenshot ("))
+    }
+
+    @Test
+    func aScreenshotLineSitsRightAfterTheScreenLineAndNothingElseMoves() throws {
+        let outcome = ScreenshotFit.Outcome.written(path: "/tmp/x.png", width: 402, height: 874, scale: 1, label: nil)
+        let line = ScreenshotFit.line(outcome)
+        let without = try LiveScreenQuery(Self.screen()).answer()
+        let with = try LiveScreenQuery(Self.screen()).answer(screenshot: outcome)
+
+        #expect(with.residue.first?.hasPrefix("screen ") == true)
+        #expect(with.residue[1] == line)
+        // Only the closing hint moves: a written screenshot is what it pointed to.
+        #expect(Array(with.residue.dropFirst(2).dropLast()) == Array(without.residue.dropFirst().dropLast()))
+        #expect(with.verdict == without.verdict)
+    }
+
+    /// A read of a screen whose tree has no text says its hash includes a pixel hash, on a line of its own after the screen line, so the `screen <hash>` line a guard is copied from keeps its form (SimWalk#223).
+    @Test
+    func aTextlessReadSaysItsHashIncludesAPixelHash() throws {
+        let frame = AXNode.Frame(x: 0, y: 0, width: 402, height: 874)
+        let canvas = AXNode(type: "Application", frame: frame, children: [AXNode(type: "Other", frame: frame)])
+        let pixels = try #require(PixelSignature(png: PixelSignatureTests.png()))
+
+        let textless = try LiveScreenQuery(Self.screen(tree: canvas, pixels: pixels)).answer()
+        let withText = try LiveScreenQuery(Self.screen()).answer()
+
+        #expect(textless.residue.first?.split(separator: " ").count == 2)
+        #expect(textless.residue[1] == "pixels: hashed (the tree has no text, so the screen hash includes a pixel hash), so a picture that moves moves the hash")
+        #expect(!withText.text.contains("pixels:"))
+    }
+
+    /// A written screenshot answers the visual question, so the text no longer says it still needs one and the read is not credited with one saved.
+    @Test
+    func aWrittenScreenshotChangesTheHintAndWeighsNoScreenshot() throws {
+        let written = ScreenshotFit.Outcome.written(path: "/tmp/x.png", width: 402, height: 874, scale: 1, label: nil)
+        let refused = ScreenshotFit.Outcome.refused("the runner sent no image")
+
+        let answer = try LiveScreenQuery(Self.screen()).answer(screenshot: written)
+        let kept = try LiveScreenQuery(Self.screen()).answer(screenshot: refused)
+
+        #expect(answer.text.contains("still need a look at the screenshot it wrote"))
+        #expect(!answer.text.contains("--screenshot on this read"))
+        #expect(answer.weighing == nil)
+        #expect(!answer.text.contains("1 screenshot ("))
+        #expect(kept.text.contains("still need a screenshot (--screenshot on this read, or screenshot: true over MCP)"))
+        #expect(kept.text.contains("1 screenshot ("))
     }
 
     @Test
@@ -77,7 +123,7 @@ struct LiveScreenQueryTests {
         #expect(try !#require(String(data: withoutData, encoding: .utf8)).contains("systemAlert"))
     }
 
-    private static func screen(state: LiveScreen.AppState = .foreground, tree: AXNode? = tree, settled: Bool? = true, systemAlert: LiveScreen.SystemAlert? = nil) -> LiveScreen {
+    private static func screen(state: LiveScreen.AppState = .foreground, tree: AXNode? = tree, settled: Bool? = true, systemAlert: LiveScreen.SystemAlert? = nil, pixels: PixelSignature? = nil) -> LiveScreen {
         LiveScreen(
             appBundleID: "com.example.live",
             device: CaptureManifest.Device(name: "iPhone 18 Pro", udid: "UDID-1", osVersion: "26.0"),
@@ -88,7 +134,8 @@ struct LiveScreenQueryTests {
             tree: tree,
             settled: tree == nil ? nil : settled,
             screenPixels: LiveScreen.Pixels(width: 1206, height: 2622),
-            systemAlert: systemAlert
+            systemAlert: systemAlert,
+            pixels: pixels
         )
     }
 

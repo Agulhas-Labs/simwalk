@@ -44,9 +44,9 @@ struct MCPClientModeTests {
         return try #require(responses.last, sourceLocation: sourceLocation)
     }
 
-    // MARK: Claude Code is unchanged
+    // MARK: Claude Code, a blocking client
 
-    /// The recorded fixture is what the server sent before bounded mode existed.
+    /// The recorded fixture is what a blocking client is sent: the list from before bounded mode, re-recorded when J13 cut its text.
     ///
     /// The comparison is of the parsed list re-serialised with sorted keys, so it pins the JSON, not the bytes the server wrote.
     @Test
@@ -273,7 +273,7 @@ extension MCPClientModeTests {
     }
 }
 
-private extension Data {
+extension Data {
     /// The fixture's one line, without its newline.
     var trimmedLine: Data {
         last == 0x0A ? dropLast() : self

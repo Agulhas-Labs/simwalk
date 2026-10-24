@@ -102,6 +102,21 @@ struct DoctorCommandTests {
         #expect(failing.lines.contains { $0.contains("hook") && $0.contains("fail") }, "\(failing.lines)")
         #expect(failing.status == 1)
     }
+
+    /// With `CLAUDE_CONFIG_DIR` set, the doctor's hook, server and rule checks read the install under it and pass (SimWalk#157).
+    @Test
+    func aClaudeInstallUnderClaudeConfigDirPasses() throws {
+        var scratch = try Scratch()
+        defer { scratch.remove() }
+        scratch.configDirectory = scratch.root.appendingPathComponent("moved-config", isDirectory: true)
+        try scratch.installClaude()
+
+        let report = try scratch.doctor(["--agent", "claude"])
+
+        #expect(report.status == 0, "\(report.lines)")
+        #expect(FileManager.default.fileExists(atPath: scratch.root.appendingPathComponent("moved-config/settings.json").path))
+        #expect(FileManager.default.fileExists(atPath: scratch.root.appendingPathComponent("moved-config/rules/simwalk.md").path))
+    }
 }
 
 extension DoctorCommandTests {
@@ -110,6 +125,9 @@ extension DoctorCommandTests {
         let root: URL
         let home: URL
         let cursor: URL
+
+        /// Where `CLAUDE_CONFIG_DIR` points, when the scratch machine sets it.
+        var configDirectory: URL?
 
         init() throws {
             root = FileManager.default.temporaryDirectory.appendingPathComponent("simwalk-doctor-tests-\(UUID().uuidString)", isDirectory: true)
@@ -124,7 +142,9 @@ extension DoctorCommandTests {
         }
 
         var environment: [String: String] {
-            ["HOME": home.path, "PATH": "/usr/bin:/bin"]
+            var values = ["HOME": home.path, "PATH": "/usr/bin:/bin"]
+            values["CLAUDE_CONFIG_DIR"] = configDirectory?.path
+            return values
         }
 
         /// The scratch machine: its home and its applications folder are the scratch's, so the real Cursor in /Applications is not found.
@@ -132,10 +152,9 @@ extension DoctorCommandTests {
             AgentDetection.Machine(environment: environment, applications: root.appendingPathComponent("Applications", isDirectory: true))
         }
 
-        /// The `simwalk` the package built, which sits beside the test bundle.
+        /// The `simwalk` the package built, which sits beside the test bundle in the products directory, wherever the scratch path put it.
         var binary: String {
-            let bundle = Bundle.allBundles.first { $0.bundleURL.pathExtension == "xctest" }
-            return (bundle?.bundleURL.deletingLastPathComponent() ?? URL(fileURLWithPath: ".build/debug")).appendingPathComponent("simwalk").path
+            Bundle(for: BundleToken.self).bundleURL.deletingLastPathComponent().appendingPathComponent("simwalk").path
         }
 
         /// `simwalk install --agent cursor` into the scratch Cursor directory, naming the built binary.
@@ -192,6 +211,9 @@ extension DoctorCommandTests {
             }
         }
     }
+
+    /// A class in this test target, so `Bundle(for:)` finds the bundle this test image was loaded from.
+    private final class BundleToken {}
 
     final class Printed: @unchecked Sendable {
         private let lock = NSLock()

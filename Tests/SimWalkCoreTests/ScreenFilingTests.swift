@@ -137,4 +137,44 @@ struct ScreenFilingTests {
     private static func evidence(_ theme: Walkbook.Theme, _ picture: String) -> StateApplicationCheck.Evidence {
         StateApplicationCheck.Evidence(state: Walkbook.CaptureState(theme: theme), screenshot: Data(picture.utf8))
     }
+
+    /// A state refused at launch joins the refused list and turns a captured screen into `stateNotApplied`, leading with an earlier refusal's reason (SimWalk#222 review).
+    @Test
+    func aStateRefusedAtLaunchIsRefusedWithoutACapture() {
+        let landscape = Walkbook.CaptureState(theme: .light, orientation: .portrait)
+        let captured = StateApplicationCheck.Filing(outcome: .captured, kept: [Walkbook.CaptureState(theme: .light)], refused: [])
+
+        let refused = captured.refusingAtLaunch([(landscape, "asked for portrait and the app kept a 820×1180 pt frame (landscape)")])
+
+        guard case let .stateNotApplied(reason) = refused.outcome else {
+            Issue.record("expected stateNotApplied, got \(refused.outcome)")
+            return
+        }
+
+        #expect(reason.contains("'\(landscape.slug)' asked for portrait"))
+        #expect(refused.refused == [landscape])
+        #expect(refused.kept == captured.kept)
+        #expect(captured.refusingAtLaunch([]) == captured)
+    }
+
+    /// A screen whose every state was refused at launch has no tree to check `expect` against: it is filed as the state refusal naming both states, not as a mismatch on nothing and not as a capture (SimWalk#225).
+    @Test
+    func aScreenWhoseEveryStateWasRefusedAtLaunchIsFiledAsTheRefusalNamingThem() {
+        let light = Walkbook.CaptureState(theme: .light, orientation: .portrait)
+        let dark = Walkbook.CaptureState(theme: .dark, orientation: .portrait)
+        let clause = "asked for portrait and the app kept a 820×1180 pt frame (landscape)"
+
+        let filing = ScreenFiling.decide(trees: [], evidence: [], expect: "activity-detail", instead: .captured)
+            .refusingAtLaunch([(light, clause), (dark, clause)])
+
+        guard case let .stateNotApplied(reason) = filing.outcome else {
+            Issue.record("expected stateNotApplied, got \(filing.outcome)")
+            return
+        }
+
+        #expect(reason.contains("'\(light.slug)' \(clause)"))
+        #expect(reason.contains("'\(dark.slug)' \(clause)"))
+        #expect(filing.refused == [light, dark])
+        #expect(filing.kept.isEmpty)
+    }
 }

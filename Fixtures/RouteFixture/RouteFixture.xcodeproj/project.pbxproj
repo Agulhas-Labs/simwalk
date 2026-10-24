@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0F19E9F3D149782BE6ED2292 /* CanvasRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0639CAE50955646C3022F68 /* CanvasRoot.swift */; };
 		9F198979D1940DBD53F9E6F3 /* FailureSpecimenUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CEEDA4A490E0CFEB2CCA00E /* FailureSpecimenUITests.swift */; };
 		D1AC34FB8062BF5262AD20E4 /* TabsRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130C776615CA0502700FFDDC /* TabsRoot.swift */; };
 		E49F77C264CE4121EE227051 /* RouteFixtureApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C381B9938D4797764C976755 /* RouteFixtureApp.swift */; };
@@ -29,6 +30,7 @@
 		2D6EB6B98A8C214A20E71ED5 /* RouteFixtureFailureSpecimen.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = RouteFixtureFailureSpecimen.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AAA785A543D1E4EF9C7F133F /* RouteFixture.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RouteFixture.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C381B9938D4797764C976755 /* RouteFixtureApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteFixtureApp.swift; sourceTree = "<group>"; };
+		E0639CAE50955646C3022F68 /* CanvasRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasRoot.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -44,6 +46,7 @@
 		52F8F3D514B29DC496B9D82F /* RouteFixture */ = {
 			isa = PBXGroup;
 			children = (
+				E0639CAE50955646C3022F68 /* CanvasRoot.swift */,
 				274E18F05B62645FE58448F1 /* Info.plist */,
 				C381B9938D4797764C976755 /* RouteFixtureApp.swift */,
 				130C776615CA0502700FFDDC /* TabsRoot.swift */,
@@ -151,6 +154,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0F19E9F3D149782BE6ED2292 /* CanvasRoot.swift in Sources */,
 				E49F77C264CE4121EE227051 /* RouteFixtureApp.swift in Sources */,
 				D1AC34FB8062BF5262AD20E4 /* TabsRoot.swift in Sources */,
 			);

@@ -5,6 +5,8 @@
 # accessibility text size the two draw over each other. At the default size, in light and dark, they do not touch.
 # `demo.walkbook.json` walks light, dark, an accessibility size and Arabic; a walk with the default off and one with
 # it on differ by exactly that regression. README.md says how to set the default and read the result.
+# A second screen, "Usage" (a row at the end of the list), draws three figures from a bundled download log for the value oracle:
+# `downloads.walkbook.json` and `downloads-oracle.sh`.
 #
 # A project of its own, like RouteFixture. The committed `.xcodeproj` builds without XcodeGen; this file documents
 # how it was made. Build and walk:

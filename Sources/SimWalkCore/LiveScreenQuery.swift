@@ -33,11 +33,21 @@ public struct LiveScreenQuery {
     /// The answer, or a refusal naming why there was nothing to read.
     ///
     /// - Parameter match: narrows the text to elements whose label or value contains it, case-insensitively.
-    public func answer(match: String? = nil) throws -> Answer {
+    /// - Parameter screenshot: what became of the screenshot, its line (``ScreenshotFit/line(_:)``) put right after the `screen <hash>` line.
+    public func answer(match: String? = nil, screenshot: ScreenshotFit.Outcome? = nil) throws -> Answer {
         guard let tree = screen.tree, screen.appState != .notRunning else {
             throw LiveScreenError.appNotRunning(bundleID: screen.appBundleID, udid: screen.device.udid)
         }
-        let text = BundleScreenQuery.text(of: tree, match: match, stillNeeding: "a screenshot (xcrun simctl io \(screen.device.udid) screenshot <file>.png)")
+        // A written screenshot answers the visual question the text hint would send to one, so the read stands in for no screenshot and weighs nothing.
+        let wrote = switch screenshot {
+        case .written: true
+        case .refused, nil: false
+        }
+        let text = BundleScreenQuery.text(
+            of: tree,
+            match: match,
+            stillNeeding: wrote ? "a look at the screenshot it wrote" : "a screenshot (--screenshot on this read, or screenshot: true over MCP)"
+        )
         let forward = screen.appState == .background ? " (brought forward from the background)" : ""
         let detail = "live read of \(screen.appBundleID)\(forward) — \(text.clause)"
         let qualifications = [
@@ -46,9 +56,14 @@ public struct LiveScreenQuery {
         return Answer(
             header: header,
             verdict: AnswerVerdict.reporting(qualifications: qualifications, detail: detail),
-            residue: ["screen \(ScreenHash.of(tree))"] + text.residue + (notes.isEmpty ? [] : [""] + notes),
-            weighing: screen.screenPixels.map { ContextSaving(screenshotTokens: [ImageTokenEstimate.tokens(width: $0.width, height: $0.height)], treeBytes: 0, servedBytes: 0) }
+            residue: ["screen \(ScreenHash.of(tree, pixels: screen.pixels))"] + [screenshot.map(ScreenshotFit.line), pixelsLine].compactMap(\.self) + text.residue + (notes.isEmpty ? [] : [""] + notes),
+            weighing: wrote ? nil : screen.screenPixels.map { ContextSaving(screenshotTokens: [ImageTokenEstimate.tokens(width: $0.width, height: $0.height)], treeBytes: 0, servedBytes: 0) }
         )
+    }
+
+    /// A text-less screen's hash moves with its picture, which a read would otherwise not say: a step says it on its delta's `pixels:` line, and an agent comparing two reads of an animating screen needs it as much (SimWalk#223).
+    private var pixelsLine: String? {
+        screen.pixels == nil ? nil : "pixels: hashed (\(ScreenDelta.pixelHashReason)), so a picture that moves moves the hash"
     }
 
     private var header: String {

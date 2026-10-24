@@ -4,7 +4,7 @@
 
 import SwiftUI
 
-/// The demo's one screen: an "Account" list of title and value rows.
+/// The demo's first screen: an "Account" list of title and value rows, ending in a link to the usage screen.
 struct AccountScreen: View {
     private let rows: [(title: LocalizedStringKey, value: LocalizedStringKey)] = [
         ("Storage", "12.4 GB of 50 GB"),
@@ -29,6 +29,7 @@ struct AccountScreen: View {
                         identifier: "row-title-\(index)"
                     )
                 }
+                NavigationLink("Usage") { UsageScreen() }
             }
             .accessibilityIdentifier("account-list")
             .navigationTitle("Account")

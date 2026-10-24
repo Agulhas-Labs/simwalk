@@ -37,6 +37,12 @@ struct AXTreeCapture {
     }
 
     @MainActor
+    private static func placeholder(of snapshot: XCUIElementSnapshot) -> String? {
+        guard RouteTarget.textEntryTypes.contains(name(of: snapshot.elementType)) else { return nil }
+        return snapshot.placeholderValue.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    @MainActor
     private static func node(from snapshot: XCUIElementSnapshot) -> AXNode {
         AXNode(
             type: name(of: snapshot.elementType),
@@ -51,6 +57,9 @@ struct AXTreeCapture {
             label: snapshot.label.isEmpty ? nil : snapshot.label,
             identifier: snapshot.identifier.isEmpty ? nil : snapshot.identifier,
             value: (snapshot.value as? String).flatMap { $0.isEmpty ? nil : $0 },
+            // Only where an element takes text, and only when it has one: a placeholder is the only name a
+            // filled SwiftUI text field exposes, and no other node's bytes should change for it (SimWalk#212).
+            placeholder: placeholder(of: snapshot),
             // The two traits that separate one row from another row drawn the same way. Without them a
             // selected pill and its four unselected siblings serialise identically, so a bundle audit
             // cannot tell an app that never exposes selection from a capture that never recorded it —

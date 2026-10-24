@@ -202,6 +202,13 @@ Every problem names its subject — a screen id, a step index, a slug — and a 
 rather than the first, because an author fixing a walkbook one refusal per run is the loop this tool
 exists to remove.
 
+## A value compared across two paths comes from one function
+A runner value the core compares across two paths (a screen hash and the guard it is later checked against) comes
+from one runner function, not from two XCTest calls that look alike. `XCUIScreen.main.screenshot()` and
+`app.screenshot()` differ in grid and orientation on a rotated device or a windowed app, so a read that hashes one
+and a step that hashes the other refuse every guard on an untouched screen. The core takes the value as an injected
+closure and a test pins that the closure, not the source's own call, is used (SimWalk#150).
+
 ## Determinism
 The runner executes a plan; it never improvises navigation. Anything time- or randomness-dependent
 takes its inputs explicitly (no naked `Date()`/`Date.now` in core logic paths) so a walk is
@@ -215,3 +222,9 @@ dispatch signal source hears a signal before its delivery to a thread has finish
 puts `SIG_DFL` back can lose the race and the process dies of that signal, even one whose default is to
 discard it (`SIGURG`, `SIGIO`). Every test beside it then ends unreported, with no crash report to say
 why (SimWalk#133).
+
+## A test that pins a fix fails without it
+Show it by setting the fix aside and running the test: one that passes either way pins nothing. The
+package builds with every warning an error, so the set-aside must compile clean, or the run fails to
+build and proves nothing. Make a condition never hold with a form the compiler does not flag
+(`x == !x`), never by leaving a binding or a capture unused.

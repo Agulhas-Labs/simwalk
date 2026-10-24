@@ -36,8 +36,12 @@ public struct RouteProbeSummary {
         var residue = report.probes.enumerated().map { Self.probeLine($0.element, position: $0.offset + 1) }
         residue += launchConditionGaps.map(\.line)
         residue.append(Self.scopeLine)
-        if !notes.isEmpty {
-            residue += [""] + notes
+        var lines = notes
+        if let turned = report.deviceTurns, !turned.isEmpty {
+            lines += (lines.isEmpty ? [] : [""]) + ["⚠ " + DeviceAlignment.note(screens: turned)]
+        }
+        if !lines.isEmpty {
+            residue += [""] + lines
         }
         return Answer(header: header, verdict: verdict, residue: residue)
     }
@@ -73,6 +77,7 @@ public struct RouteProbeSummary {
         let environmentGapCount = launchConditionGaps.filter { $0.axis == .environment }.count
         let resetGapCount = launchConditionGaps.filter { $0.axis == .resetPermissions }.count
         let locationGapCount = launchConditionGaps.filter { $0.axis == .location }.count
+        let orientationGapCount = launchConditionGaps.filter { $0.axis == .orientation }.count
         let stated = [
             AnswerVerdict.qualification(counts.drifted, "route", "drifted from the app"),
             AnswerVerdict.qualification(counts.snapshotBlind, "route", "drifted behind a system sheet the app's snapshot cannot see"),
@@ -82,6 +87,7 @@ public struct RouteProbeSummary {
             AnswerVerdict.qualification(environmentGapCount, "route", "not probed under every environment its screen is walked under"),
             AnswerVerdict.qualification(resetGapCount, "route", "probed without the permission reset its screen's states name"),
             AnswerVerdict.qualification(locationGapCount, "route", "probed without the location its screen's states name"),
+            AnswerVerdict.qualification(orientationGapCount, "route", "probed without the orientation its screen's states name"),
         ].compactMap(\.self) + qualifications
         return AnswerVerdict.reporting(
             qualifications: stated,
@@ -133,7 +139,7 @@ public extension RouteProbeSummary {
         public let probed: String?
         /// For `.locale`, the other locales its states name, in walkbook order, each once (`nil` is the device's own).
         ///
-        /// For `.arguments`/`.environment`, the slug of every other state whose value differs from the first state's; for `.resetPermissions`/`.location`, the slug of every state that names one, the first's included — in walkbook order.
+        /// For `.arguments`/`.environment`, the slug of every other state whose value differs from the first state's; for `.resetPermissions`/`.location`/`.orientation`, the slug of every state that names one, the first's included — in walkbook order.
         public let unprobed: [String?]
 
         public init(screenID: String, axis: Axis, probed: String?, unprobed: [String?]) {
@@ -179,6 +185,11 @@ public extension RouteProbeSummary {
                     gaps.append(LaunchConditionGap(screenID: screen.id, axis: .location, probed: nil, unprobed: locationSlugs))
                 }
 
+                let orientationSlugs = screen.states.filter { $0.orientation != nil }.map { $0.slug as String? }
+                if !orientationSlugs.isEmpty {
+                    gaps.append(LaunchConditionGap(screenID: screen.id, axis: .orientation, probed: nil, unprobed: orientationSlugs))
+                }
+
                 return gaps
             }
         }
@@ -191,10 +202,14 @@ public extension RouteProbeSummary {
             case .arguments, .environment:
                 let slugs = unprobed.compactMap(\.self).map { "'\($0)'" }.joined(separator: ", ")
                 return "  ⚠ \(screenID) — probed under the first state's \(axis.rawValue) only; a walk also follows state \(slugs) under other \(axis.rawValue), which this run did not check"
-            case .resetPermissions, .location:
-                // The dry run must not change the device (the walk's reset and simulated location are the changes), so it probes without them.
+            case .orientation:
+                // The dry run turns the device only to match a landscape-only app (SimWalk#225), never to a state's orientation, so the route is followed in the device's own.
                 let slugs = unprobed.compactMap(\.self).map { "'\($0)'" }.joined(separator: ", ")
-                return "  ⚠ \(screenID) — state \(slugs) names \(axis.rawValue), which this run probed without (a dry run never changes the device), so a `systemTap` answering that permission, or content that depends on location, may read differently in the walk"
+                return "  ⚠ \(screenID) — state \(slugs) names \(axis.rawValue), which this run probed without (a dry run turns the device only to match a landscape-only app, and turns it back), so content that depends on orientation may read differently in the walk"
+            case .resetPermissions, .location:
+                // The dry run must not change the device's permissions or location (the walk's reset and simulated location are the changes), so it probes without them.
+                let slugs = unprobed.compactMap(\.self).map { "'\($0)'" }.joined(separator: ", ")
+                return "  ⚠ \(screenID) — state \(slugs) names \(axis.rawValue), which this run probed without (a dry run changes neither), so a `systemTap` answering that permission, or content that depends on location, may read differently in the walk"
             }
         }
 
@@ -214,5 +229,7 @@ public extension RouteProbeSummary.LaunchConditionGap {
         case resetPermissions
         /// A state's `location` — never applied by a dry run (SimWalk#62 item 1).
         case location
+        /// A state's `orientation` — never applied by a dry run, which does not turn the device (SimWalk#199).
+        case orientation
     }
 }

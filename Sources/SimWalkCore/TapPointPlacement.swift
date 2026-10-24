@@ -45,7 +45,8 @@ public enum TapPointPlacement: Equatable, Sendable {
         return .point(x: x, y: y)
     }
 
-    private static func size(_ frame: AXNode.Frame) -> String {
+    /// `W×H`, the way a refusal and a `session step` answer name a frame.
+    static func size(_ frame: AXNode.Frame) -> String {
         "\(Walkbook.RouteStep.rendered([frame.width]))×\(Walkbook.RouteStep.rendered([frame.height]))"
     }
 

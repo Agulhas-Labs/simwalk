@@ -47,6 +47,25 @@ struct RunnerInvocationTests {
         #expect(call.arguments.suffix(2) == ["-resultBundlePath", "/runner/dd/Logs/Test/one.xcresult"])
     }
 
+    /// A live read names a screenshot output only when it is given one, so a read that wants no PNG sets no key the runner would act on.
+    @Test
+    func aliveReadSetsTheScreenshotOutputOnlyWhenGivenAPath() throws {
+        var environments: [[String: String]] = []
+        let shell = Shell(script: { _, _, environment in
+            environments.append(environment)
+            return Shell.Result(status: 0, standardOutput: "", standardError: "")
+        })
+        let runner = RunnerInvocation(projectPath: "/runner/SimWalkRunner.xcodeproj", derivedDataPath: "/runner/dd", shell: shell)
+        let simulator = Simulator(udid: "UDID-1", name: "iPhone 17 Pro", osVersion: "26.5", isBooted: true)
+
+        try runner.inspect(appBundleID: "a", outputPath: "/o.json", logFilePath: nil, runnerCommit: nil, nonce: "n", on: simulator)
+        try runner.inspect(appBundleID: "a", outputPath: "/o.json", logFilePath: nil, runnerCommit: nil, nonce: "n", screenshotPath: "/o.png", on: simulator)
+
+        #expect(environments.count == 2)
+        #expect(environments[0]["TEST_RUNNER_SIMWALK_SCREENSHOT_OUTPUT"] == nil)
+        #expect(environments[1]["TEST_RUNNER_SIMWALK_SCREENSHOT_OUTPUT"] == "/o.png")
+    }
+
     /// A runner that fails is never followed by a sysdiagnose: `xcodebuild` would otherwise spend up to ten minutes on `simctl diagnose` before the walk hears of a failure that has already happened (SimWalk#54).
     @Test
     func therunnerNeverCollectsTestDiagnostics() throws {
@@ -75,7 +94,7 @@ struct RunnerInvocationTests {
         let runner = RunnerInvocation(projectPath: "/runner/SimWalkRunner.xcodeproj", derivedDataPath: "/runner/dd", shell: shell)
         let simulator = Simulator(udid: "UDID-1", name: "iPhone 17 Pro", osVersion: "26.5", isBooted: true)
 
-        #expect(throws: RunnerError.walkFailed(reason: "WalkRunner.swift:40: error: SIMWALK_NONCE not set")) {
+        #expect(throws: RunnerError.walkFailed(reason: "WalkRunner.swift:40: error: SIMWALK_NONCE not set", status: 65)) {
             try runner.inspect(appBundleID: "com.example.app", outputPath: "/scratch/live.json", logFilePath: nil, runnerCommit: nil, nonce: "NONCE-1", on: simulator)
         }
     }

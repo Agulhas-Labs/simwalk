@@ -37,6 +37,8 @@ struct AppearanceRetryPass {
     let walk: (_ walkbookPath: String, _ outputPath: String, _ nonce: String) throws -> Void
     /// The runner's own account of why the second runner failed, read from the result bundle `walk` named for it — asked only when that runner failed and left nothing to read, as the first pass's is (SimWalk#70).
     var diagnose: () -> [String] = { [] }
+    /// What the second runner's failure comes to as XCTest's crash blame (SimWalk#176), asked only of one whose bundle was folded in.
+    var blameCrashes: (Error) -> XCTestCrashBlame = { _ in .notApplicable }
 
     /// Settles and walks again the screens of `first` that refused on appearance, folding the result into `first` on disk; `nil` when no screen needs it, which is every walk on a device that drew what it reported.
     ///
@@ -86,7 +88,7 @@ struct AppearanceRetryPass {
         }
         afterSettle()
         let second = secondPass(of: book, folding: first, settle: settle, run: run, now: now)
-        return Outcome(report: second.report, firstReset: firstReset, secondRunnerRan: true, lastRunnerFinished: second.lastRunnerFinished)
+        return Outcome(report: second.report, firstReset: firstReset, secondRunnerRan: true, lastRunnerFinished: second.lastRunnerFinished, retryTimeouts: second.timeouts)
     }
 
     /// Puts the device back in the appearance the walk found it in, from the host, after a second runner that left nothing to read — a runner that stopped short may have stopped before its own last reset (SimWalk#68).
@@ -111,13 +113,15 @@ struct AppearanceRetryPass {
     /// **The scratch bundle is written inside `first`** (`CaptureBundleLayout.retryScratchDirectory`, the round-3 review), so every move the fold makes is a rename on one volume. **It is removed whichever way it went but two.** After a fold, or a fold undone, it holds its own manifest, the declined screens' artefacts and whatever of the first attempt the fold set aside. After a fold that could not be undone it holds the only copy of the first attempt, so it is kept and the answer says where; and after a fold undone whose record could not be written over the first attempt afterwards, it is kept too and named — whatever that write found wrong with the bundle, the scratch bundle holds what the fold set aside.
     ///
     /// **A second runner that left nothing to read is followed by a put-back from the host** (SimWalk#68): it may have stopped before its last reset, and nothing of its walk is kept, so the device is put back to `found` here rather than left at whatever the runner last set — and the answer names the pass's failure as the reason, instead of reading the device afterwards as evidence about resets no kept capture rests on.
+    ///
+    /// **The second runner's timed-out audits are read before the scratch bundle goes** (SimWalk#193), as ``TestManagerRestart/timeouts(in:orRecordedIn:)`` reads the first runner's: a runner that crashed before it finalised its manifest leaves them only there, and the device is still computing them.
     private func secondPass(
         of book: Walkbook,
         folding first: CaptureBundle,
         settle: CaptureManifest.AppearanceSettle,
         run: (String, [String], TimeInterval) throws -> Shell.Result,
         now: () -> Date
-    ) -> (report: Report, lastRunnerFinished: Bool) {
+    ) -> SecondPass {
         let output = CaptureBundleLayout.retryScratchDirectory(in: first.url, id: UUID())
         var keepsScratch = false
         defer {
@@ -132,7 +136,7 @@ struct AppearanceRetryPass {
             // No second runner launched: the last runner to run is the first, whose bundle was read.
             let reason = "\(error)"
             _ = record(settle, secondPassFailure: reason, in: first)
-            return (.retryFailed(reason: reason, keptAt: nil), true)
+            return SecondPass(report: .retryFailed(reason: reason, keptAt: nil), lastRunnerFinished: true, timeouts: [])
         }
         defer { WalkCommand.discardTemporary(executed.temporaryURL) }
 
@@ -147,24 +151,27 @@ struct AppearanceRetryPass {
         } catch {
             runnerFailure = error
         }
+        let read = Result { try WalkCommand.bundleWrittenBy(walkLaunchedAt: launchedAt, buildHash: buildHash, nonce: retryNonce, at: output) }
+        let timeouts = TestManagerRestart.timeouts(in: read, orRecordedIn: output)
         let second: CaptureBundle
         do {
-            second = try WalkCommand.bundleWrittenBy(walkLaunchedAt: launchedAt, buildHash: buildHash, nonce: retryNonce, at: output)
+            second = try read.get()
         } catch {
             // A second runner that left no readable bundle may have stopped before its last reset.
             let reason = "\(runnerFailure ?? error)"
             _ = record(settle, secondPassFailure: reason, in: first)
-            return (.runnerLeftNothing(reason: reason, runnerFailed: runnerFailure != nil, putBack: putBack(run: run), diagnosis: runnerFailure == nil ? [] : diagnose()), false)
+            return SecondPass(report: .runnerLeftNothing(reason: reason, runnerFailed: runnerFailure != nil, putBack: putBack(run: run), diagnosis: runnerFailure == nil ? [] : diagnose()), lastRunnerFinished: false, timeouts: timeouts)
         }
         // From here the second runner is known to have finished, folded in or not: the runner resets the device and only
         // then finalises its manifest, and a fold is refused for what a bundle says, never for how its runner ended.
         do {
             try AppearanceRetry.fold(second, into: first, settle: settle, fileManager: fileManager)
-            return (.folded(runnerFailure: runnerFailure.map { "\($0)" }), true)
+            let crashes = runnerFailure.map(blameCrashes) ?? .notApplicable
+            return SecondPass(report: .folded(runnerFailure: crashes.isExcused ? nil : runnerFailure.map { "\($0)" }, xctestCrashes: crashes.line), lastRunnerFinished: true, timeouts: timeouts)
         } catch {
             if let notUndone = error as? AppearanceRetryError, case .foldNotUndone = notUndone {
                 keepsScratch = true
-                return (.foldNotUndone(reason: "\(notUndone)"), true)
+                return SecondPass(report: .foldNotUndone(reason: "\(notUndone)"), lastRunnerFinished: true, timeouts: timeouts)
             }
             // The fold's own refusal is the reason a bundle that was read back left nothing to fold in — a runner
             // exit beside it is worth keeping too, but recording only the exit and losing why the fold refused the
@@ -176,9 +183,9 @@ struct AppearanceRetryPass {
             let recorded = record(settle, secondPassFailure: reason, in: first)
             guard recorded || !undone else {
                 keepsScratch = true
-                return (.retryFailed(reason: reason, keptAt: output.path), true)
+                return SecondPass(report: .retryFailed(reason: reason, keptAt: output.path), lastRunnerFinished: true, timeouts: timeouts)
             }
-            return (.retryFailed(reason: reason, keptAt: nil), true)
+            return SecondPass(report: .retryFailed(reason: reason, keptAt: nil), lastRunnerFinished: true, timeouts: timeouts)
         }
     }
 
@@ -193,6 +200,13 @@ struct AppearanceRetryPass {
 }
 
 extension AppearanceRetryPass {
+    /// What the second pass came to: its report, whether the last runner to run is known to have finished, and the timed-out audits the second runner recorded.
+    private struct SecondPass {
+        let report: Report
+        let lastRunnerFinished: Bool
+        let timeouts: [AppleAuditScan.Failure]
+    }
+
     /// What the pass came to, and the first runner's reset it read on the way.
     struct Outcome {
         let report: Report
@@ -204,6 +218,8 @@ extension AppearanceRetryPass {
         ///
         /// Round 3 read this as "the second attempt was folded", so a readable second bundle the fold refused made the reset read as inconclusive where it was known.
         let lastRunnerFinished: Bool
+        /// The timed-out audits the second runner recorded, read from its scratch bundle before the pass removed it (SimWalk#193); none when no second runner ran.
+        var retryTimeouts: [AppleAuditScan.Failure] = []
 
         /// The bound on each call the handback makes: `DeviceSettle.handbackBound` after a settle that stopped short, when the device may be down or wedged; `nil` otherwise, the handback running as in any walk.
         var handbackBound: TimeInterval? {
@@ -223,8 +239,8 @@ extension AppearanceRetryPass {
 
     /// What became of the refused screens.
     enum Report: Equatable {
-        /// Walked again and folded in — recorded in the manifest's `appearanceSettle`; the payload is the second runner's own failure, when its bundle survived one.
-        case folded(runnerFailure: String?)
+        /// Walked again and folded in — recorded in the manifest's `appearanceSettle`; the payload is the second runner's own failure, when its bundle survived one, and what that failure came to as XCTest's crash blame (``XCTestCrashBlame/line``), when it was that: `runnerFailure` is `nil` for one excused.
+        case folded(runnerFailure: String?, xctestCrashes: String? = nil)
         /// The settle stopped at a step; nothing was walked again.
         case settleFailed(DeviceSettle.Outcome)
         /// The settle held and the second pass left nothing that could be folded in; the first attempt's refusals stand.
@@ -245,7 +261,7 @@ extension AppearanceRetryPass {
         /// What this qualifies the walk's answer by — every way the walk meant to recover these screens and did not, and nothing when it did.
         var qualification: String? {
             switch self {
-            case .folded(runnerFailure: nil):
+            case .folded(runnerFailure: nil, _):
                 nil
             case .folded:
                 "a runner failure the appearance retry survived"
@@ -267,10 +283,10 @@ extension AppearanceRetryPass {
         /// `recorded` is whether the bundle's manifest carries the settle — then its own lines say what happened, and these add only what a file cannot: the second runner's failure, the command that leaves the device usable, and a scratch bundle kept inside the bundle.
         func notes(udid: String, recorded: Bool) -> [String] {
             switch self {
-            case .folded(runnerFailure: nil):
-                []
-            case let .folded(runnerFailure?):
-                ["⚠ the runner reported a failure walking the refused screens again after the appearance settle, and its bundle survived it — those screens above are what it recorded: \(runnerFailure)"]
+            case let .folded(runnerFailure: nil, crashes):
+                [crashes].compactMap(\.self)
+            case let .folded(runnerFailure?, crashes):
+                ["⚠ the runner reported a failure walking the refused screens again after the appearance settle, and its bundle survived it — those screens above are what it recorded: \(runnerFailure)"] + [crashes].compactMap(\.self)
             case let .settleFailed(outcome):
                 [recorded ? outcome.remedyNote(udid: udid) : outcome.note(udid: udid)].compactMap(\.self)
             case let .retryFailed(reason, keptAt):

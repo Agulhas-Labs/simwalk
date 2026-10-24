@@ -109,75 +109,22 @@ struct StepPerformer {
             element.tap()
             return try StepResult(arrived(leaving: departed, in: app, budget: budget))
         case let .tap(label):
-            // A label the tree does not hold yet is swiped towards, as `scrollTo` does (SimWalk#104).
-            var search = ScrollSearch(label: label, limit: Self.scrollAttempts)
-            let (choice, stopped) = try TargetResolution.resolveSeeking(label, reaching: .control, search: &search, in: app, quiet: quiet, budget: budget)
-            if let stopped {
-                return .blocked(reason: stopped)
+            return try tapElement(label, gesture: .tap)
+        case let .longPress(label, seconds):
+            return try tapElement(label, gesture: .press(seconds))
+        case let .swipe(label, direction):
+            return try swipe(direction, on: label)
+        case let .type(label, text, replace):
+            if replace {
+                return try replaceText(in: label, with: text)
             }
-            guard case .chosen = choice else {
-                return .blocked(reason: choice.reason(for: label))
+            let field: TextEntry
+            do {
+                field = try bindTextEntry(label)
+            } catch let refusal as TextEntry.Refusal {
+                return refusal.result
             }
-            let binding = try TargetResolution.bind(choice, labelled: label, in: app, quiet: quiet, budget: budget) {
-                TargetResolution.element(for: $0, labelled: label, in: app)
-            }
-            guard case let .element(element, target, bound) = binding else {
-                return .blocked(reason: binding.refusal(doing: "tapped"))
-            }
-            // A row the seek swiped into the tree sits at the fold, under the tab bar a tap there would land on.
-            if search.swipes > 0, case let .blocked(reason, _) = try BarClearance.clearOfBars(element, as: target, in: app) {
-                return .blocked(reason: reason)
-            }
-            let before = try AXTreeCapture.tree(of: app)
-            let departed = ScreenIdentity.of(before)
-            // A keyboard key is judged by the focused field as well (SimWalk#94): a keystroke changes that
-            // field's value and nothing `ScreenIdentity` hashes, so identity alone refused every digit
-            // typed on a number pad that had in fact landed. A Return exposed as a button inside the keyboard
-            // is a key too (SimWalk#96), which is why the core decides it from the tree.
-            guard TypedTextLanding.isKey(target.node, in: before) else {
-                // SimWalk#125 and #95 are decided in the core (`TapLanding`): an element selected in the snapshot
-                // and live, hittable now, under a navigation bar naming the label in the tree read above, has landed
-                // even if the tap changes nothing, its destination already on screen (an iPad sidebar row opened
-                // selected). The live reads go through `liveRead`, as the `tab` step's do, and only for an element
-                // the snapshot read as selected, the one case they decide: a covered element reads false and is
-                // refused as before, and every other tap is spared a live query.
-                // Hittability is polled to a short deadline, as the tab path's is: a row can be read while the
-                // screen is still settling, and one read would call it covered (SimWalk#126).
-                let selected = target.node.isSelected && Self.liveRead(or: false) { element.isSelected }
-                var hittable = selected && Self.liveRead(or: false) { element.isHittable }
-                let hittableDeadline = Date().addingTimeInterval(Self.selectedHittableWait)
-                while selected, !hittable, Date() < hittableDeadline {
-                    Thread.sleep(forTimeInterval: Self.settleInterval)
-                    hittable = Self.liveRead(or: false) { element.isHittable }
-                }
-                element.tap()
-                let landing = try TapLanding.decide(
-                    arrived: arrived(leaving: departed, in: app, budget: budget),
-                    wasSelected: selected,
-                    hittable: hittable,
-                    titled: TapLanding.destinationTitled(label: label, in: before, tapped: target.node)
-                )
-                return landing == .notLanded ? .blocked(reason: bound.reason(for: label)) : .landedOn(target.node)
-            }
-            let focusedBefore = Self.focusedFieldValue(in: app)
-            element.tap()
-            let landed = try keyLanded(leaving: departed, focusedBefore: focusedBefore, in: app, budget: budget)
-            return landed ? .landedOn(target.node) : .blocked(reason: bound.keyReason(for: label, fieldHadFocus: focusedBefore != .none || Self.focusedFieldValue(in: app) != .none))
-        case let .type(label, text):
-            // Resolved among text-entry elements only. The first node in tree order carrying the label
-            // is routinely the container a search field is drawn inside — and `typeText` on a container
-            // is an *XCTest failure*, which fails the whole walk rather than returning something this
-            // loop could report as a step that did not land.
-            let choice = try TargetResolution.resolve(label, reaching: .textEntry, in: app, quiet: quiet, budget: budget)
-            guard case .chosen = choice else {
-                return .blocked(reason: choice == .none ? nil : choice.reason(for: label))
-            }
-            let binding = try TargetResolution.bind(choice, labelled: label, in: app, quiet: quiet, budget: budget) {
-                TargetResolution.textEntry(for: $0, in: app)
-            }
-            guard case let .element(element, target, _) = binding else {
-                return .blocked(reason: binding.refusal(doing: "typed into"))
-            }
+            let (element, target) = (field.element, field.target)
             // Read before the field is touched, because an empty field reports its *placeholder* as its
             // value — so `type 'terms' into 'Search items, examples, terms…'` would read back a value
             // containing the text without a keystroke having landed. The evidence is the change.
@@ -243,6 +190,8 @@ struct StepPerformer {
             }
         case let .tapPoint(label, point):
             return try tapPoint(at: point, within: label, in: app, quiet: quiet, budget: budget)
+        case let .drag(label, from, to, hold, seconds):
+            return try drag(between: (from, to), within: label, hold: hold, seconds: seconds, quiet: quiet, budget: budget)
         case let .systemTap(label, atLaunch, _):
             let scope = try sheetScope ?? SystemSheetScope(baseline: sheetReads.appTree())
             return try systemTap(label, atLaunch: atLaunch, over: app, reading: sheetReads, admitting: scope)
@@ -266,46 +215,99 @@ struct StepPerformer {
         }
     }
 
-    /// Taps a point — within the frame of the element `label` resolves to, or on the screen when there is no label (SimWalk#29).
+    /// Finds the element `label` names the way a `tap` always has: a label the tree does not hold yet is swiped towards, as `scrollTo` does (SimWalk#104), and a row the seek swiped into the tree is checked clear of the bars in front of it.
+    private func findTappable(_ label: String, verb: String) throws -> Found {
+        var search = ScrollSearch(label: label, limit: Self.scrollAttempts)
+        let (choice, stopped) = try TargetResolution.resolveSeeking(label, reaching: .control, search: &search, in: app, quiet: quiet, budget: budget)
+        if let stopped {
+            return .blocked(.blocked(reason: stopped))
+        }
+        guard case .chosen = choice else {
+            return .blocked(.blocked(reason: choice.reason(for: label)))
+        }
+        let binding = try TargetResolution.bind(choice, labelled: label, in: app, quiet: quiet, budget: budget) {
+            TargetResolution.element(for: $0, labelled: label, in: app)
+        }
+        guard case let .element(element, target, bound) = binding else {
+            return .blocked(.blocked(reason: binding.refusal(doing: verb)))
+        }
+        // A row the seek swiped into the tree sits at the fold, under the tab bar a touch there would land on.
+        if search.swipes > 0, case let .blocked(reason, _) = try BarClearance.clearOfBars(element, as: target, in: app) {
+            return .blocked(.blocked(reason: reason))
+        }
+        return .element(Found.Tappable(element: element, target: target, bound: bound))
+    }
+
+    /// A `tap` or a `longPress`: finds the element by `label`, touches it with `gesture`, and lands as a `tap` lands.
+    private func tapElement(_ label: String, gesture: Gesture) throws -> StepResult {
+        let tappable: Found.Tappable
+        switch try findTappable(label, verb: gesture.verb) {
+        case let .element(found):
+            tappable = found
+        case let .blocked(result):
+            return result
+        }
+        let (element, target, bound) = (tappable.element, tappable.target, tappable.bound)
+        let before = try AXTreeCapture.tree(of: app)
+        let departed = ScreenIdentity.of(before)
+        // A keyboard key is judged by the focused field as well (SimWalk#94): a keystroke changes that
+        // field's value and nothing `ScreenIdentity` hashes, so identity alone refused every digit
+        // typed on a number pad that had in fact landed. A Return exposed as a button inside the keyboard
+        // is a key too (SimWalk#96), which is why the core decides it from the tree.
+        guard TypedTextLanding.isKey(target.node, in: before) else {
+            // SimWalk#125 and #95 are decided in the core (`TapLanding`): an element selected in the snapshot
+            // and live, hittable now, under a navigation bar naming the label in the tree read above, has landed
+            // even if the tap changes nothing, its destination already on screen (an iPad sidebar row opened
+            // selected). The live reads go through `liveRead`, as the `tab` step's do, and only for an element
+            // the snapshot read as selected, the one case they decide: a covered element reads false and is
+            // refused as before, and every other tap is spared a live query.
+            // Hittability is polled to a short deadline, as the tab path's is: a row can be read while the
+            // screen is still settling, and one read would call it covered (SimWalk#126).
+            let selected = target.node.isSelected && Self.liveRead(or: false) { element.isSelected }
+            var hittable = selected && Self.liveRead(or: false) { element.isHittable }
+            let hittableDeadline = Date().addingTimeInterval(Self.selectedHittableWait)
+            while selected, !hittable, Date() < hittableDeadline {
+                Thread.sleep(forTimeInterval: Self.settleInterval)
+                hittable = Self.liveRead(or: false) { element.isHittable }
+            }
+            gesture.apply(to: element)
+            let landing = try TapLanding.decide(
+                arrived: arrived(leaving: departed, in: app, budget: budget),
+                wasSelected: selected,
+                hittable: hittable,
+                titled: TapLanding.destinationTitled(label: label, in: before, tapped: target.node)
+            )
+            return landing == .notLanded ? .blocked(reason: bound.reason(for: label)) : .landedOn(target.node)
+        }
+        let focusedBefore = Self.focusedFieldValue(in: app)
+        gesture.apply(to: element)
+        let landed = try keyLanded(leaving: departed, focusedBefore: focusedBefore, in: app, budget: budget)
+        return landed ? .landedOn(target.node) : .blocked(reason: bound.keyReason(for: label, fieldHadFocus: focusedBefore != .none || Self.focusedFieldValue(in: app) != .none))
+    }
+
+    /// A `swipe`: once in `direction`, on the element `label` finds as a `tap` does or, with none, on the app.
     ///
-    /// **The label resolves through the same choice as every other step's** (`resolve`, then `bind`), reaching as a `scrollTo` does: a chart is content, not a control, and a bar's control is never preferred to it. What it contributes is only a frame; `TapPointPlacement` decides the point, or refuses — an empty frame, a point off the screen — in the core where a test holds it.
-    ///
-    /// **Landed means the touch was delivered there and, if it navigated, that the destination was reached** (SimWalk#29 review, item 1) — a `tap` that pushes returns before the push happens, so the same wait `tap` and `back` already pay is what this step now pays too, or SimWalk#6 recurs one step over: the settle window closes on the screen just left, filing its capture under the destination's id, and the next route step resolves against the wrong screen. So the step waits one quiet period after the touch, and then lands unconditionally: no read of the tree lands it early, since `ScreenIdentity` cannot tell a push from a ticking label, a spinner or a callout (the 2026-09-23 review), and nothing after the touch refuses (SimWalk#38, item 4). `TapPointLanding` holds the decision and the wait, in the core, where a test replays it against a scripted clock (SimWalk#38); this loop keeps only the clock. The manifest still names the step `tapPoint`, so a reader can tell what resolved it.
-    private func tapPoint(at point: [Double], within label: String?, in app: XCUIApplication, quiet: TimeInterval, budget: TimeInterval) throws -> StepResult {
-        var element: AXNode.Frame?
+    /// Never a search, and it lands one quiet period after the gesture, unconditionally, as a `tapPoint` does (SimWalk#198).
+    private func swipe(_ direction: String, on label: String?) throws -> StepResult {
+        guard let written = Walkbook.RouteStep.SwipeDirection(rawValue: direction) else {
+            return .blocked(reason: "'\(direction)' is not a swipe direction")
+        }
+        var surface: XCUIElement = app
         if let label {
-            let choice = try TargetResolution.resolve(label, reaching: .anything, in: app, quiet: quiet, budget: budget)
-            guard case .chosen = choice else {
-                return .blocked(reason: choice.reason(for: label))
-            }
-            let binding = try TargetResolution.bind(choice, labelled: label, in: app, quiet: quiet, budget: budget) {
-                TargetResolution.element(for: $0, labelled: label, in: app)
-            }
-            guard case let .element(_, target, _) = binding else {
-                return .blocked(reason: binding.refusal(doing: "tapped within"))
-            }
-            element = target.node.frame
-        }
-        let bounds = app.frame
-        let screen = AXNode.Frame(x: bounds.origin.x, y: bounds.origin.y, width: bounds.size.width, height: bounds.size.height)
-        switch TapPointPlacement.of(point, within: element, onScreen: screen) {
-        case let .refused(reason):
-            return .blocked(reason: reason)
-        case let .point(x, y):
-            // One of this walk's quiet periods, not the fixed poll interval: a walk slowed with `--settle` is one
-            // whose pushes take that long to reach the tree (SimWalk#29 review 2).
-            let landing = TapPointLanding(quiet: quiet)
-            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x - screen.x, dy: y - screen.y)).tap()
-            let touched = Date()
-            while true {
-                switch landing.next(elapsed: Date().timeIntervalSince(touched)) {
-                case .watch:
-                    Thread.sleep(forTimeInterval: Self.settleInterval)
-                case .landed:
-                    return .landed
-                }
+            switch try findTappable(label, verb: "swiped") {
+            case let .element(tappable):
+                surface = tappable.element
+            case let .blocked(result):
+                return result
             }
         }
+        switch written {
+        case .up: surface.swipeUp()
+        case .down: surface.swipeDown()
+        case .left: surface.swipeLeft()
+        case .right: surface.swipeRight()
+        }
+        return landedAfterQuietPeriod()
     }
 
     /// Taps a control on a system sheet: SpringBoard's first, then one hosted in the app's own window (SimWalk#28).
@@ -429,15 +431,11 @@ struct StepPerformer {
     ///
     /// By app coordinates from the box the tree read gave, never through a live element (SimWalk#45). Binding the containers by index and reading each one's frame back is a query per read, and on HealthKit's 59-type sheet the matching set changed between the bind and the read — XCUITest raises that as a test failure ("No matches found for Element at index 1"), which ended the walk with no step outcome at all. A drag between two points, because a `swipeUp()` on the container a `containing` query found hung the runner on the same sheet (2026-09-22). The box is in the sheet's own coordinate space where the sheet is remote (its table reads y 0 in the snapshot and sits at y 62 live, iOS 27.0), so the two points are taken well inside it, at 0.2 and 0.8 of its height, where that offset still lands both on the container.
     private static func scrollToEnd(of container: AXNode, in app: XCUIApplication, until label: String) {
-        let bounds = app.frame
         let box = container.frame
         // A box shorter than this puts the two points nearly together, and each "drag" becomes a press and
         // release — a tap on whatever sits there, up to `scrollAttempts` times (the #45 review).
-        guard box.height >= 40 else { return }
-        let x = box.x + box.width / 2 - bounds.origin.x
-        let origin = app.coordinate(withNormalizedOffset: .zero)
-        let lower = origin.withOffset(CGVector(dx: x, dy: box.y + box.height * 0.8 - bounds.origin.y))
-        let upper = origin.withOffset(CGVector(dx: x, dy: box.y + box.height * 0.2 - bounds.origin.y))
+        guard box.height >= minimumDragHeight else { return }
+        let (lower, upper) = dragPoints(in: box, of: app)
         for _ in 0 ..< scrollAttempts {
             guard keepsDragging(label, in: app) else { return }
             lower.press(forDuration: scrollPress, thenDragTo: upper)
@@ -653,5 +651,79 @@ extension StepPerformer {
     @MainActor
     final class Arrival {
         var landedAfter: TimeInterval?
+    }
+}
+
+/// The drag a scroll is made by: the one `scrollToEnd` repeats and a live session's `scroll` request makes once.
+extension StepPerformer {
+    /// Drags the container `scroll` names once, towards its end for `down` and back towards its start for `up`, by the same points `scrollToEnd` uses (SimWalk#45, #172).
+    static func drag(_ scroll: LiveSessionScroll, in app: XCUIApplication) throws {
+        guard scroll.container.height >= minimumDragHeight else {
+            throw WalkRunner.InspectRefusal(description: "the container is under \(Int(minimumDragHeight)) points tall: a drag there would be a tap")
+        }
+        let (lower, upper) = dragPoints(in: scroll.container, of: app)
+        switch scroll.direction {
+        case .down:
+            lower.press(forDuration: scrollPress, thenDragTo: upper)
+        case .up:
+            upper.press(forDuration: scrollPress, thenDragTo: lower)
+        }
+    }
+
+    /// The shortest box a drag is made in.
+    private static var minimumDragHeight: Double {
+        40
+    }
+
+    /// The two points of a drag in `box`: at its horizontal middle, at 0.8 and 0.2 of its height, by app coordinates from `app.frame`'s origin.
+    private static func dragPoints(in box: AXNode.Frame, of app: XCUIApplication) -> (lower: XCUICoordinate, upper: XCUICoordinate) {
+        let bounds = app.frame
+        let x = box.x + box.width / 2 - bounds.origin.x
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        return (
+            origin.withOffset(CGVector(dx: x, dy: box.y + box.height * 0.8 - bounds.origin.y)),
+            origin.withOffset(CGVector(dx: x, dy: box.y + box.height * 0.2 - bounds.origin.y))
+        )
+    }
+}
+
+extension StepPerformer {
+    /// How a `tap` or a `longPress` touches the element it found; everything before and after the touch is the same step (SimWalk#198).
+    private enum Gesture {
+        case tap
+        case press(TimeInterval)
+
+        /// What the step did, for the refusal that names it.
+        var verb: String {
+            switch self {
+            case .tap: "tapped"
+            case .press: "long-pressed"
+            }
+        }
+
+        @MainActor
+        func apply(to element: XCUIElement) {
+            switch self {
+            case .tap:
+                element.tap()
+            case let .press(seconds):
+                element.press(forDuration: seconds)
+            }
+        }
+    }
+
+    /// What finding an element for a `tap`, `longPress` or labelled `swipe` came to.
+    enum Found {
+        case element(Tappable)
+        case blocked(StepResult)
+    }
+}
+
+extension StepPerformer.Found {
+    /// The element found, with the candidate it was bound from and the choice that named it.
+    struct Tappable {
+        let element: XCUIElement
+        let target: RouteTarget.Candidate
+        let bound: RouteTarget.Choice
     }
 }

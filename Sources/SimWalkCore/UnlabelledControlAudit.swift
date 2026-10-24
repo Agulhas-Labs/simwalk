@@ -14,6 +14,10 @@ import Foundation
 ///
 /// **The inner control SwiftUI nests inside a labelled one is not examined.** A `Menu` row is a labelled `Button` with an unlabelled, unidentified `Button` of the same frame inside it (SimWalk#112); a `Toggle` is a labelled `Switch` with the platform's own unlabelled `Switch` inside it (SimWalk#102). No SwiftUI modifier reaches the inner one, and VoiceOver stops on the outer, so the inner is that control's part, not a second control. It is excused only when the enclosing control has a label (an identifier alone is no voice) and its frame contains the inner one's within a point; a control that merely sits somewhere inside a labelled one, outside its frame, is still examined.
 ///
+/// **An empty text field is named by its placeholder (SimWalk#234).** VoiceOver speaks the placeholder of a `TextField` with no value as its name, so such a field with a non-blank placeholder is labelled. A field that holds a value is still judged on label and identifier alone.
+///
+/// **The tree is read with VoiceOver off (SimWalk#235).** An app can set a label only while VoiceOver runs, so an element unlabelled here may be labelled for a VoiceOver user; the finding's wording says "with VoiceOver off" because that is all this rule can see.
+///
 /// **The bars are examined.** A `TabBar` or `NavigationBar` control with no label is a real defect (an unlabelled toolbar or back button), so this rule does not skip them, unlike the geometry rules.
 public struct UnlabelledControlAudit: PerTreeLabelAuditRule {
     public static let name = AuditRuleName.unlabelledControl
@@ -22,16 +26,18 @@ public struct UnlabelledControlAudit: PerTreeLabelAuditRule {
     }
 
     public static var findingClause: String {
-        "with neither a label nor an identifier"
+        "with neither a label nor an identifier with VoiceOver off"
     }
 
     public init() {}
 
     public func evaluate(_ tree: AXNode, screenID: String, stateSlug: String) -> LabelRuleResult {
         var result = LabelRuleResult()
-        for control in AuditedControl.all(in: tree) where Self.isCandidate(control) {
+        // Elements of a cell not yet laid out are at a placeholder frame, and a user meets them filled (SimWalk#230).
+        for control in AuditedControl.all(in: CellsNotLaidOut.removed(from: tree)) where Self.isCandidate(control) {
             result.examined += 1
             guard AuditedControl.isBlank(control.node.label), AuditedControl.isBlank(control.node.identifier) else { continue }
+            guard !Self.isNamedByPlaceholder(control.node) else { continue }
             result.findings.append(LabelFinding(screenID: screenID, stateSlug: stateSlug, type: control.node.type, label: nil, frame: control.node.frame))
         }
         return result
@@ -44,6 +50,16 @@ public struct UnlabelledControlAudit: PerTreeLabelAuditRule {
         guard control.node.type == "Image", control.node.isEnabled, let button = control.enclosingButton else { return false }
         return AuditedControl.isBlank(button.label) && !AuditedControl.isBlank(button.identifier)
     }
+
+    /// Whether an empty text-entry field is named by its placeholder, which VoiceOver speaks as the field's name (SimWalk#234).
+    ///
+    /// Only while the field is empty: a field holding a value draws and speaks the value, never the placeholder, so it is judged on label and identifier alone.
+    private static func isNamedByPlaceholder(_ node: AXNode) -> Bool {
+        guard textEntryTypes.contains(node.type), AuditedControl.isBlank(node.value) else { return false }
+        return !AuditedControl.isBlank(node.placeholder)
+    }
+
+    private static let textEntryTypes: Set<String> = ["TextField", "SecureTextField", "SearchField"]
 
     /// Whether the control is the part SwiftUI nests inside an enclosing control that has a label and the same footprint.
     private static func isPartOfLabelledControl(_ control: AuditedControl) -> Bool {

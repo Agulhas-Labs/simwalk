@@ -10,7 +10,7 @@ import Foundation
 public struct MotionWatch: Equatable, Sendable {
     /// How long the route's last step took from its action returning to the read that showed it had arrived; `nil` for a screen with no route or a step that does not wait for arrival (`CaptureManifest.Motion.landingMilliseconds`).
     public let landing: TimeInterval?
-    /// Whether the route's last step asked for a scroll — a `scrollTo`, or a `systemTap`, which drags a sheet's list when its control is below the fold — so that `LayoutShiftRule` reads the scroll still decelerating in the watch as the walk's motion, not the app's.
+    /// Whether the route's last step asked for a scroll — a `scrollTo`, a `swipe`, which leaves a list mid-fling, or a `systemTap`, which drags a sheet's list when its control is below the fold — so that `LayoutShiftRule` reads the scroll still decelerating in the watch as the walk's motion, not the app's.
     ///
     /// Every `systemTap` counts, dragged or not: the runner does not report whether it dragged, and treating an undragged one as a scroll only drops shifts inside a scroll container that move with the container's content.
     public let afterScroll: Bool
@@ -21,9 +21,9 @@ public struct MotionWatch: Equatable, Sendable {
     public init(lastStep: Walkbook.RouteStep?, landing: TimeInterval?) {
         self.landing = landing
         switch lastStep {
-        case .scrollTo, .systemTap:
+        case .scrollTo, .systemTap, .swipe, .drag:
             afterScroll = true
-        case .tab, .tap, .type, .tapPoint, .openURL, .back, nil:
+        case .tab, .tap, .type, .longPress, .tapPoint, .openURL, .back, nil:
             afterScroll = false
         }
     }

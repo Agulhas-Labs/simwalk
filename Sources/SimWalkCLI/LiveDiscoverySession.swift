@@ -20,6 +20,8 @@ struct LiveDiscoverySession: DiscoverySession {
     let cancellation: Cancellation?
     let pause: (TimeInterval) -> Void
     let now: () -> Date
+    /// Where a relaunch's notes go, each as the runner worded it; the session start prints its own the same way.
+    var note: (String) -> Void = { _ in }
 
     func read() throws -> LiveScreen {
         let response = try exchange(.read, timeout: SessionReadCommand.readTimeout)
@@ -38,7 +40,14 @@ struct LiveDiscoverySession: DiscoverySession {
         guard let screen = response.screen else {
             throw LiveSessionHostError.runnerFailed(number: response.n, failure: response.failure ?? "it answered the relaunch with no screen")
         }
+        for line in response.notes ?? [] {
+            note("⚠ " + line)
+        }
         return screen
+    }
+
+    func scroll(_ scroll: LiveSessionScroll) throws -> LiveScreen? {
+        try exchange(.scroll, scroll: scroll, timeout: SessionStepCommand.stepTimeout).screen
     }
 
     /// How long a relaunch waits for its answer: the app's end and launch, the settle, and a read.
@@ -46,15 +55,15 @@ struct LiveDiscoverySession: DiscoverySession {
         120
     }
 
-    private func exchange(_ action: LiveSessionRequest.Action, step: Walkbook.RouteStep? = nil, timeout: TimeInterval) throws -> LiveSessionResponse {
+    private func exchange(_ action: LiveSessionRequest.Action, step: Walkbook.RouteStep? = nil, scroll: LiveSessionScroll? = nil, timeout: TimeInterval) throws -> LiveSessionResponse {
         if cancellation?.isCancelled == true {
             throw DiscoverError.cancelled
         }
         if let device = LiveSessionDeviceExchange(record: record, store: store, leases: leases, send: deviceSend) {
-            return try device.perform(DeviceSessionRequest(action: action, step: step), timeout: timeout, processes: processes, shell: shell, now: now)
+            return try device.perform(DeviceSessionRequest(action: action, step: step, scroll: scroll), timeout: timeout, processes: processes, shell: shell, now: now)
         }
         let channel = LiveSessionChannel(layout: store.layout(id: record.id))
-        let number = try channel.send(action, step: step)
+        let number = try channel.send(action, step: step, scroll: scroll)
         return try channel.awaitResponse(to: number, timeout: timeout, isRunnerAlive: { processes.isRunning(record) }, pause: pause, now: now)
     }
 }

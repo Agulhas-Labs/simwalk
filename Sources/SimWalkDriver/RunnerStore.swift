@@ -79,6 +79,13 @@ public struct RunnerStore {
     /// What both installs share once they know the tree's commit, files and content hash: keep an existing pairing unless asked, reuse a snapshot whose bytes still match, else copy, then write the binding.
     private func pair(commit: String, content: String, files: [String], from source: URL, binaryHash: String, repoint: Bool, listed: [String: String] = [:]) throws -> Installation {
         let existing = binding(forBinary: binaryHash)
+        if let existing, !repoint, existing.commit != commit,
+           let inputs = Self.runnerInputsHash(of: files, listed: listed, in: source),
+           Self.runnerInputsHash(ofSnapshotAt: URL(fileURLWithPath: existing.snapshot, isDirectory: true)) == inputs
+        {
+            // Another commit, the same runner build inputs, and the paired snapshot still holding them: nothing to keep apart.
+            return Installation(binding: existing, outcome: .unchangedAtCommit(checkoutCommit: commit))
+        }
         if let existing, existing.commit != commit || existing.contentHash != content, !repoint {
             return Installation(binding: existing, outcome: .kept(checkoutCommit: commit))
         }
@@ -196,6 +203,10 @@ public struct RunnerStore {
 
     /// The same hash over what a snapshot directory holds now.
     private static func contentHash(ofSnapshotAt snapshot: URL) -> String {
+        contentHash(of: files(inSnapshotAt: snapshot), in: snapshot)
+    }
+
+    private static func files(inSnapshotAt snapshot: URL) -> [String] {
         let manager = FileManager.default
         var files: [String] = []
         for relative in manager.subpaths(atPath: snapshot.path) ?? [] {
@@ -205,7 +216,26 @@ public struct RunnerStore {
                 files.append(relative)
             }
         }
-        return contentHash(of: files.sorted(), in: snapshot)
+        return files.sorted()
+    }
+
+    /// Whether the runner build reads `file`: it is built from `Runner/` and the root package its project references, so a change elsewhere, such as docs or release scripts, cannot change it.
+    private static func isRunnerInput(_ file: String) -> Bool {
+        file.hasPrefix("Runner/") || file.hasPrefix("Sources/") || file == "Package.swift" || file == "Package.resolved"
+    }
+
+    /// The content hash over only the runner build's inputs among `files`, read from `listed` when a release listed them and from `root` otherwise, or nil when none are present.
+    private static func runnerInputsHash(of files: [String], listed: [String: String], in root: URL) -> String? {
+        let inputs = files.filter(isRunnerInput).sorted()
+        guard !inputs.isEmpty else { return nil }
+        return listed.isEmpty ? contentHash(of: inputs, in: root) : contentHash(of: inputs, listed: listed)
+    }
+
+    /// The same hash over what a snapshot directory holds now, a missing or emptied snapshot hashes to nothing a checkout's inputs match.
+    private static func runnerInputsHash(ofSnapshotAt snapshot: URL) -> String? {
+        let inputs = files(inSnapshotAt: snapshot).filter(isRunnerInput)
+        guard !inputs.isEmpty else { return nil }
+        return contentHash(of: inputs, in: snapshot)
     }
 }
 
@@ -242,7 +272,7 @@ public extension RunnerStore {
 }
 
 public extension RunnerStore.Installation {
-    /// The five things an install can have done about a binary's runner.
+    /// The six things an install can have done about a binary's runner.
     enum Outcome: Equatable, Sendable {
         /// A new snapshot was copied and paired.
         case snapshotted
@@ -250,6 +280,8 @@ public extension RunnerStore.Installation {
         case reusedSnapshot
         /// The binary was already paired with this very runner.
         case unchanged
+        /// The binary was already paired with a runner whose files the checkout, at the commit in the payload, holds byte for byte.
+        case unchangedAtCommit(checkoutCommit: String)
         /// The binary was already paired with a different runner, which it keeps; the payload is what the checkout holds now.
         case kept(checkoutCommit: String)
         /// Asked to, the binary was re-paired; the payload is the runner it had.

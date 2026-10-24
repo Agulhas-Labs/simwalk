@@ -216,7 +216,7 @@ public struct CaptureManifestValidator {
                 return .boundElementStepOutOfRange(screenID: screen.id, step: bound.step, routeLength: screen.routeTaken.count)
             }
             return switch screen.routeTaken[bound.step] {
-            case .tap, .scrollTo, .type:
+            case .tap, .scrollTo, .type, .longPress:
                 nil
             default:
                 .boundElementOnStepThatBindsNothing(screenID: screen.id, step: bound.step, routeStep: screen.routeTaken[bound.step])

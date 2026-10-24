@@ -10,6 +10,8 @@ import Foundation
 public struct DiscoverCrawl {
     public static let defaultDepth = 2
     public static let defaultMaxScreens = 25
+    /// The most pages of one list the crawl keeps, the first included.
+    static let pageLimit = 10
 
     /// The app the draft names.
     public let appBundleID: String
@@ -48,8 +50,8 @@ extension DiscoverCrawl {
         var slugs: Set<String> = [CaptureBundleLayout.slugSegment("launch")]
         var skipped: [DiscoverSkip] = []
         var duplicates: [DiscoverResult.Duplicate] = []
-        /// The drafted screens whose list may continue below the rows the app loaded, in draft order.
-        var belowTheFold: [String] = []
+        /// The drafted screens whose list may continue below the rows read, each with why paging stopped, in draft order.
+        var belowTheFold: [DiscoverResult.OpenList] = []
         /// The tree last read, or `nil` when the app was not running.
         var current: AXNode?
         /// The system alert over the app in the screen last read, if any.
@@ -114,6 +116,101 @@ extension DiscoverCrawl {
             )
         }
 
+        /// The rows of the screen `tree` is of: the screen's own, or, where a list reaches the bottom and its rows will be tapped, the whole list's, dragged page by page and then back to the top.
+        ///
+        /// A list is left open, with why, when it is not dragged or paging stops before its end; `returned` is false when the screen could not be got back to after the drags.
+        ///
+        /// Once a drag down was answered, the form check is trusted only when a drag up was then seen to move nothing: `DiscoverForm` compares text shapes, not frames, so a list left scrolled passes it. Otherwise the app is relaunched and replayed without asking `isOn` first.
+        private func readRows(of tree: AXNode, id: String, form: DiscoverForm, legs: [Leg], depth: Int) throws -> ScreenRead {
+            guard let list = DiscoverClassifier.continuingList(tree) else {
+                let read = DiscoverClassifier.read(tree, screenID: id)
+                return ScreenRead(rows: read.rows, skipped: read.skipped, returned: true)
+            }
+            guard depth < crawl.depth, screens.count < crawl.maxScreens else {
+                belowTheFold.append(DiscoverResult.OpenList(screenID: id, why: depth >= crawl.depth ? "not scrolled: beyond depth" : "not scrolled: beyond max screens"))
+                let read = DiscoverClassifier.read(tree, screenID: id)
+                return ScreenRead(rows: read.rows, skipped: read.skipped, returned: true)
+            }
+            var pages = DiscoverListPages(first: tree, container: list, screenID: id)
+            var kept = 1
+            var rewind = false
+            var dragged = false
+            var why: String?
+            paging: while true {
+                guard kept < DiscoverCrawl.pageLimit else {
+                    why = "stopped after \(DiscoverCrawl.pageLimit) pages"
+                    rewind = true
+                    break paging
+                }
+                guard let screen = try session.scroll(LiveSessionScroll(direction: .down, container: list.frame)) else {
+                    why = "the runner could not scroll it"
+                    break paging
+                }
+                dragged = true
+                current = screen.tree
+                systemAlert = screen.systemAlert
+                guard let page = screen.tree, identifiers(of: page, outside: list) == identifiers(of: tree, outside: list), screen.systemAlert == nil else {
+                    why = "the screen changed while scrolling"
+                    break paging
+                }
+                switch pages.add(page) {
+                case .moved:
+                    kept += 1
+                case .end:
+                    rewind = true
+                    break paging
+                case .unjoined:
+                    why = "two pages could not be joined"
+                    rewind = true
+                    break paging
+                case .changedInPlace:
+                    why = "the list changed without scrolling"
+                    rewind = true
+                    break paging
+                case .containerGone:
+                    why = "the list was gone after a scroll"
+                    break paging
+                }
+            }
+            var atTop = !dragged
+            if rewind {
+                atTop = try scrollToTop(of: list, drags: kept + 2)
+            }
+            if let why {
+                belowTheFold.append(DiscoverResult.OpenList(screenID: id, why: why))
+            }
+            let read = pages.read()
+            let returned = try atTop ? back(to: form, by: legs) : relaunchAndReplay(to: form, by: legs)
+            return ScreenRead(rows: read.rows, skipped: read.skipped, returned: returned)
+        }
+
+        /// The screen-level identifiers of `page` that no descendant of the list's container carries, in order (the container's own identifier usually names the screen, so it stays): what names the screen once the rows that scroll away are set aside.
+        ///
+        /// The list is found on `page` as ``DiscoverListPages`` finds it; when it is not there nothing is set aside, and the `containerGone` stop catches that a step later.
+        private func identifiers(of page: AXNode, outside list: AXNode) -> [String] {
+            let all = ScreenIdentifierRule.screenLevelIdentifiers(in: page)
+            guard let found = DiscoverListPages.list(in: page, like: list) else { return all }
+            let inside = Set(found.children.flatMap(\.flattened).compactMap(\.identifier))
+            return all.filter { !inside.contains($0) }
+        }
+
+        /// Drags `list` up until a drag moves nothing, at most `drags` times, and stops where the runner cannot drag; says whether a drag was answered and seen to move nothing (a shift under a point, or the list stayed put while it changed in place, SimWalk#208), which is the only proof the list is at its top.
+        private func scrollToTop(of list: AXNode, drags: Int) throws -> Bool {
+            for _ in 0 ..< drags {
+                guard let before = current, let screen = try session.scroll(LiveSessionScroll(direction: .up, container: list.frame)) else { return false }
+                current = screen.tree
+                systemAlert = screen.systemAlert
+                guard let after = screen.tree else { return false }
+                if let shift = DiscoverListPages.shift(from: before, to: after, container: list), abs(shift) < 1 {
+                    return true
+                }
+                if DiscoverListPages.stayedPut(from: before, to: after, container: list) {
+                    return true
+                }
+            }
+            return false
+        }
+
         /// Drafts the screen `tree` is of, unless its form is drafted already, then taps each of its rows and comes back.
         private func visit(_ tree: AXNode, legs: [Leg], depth: Int, slug: String, parent: String?) throws {
             let route = legs.flatMap(\.steps)
@@ -125,11 +222,14 @@ extension DiscoverCrawl {
             let id = claim(slug, parent: parent)
             drafted[form] = id
             screens.append(Walkbook.Screen(id: id, route: route, states: [crawl.state], expect: tree.screenIdentifier))
-            if DiscoverClassifier.listMayContinue(tree) {
-                belowTheFold.append(id)
-            }
-            let read = DiscoverClassifier.read(tree, screenID: id)
+            let read = try readRows(of: tree, id: id, form: form, legs: legs, depth: depth)
             skipped += read.skipped
+            guard read.returned else {
+                skipped += read.rows.map { row in
+                    DiscoverSkip(screenID: id, type: row.node.type, name: row.label, reason: .couldNotReturn, frame: row.node.frame)
+                }
+                return
+            }
             for (index, row) in read.rows.enumerated() {
                 let entry = { (reason: DiscoverSkip.Reason) in
                     DiscoverSkip(screenID: id, type: row.node.type, name: row.label, reason: reason, frame: row.node.frame)
@@ -188,6 +288,11 @@ extension DiscoverCrawl {
             if let tree = current, !endsBranch(tree), DiscoverBackButton.of(tree) != nil, try follow([.back]) != nil, isOn(form) {
                 return true
             }
+            return try relaunchAndReplay(to: form, by: legs)
+        }
+
+        /// Relaunches the app and replays `legs`, and says whether it is on the screen of `form`.
+        private func relaunchAndReplay(to form: DiscoverForm, by legs: [Leg]) throws -> Bool {
             try relaunch()
             return try replay(legs) && isOn(form)
         }
@@ -281,5 +386,12 @@ private extension DiscoverCrawl {
         let steps: [Walkbook.RouteStep]
         var from: DiscoverForm?
         var row: DiscoverClassifier.Row?
+    }
+
+    /// The rows and skips read off one screen, and whether the app is back on it.
+    struct ScreenRead {
+        let rows: [DiscoverClassifier.Row]
+        let skipped: [DiscoverSkip]
+        let returned: Bool
     }
 }

@@ -1,0 +1,186 @@
+{
+  "name": "route-fixture-replace-specimens",
+  "appBundleID": "dev.simwalk.route-fixture",
+  "screens": [
+    {
+      "id": "specimens/long",
+      "expect": "replace-specimens-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "scrollTo": {
+            "label": "Open replace specimens"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open replace specimens"
+          }
+        },
+        {
+          "type": {
+            "label": "Long",
+            "text": "Short",
+            "replace": true
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "specimens/shout",
+      "expect": "replace-specimens-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "scrollTo": {
+            "label": "Open replace specimens"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open replace specimens"
+          }
+        },
+        {
+          "type": {
+            "label": "Shout",
+            "text": "loud",
+            "replace": true
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "specimens/later",
+      "expect": "replace-specimens-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "scrollTo": {
+            "label": "Open replace specimens"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open replace specimens"
+          }
+        },
+        {
+          "type": {
+            "label": "Later",
+            "text": "loud",
+            "replace": true
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "specimens/secret",
+      "expect": "replace-specimens-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "scrollTo": {
+            "label": "Open replace specimens"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open replace specimens"
+          }
+        },
+        {
+          "type": {
+            "label": "Secret",
+            "text": "new",
+            "replace": true
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "specimens/locked",
+      "expect": "replace-specimens-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "scrollTo": {
+            "label": "Open replace specimens"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open replace specimens"
+          }
+        },
+        {
+          "type": {
+            "label": "Locked",
+            "text": "free",
+            "replace": true
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    }
+  ]
+}

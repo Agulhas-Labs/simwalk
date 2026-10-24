@@ -190,4 +190,27 @@ struct AXNodeTests {
             ]
         )
     }
+
+    /// The placeholder is the only name a filled text field has (SimWalk#212); it survives the trip, and is written only where there is one.
+    @Test
+    func aPlaceholderRoundTripsAndIsOmittedWhenAbsent() throws {
+        let field = AXNode(type: "TextField", frame: AXNode.Frame(x: 0, y: 0, width: 10, height: 10), value: "Draft", placeholder: "Nickname")
+        let plain = AXNode(type: "TextField", frame: AXNode.Frame(x: 0, y: 0, width: 10, height: 10))
+
+        let data = try JSONEncoder().encode(field)
+        let plainJSON = try #require(String(bytes: JSONEncoder().encode(plain), encoding: .utf8))
+
+        #expect(try JSONDecoder().decode(AXNode.self, from: data) == field)
+        #expect(!plainJSON.contains("placeholder"))
+    }
+
+    /// A tree written before the key existed decodes with no placeholder, and no format bump was needed to say so.
+    @Test
+    func atreeWrittenWithoutAPlaceholderDecodesWithNone() throws {
+        let json = #"{"type":"TextField","frame":{"x":0,"y":0,"width":10,"height":10},"value":"Draft"}"#
+
+        let decoded = try JSONDecoder().decode(AXNode.self, from: Data(json.utf8))
+
+        #expect(decoded.placeholder == nil)
+    }
 }

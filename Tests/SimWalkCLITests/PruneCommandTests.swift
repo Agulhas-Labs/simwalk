@@ -229,6 +229,23 @@ struct PruneCommandTests {
         #expect(!FileManager.default.fileExists(atPath: fixture.temporary.path))
     }
 
+    /// A lapsed lease that found its device shut down says the prune shut that device down, and the dry run that it would, as a clone's says it is deleted (SimWalk#249).
+    @Test
+    func apruneSaysItShutDownADeviceTheLeaseFoundShutDown() throws {
+        let dry = try Self.leaseFixture(createdDevice: false, foundShutDown: true)
+        let real = try Self.leaseFixture(createdDevice: false, foundShutDown: true)
+
+        let planned = PruneCommand.answer(prune: dry.prune, binary: (url: nil, hash: "aa"), checkout: dry.directory.url, installedHash: nil, dryRun: true, now: dry.now, leases: dry.leasing)
+        let done = PruneCommand.answer(prune: real.prune, binary: (url: nil, hash: "aa"), checkout: real.directory.url, installedHash: nil, dryRun: false, now: real.now, leases: real.leasing)
+
+        #expect(planned.text.contains("would release the lapsed lease on CLONE-OLD, shutting its device down, as the lease found it"))
+        #expect(planned.text.contains("would release 1 lapsed lease, would shut down 1 device found shut down, would remove 1 temporary file"))
+        #expect(dry.script.vectors.isEmpty)
+        #expect(done.text.contains("released the lapsed lease on CLONE-OLD and shut its device down, as the lease found it"))
+        #expect(done.text.contains("released 1 lapsed lease, shut down 1 device found shut down, removed 1 temporary file"))
+        #expect(real.script.vectors == [["simctl", "shutdown", "CLONE-OLD"]])
+    }
+
     /// SimWalk#75 item 6: the record on a clone a prune released, whose walk is gone, is removed with it.
     @Test
     func aReleasedClonesRecordWithNoRunningOwnerIsRemoved() throws {
@@ -419,7 +436,7 @@ struct PruneCommandTests {
     }
 
     /// A scratch runner store, and a lease store holding one lapsed clone lease and one stale temporary file.
-    private static func leaseFixture(createdDevice: Bool = true) throws -> LeaseFixture {
+    private static func leaseFixture(createdDevice: Bool = true, foundShutDown: Bool = false) throws -> LeaseFixture {
         let directory = try TemporaryDirectory()
         let prune = RunnerPrune(
             store: RunnerStore(directory: directory.url.appendingPathComponent("runner", isDirectory: true)),
@@ -427,7 +444,7 @@ struct PruneCommandTests {
         )
         let now = Date(timeIntervalSince1970: 1_000_000)
         let store = LeaseStore(directory: directory.url.appendingPathComponent("leases", isDirectory: true), isAlive: { _ in true })
-        _ = try store.acquire(udid: "CLONE-OLD", ttl: 60, holderPID: 41, now: now.addingTimeInterval(-3600), createdDevice: createdDevice, clonedFrom: createdDevice ? "SHUT-1" : nil)
+        _ = try store.acquire(udid: "CLONE-OLD", ttl: 60, holderPID: 41, now: now.addingTimeInterval(-3600), createdDevice: createdDevice, clonedFrom: createdDevice ? "SHUT-1" : nil, foundShutDown: foundShutDown)
         let temporary = store.directory.appendingPathComponent(".CLONE-OLD.json.AAAA.tmp")
         try Data("x".utf8).write(to: temporary)
         try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-600)], ofItemAtPath: temporary.path)

@@ -138,6 +138,21 @@ struct UsageReportTests {
         #expect(text.contains("qualified — 1 failure across 3 calls · 1 input refusal, not counted as failures"))
     }
 
+    /// A failed `--parallel` walk writes a `walk` line and a `walk.parallel` one, and is one failed call: the second is the first's breakdown, not a call of its own.
+    @Test
+    func aParallelBreakdownLineIsNotCountedAsACallOrAFailure() throws {
+        let directory = try TemporaryDirectory()
+        let log = UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 1_786_867_200) })
+        log.record(tool: "walk", target: "example.json", milliseconds: 9, succeeded: false, err: "the walk did not complete: crash", kind: .runnerFailed)
+        log.record(tool: UsageLog.parallelTool, target: "example.json", milliseconds: 8, succeeded: false, err: "the walk did not complete: crash", kind: .runnerFailed, parallel: ParallelTimings(shards: [], mergeMs: nil))
+
+        let text = try UsageReport.render(fileURL: log.fileURL).text
+
+        #expect(text.contains("1 failure across 1 call"))
+        #expect(text.contains("calls: 1"))
+        #expect(!text.contains(UsageLog.parallelTool))
+    }
+
     /// No input refusals in the window: the note is left off rather than printed as "0 input refusals".
     @Test
     func theheadlineSaysNothingAboutInputRefusalsWhenThereAreNone() throws {

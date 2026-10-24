@@ -10,6 +10,7 @@ import SwiftUI
 /// `simwalk-fixture://detail` opens the detail screen and `simwalk-fixture://location` the location screen and `simwalk-fixture://banner` the banner screen; any other URL leaves the app on home. Home carries a horizontal run of three texts, which is what a `layoutDirection` state is judged by: right to left in tree order under `rtl`.
 @main
 struct RouteFixtureApp: App {
+    @UIApplicationDelegateAdaptor private var delegate: OrientationDelegate
     @State private var path: [Route] = []
 
     init() {
@@ -20,7 +21,11 @@ struct RouteFixtureApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if ProcessInfo.processInfo.arguments.contains("-RouteFixtureTabs") {
+            if ProcessInfo.processInfo.arguments.contains("-RouteFixtureLandscapeOnly") {
+                LandscapeOnlyRoot()
+            } else if ProcessInfo.processInfo.arguments.contains("-RouteFixtureCanvas") {
+                CanvasRoot()
+            } else if ProcessInfo.processInfo.arguments.contains("-RouteFixtureTabs") {
                 TabsRoot()
             } else {
                 stackRoot
@@ -60,6 +65,19 @@ struct RouteFixtureApp: App {
         .onOpenURL { url in
             path = Route(url: url).map { [$0] } ?? []
         }
+    }
+}
+
+/// Holds the app to portrait under `-RouteFixturePortraitOnly`, which is what an `orientation` state asking for landscape is refused by (SimWalk#199); otherwise the orientations the Info.plist lists, `.all` on an iPad and everything but upside down on an iPhone.
+private final class OrientationDelegate: NSObject, UIApplicationDelegate {
+    func application(_: UIApplication, supportedInterfaceOrientationsFor _: UIWindow?) -> UIInterfaceOrientationMask {
+        if ProcessInfo.processInfo.arguments.contains("-RouteFixturePortraitOnly") {
+            return .portrait
+        }
+        if ProcessInfo.processInfo.arguments.contains("-RouteFixtureLandscapeOnly") {
+            return .landscape
+        }
+        return UIDevice.current.userInterfaceIdiom == .pad ? .all : .allButUpsideDown
     }
 }
 
@@ -146,5 +164,26 @@ private struct BannerScreen: View {
             try? await Task.sleep(for: .seconds(3))
             showsBanner = true
         }
+    }
+}
+
+/// A landscape-only app's screen under `-RouteFixtureLandscapeOnly` (SimWalk#222): one button at a fixed place, so its centre is the same landscape point on every iPad, 120 pt across and 160 pt down from the app frame's top-left.
+///
+/// Tapping it changes the **container's** identifier, which is what a walkbook's `expect` reads. A tap that lands elsewhere (the portrait grid's reading of that point) leaves it `route-home`.
+private struct LandscapeOnlyRoot: View {
+    @State private var tapped = false
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.clear
+            Button("Landscape target") { tapped = true }
+                .frame(width: 160, height: 80)
+                .background(Color.blue.opacity(0.3))
+                .padding(.leading, 40)
+                .padding(.top, 120)
+        }
+        .ignoresSafeArea()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(tapped ? "route-home-landscape-tapped" : "route-home")
     }
 }

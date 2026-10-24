@@ -34,6 +34,17 @@ struct SessionStartDeviceTests {
         #expect(answer.residue.contains("transport: wired"))
     }
 
+    /// The runner's ready notes reach a device start's answer as warning lines, as a simulator start's do (SimWalk#222 review).
+    @Test
+    func aDeviceStartCarriesTheRunnersReadyNotes() throws {
+        let fixture = try Fixture()
+        fixture.readyNotes = [DeviceAlignment.note()]
+
+        let answer = try fixture.start(["--device", Self.udid, "--team", "TEAM", "--app", "com.example.live"])
+
+        #expect(answer.residue.contains("⚠ " + DeviceAlignment.note()))
+    }
+
     /// `performOnDevice` passes `note` to the device build: an empty build directory is told as a cold build (SimWalk#98, #118).
     @Test
     func aDeviceStartOverAnEmptyBuildDirectoryTellsTheCallerItIsAColdBuild() throws {
@@ -343,6 +354,8 @@ extension SessionStartDeviceTests {
         var refusals = 0
         /// Runs as each `hello` is sent, before it is answered or refused.
         var onHello: () -> Void = {}
+        /// What the runner's ready record carries as `notes`.
+        var readyNotes: [String]?
         /// Runs as each clock read is made.
         var onNow: () -> Void = {}
         private(set) var hellos: [DeviceSessionBind] = []
@@ -365,12 +378,11 @@ extension SessionStartDeviceTests {
                 },
                 id: { "s1" },
                 runner: { RunnerSource(projectPath: "/runner/SimWalkRunner.xcodeproj", commit: "c0ffee", origin: .installed) },
-                logFileURL: directory.url.appendingPathComponent("usage.jsonl"),
                 builds: RunnerBuilds(directory: directory.url.appendingPathComponent("runner-builds", isDirectory: true)),
                 leases: leases,
                 store: store,
                 processes: processes,
-                environment: [:],
+                environment: [UsageLog.overrideVariable: directory.url.appendingPathComponent("usage.jsonl").path],
                 cancellation: cancellation,
                 deviceHello: { [self] bind in
                     hellos.append(bind)
@@ -379,7 +391,7 @@ extension SessionStartDeviceTests {
                         refusals -= 1
                         throw DeviceSessionClientError.refused
                     }
-                    return LiveSessionReady(device: CaptureManifest.Device(name: "Test Phone", udid: SessionStartDeviceTests.udid, osVersion: "27.0"), runnerCommit: "c0ffee", readyAt: Date())
+                    return LiveSessionReady(device: CaptureManifest.Device(name: "Test Phone", udid: SessionStartDeviceTests.udid, osVersion: "27.0"), runnerCommit: "c0ffee", readyAt: Date(), notes: readyNotes)
                 },
                 animationsLibrary: animationsLibrary,
                 note: note

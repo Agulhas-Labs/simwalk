@@ -174,22 +174,199 @@ struct DiscoverCrawlTests {
         #expect(result.walkbook.screens.first { $0.id == "row-p" }?.route == [.tab(label: "Home"), .scrollTo(label: "Row P"), .tap(label: "Row P")])
     }
 
-    /// A lazy list builds no rows below the fold, so a list whose last loaded row reaches the bottom may hold rows no tree showed: the screen says so and the verdict is qualified, while a list that ends on screen says nothing.
+    /// A runner that cannot drag the list leaves the screen listed with why, and the verdict qualified, while a list that ends on screen says nothing.
     @Test
-    func aListWhoseLastLoadedRowReachesTheBottomIsReportedAsMayContinue() throws {
+    func aListTheRunnerCannotScrollIsListedWithWhy() throws {
         let rows = (1 ... 20).map { "Item \(Character(UnicodeScalar(64 + $0) ?? "A"))" }
         let app = FakeDiscoveryApp(launch: "home", tabs: ["Home": "home", "Short": "short"], screens: [
             "home": FakeDiscoveryApp.Screen(title: "Home", rows: rows, tabs: ["Home", "Short"], table: true),
             "short": FakeDiscoveryApp.Screen(title: "Short", rows: ["Only"], tabs: ["Home", "Short"], table: true),
-        ])
+        ], scrollFails: ["home"])
 
-        let result = try Self.crawl(app, depth: 0)
+        let result = try Self.crawl(app)
 
-        #expect(result.belowTheFold == ["home"])
-        #expect(result.lines().contains("home: the list may continue below the rows the app loaded; rows there were not read"))
+        #expect(app.relaunches == 0)
+        #expect(result.belowTheFold == [DiscoverResult.OpenList(screenID: "home", why: "the runner could not scroll it")])
+        #expect(result.lines().contains("home: the list may continue below the rows read; rows there were not read (the runner could not scroll it)"))
         let verdict = result.answer(header: "discover", output: "draft.json").verdict
         #expect(verdict.isQualified)
         #expect(verdict.line.contains("1 screen's list may continue below the fold, not read"))
+    }
+
+    /// The fixture's Hub: a lazy list of filler with its disclosure row far below the fold, which only dragging the list loads.
+    @Test
+    func aLazyListsRowBelowTheFoldIsDraftedWithScrollToThenTap() throws {
+        let app = Self.lazyApp(rows: Self.filler(20) + ["Open form"], taps: ["Open form": "form"])
+
+        let result = try Self.crawl(app)
+
+        #expect(result.walkbook.screens.first { $0.id == "open-form" }?.route == [.tab(label: "Hub"), .scrollTo(label: "Open form"), .tap(label: "Open form")])
+        #expect(result.belowTheFold.isEmpty)
+        #expect(app.scrolls.contains(.down))
+    }
+
+    /// A screen identifier carried by a row of the list scrolls away with it, and says nothing about the screen.
+    @Test
+    func aScreenIdentifiedByARowInsideTheListIsPagedToItsEnd() throws {
+        let rows = Self.filler(20) + ["Open form"]
+        let hub = FakeDiscoveryApp.Screen(title: "Hub", rows: rows, tabs: ["Hub"], table: true, taps: ["Open form": "form"], plain: Set(Self.filler(20)), lazy: true, firstRowIdentifier: "hub-footer")
+        let app = FakeDiscoveryApp(launch: "hub", tabs: ["Hub": "hub"], screens: ["hub": hub, "form": FakeDiscoveryApp.Screen(title: "form", back: true, tabs: ["Hub"])])
+
+        let result = try Self.crawl(app)
+
+        #expect(ScreenIdentifierRule.screenIdentifier(of: hub.tree) == "hub-footer")
+        #expect(result.walkbook.screens.first { $0.id == "open-form" }?.route == [.tab(label: "Hub"), .scrollTo(label: "Open form"), .tap(label: "Open form")])
+        #expect(result.belowTheFold.isEmpty)
+    }
+
+    /// An identifier outside the list that differs after a drag is another screen: the list is left open, with why.
+    @Test
+    func aScreenWhoseIdentifierOutsideTheListChangesWhileScrollingIsListedWithWhy() throws {
+        let hub = FakeDiscoveryApp.Screen(title: "Hub", rows: Self.filler(20), tabs: ["Hub"], table: true, plain: Set(Self.filler(20)), lazy: true, outsideIdentifiers: (resting: "hub", scrolled: "elsewhere"))
+        let app = FakeDiscoveryApp(launch: "hub", tabs: ["Hub": "hub"], screens: ["hub": hub])
+
+        let result = try Self.crawl(app)
+
+        #expect(result.belowTheFold == [DiscoverResult.OpenList(screenID: "hub", why: "the screen changed while scrolling")])
+    }
+
+    /// The container's own identifier usually names the screen: a drag that lands on a screen whose list has the same type and frame but another identifier is not the same screen.
+    @Test
+    func aScreenWhoseListContainerIdentifierChangesWhileScrollingIsListedWithWhy() throws {
+        let hub = FakeDiscoveryApp.Screen(title: "Hub", identifier: "hub", rows: Self.filler(20), tabs: ["Hub"], table: true, plain: Set(Self.filler(20)), lazy: true, scrolledIdentifier: "detail")
+        let app = FakeDiscoveryApp(launch: "hub", tabs: ["Hub": "hub"], screens: ["hub": hub])
+
+        let result = try Self.crawl(app)
+
+        #expect(result.belowTheFold == [DiscoverResult.OpenList(screenID: "hub", why: "the screen changed while scrolling")])
+    }
+
+    /// The first page's rows are tapped as on-screen rows, so the list must be back where it started: the tap on the first row finds it only at the top.
+    @Test
+    func theListIsDraggedBackBeforeItsFirstRowsAreTapped() throws {
+        let app = Self.lazyApp(rows: ["First"] + Self.filler(20) + ["Last"], taps: ["First": "first-screen", "Last": "last-screen"])
+
+        let result = try Self.crawl(app)
+
+        #expect(app.scrolls == [.down, .down, .up, .up])
+        #expect(app.hits == ["First", "Last"])
+        #expect(result.walkbook.screens.map(\.id) == ["hub", "first", "last"])
+        #expect(result.walkbook.screens.last?.route == [.tab(label: "Hub"), .scrollTo(label: "Last"), .tap(label: "Last")])
+        #expect(result.belowTheFold.isEmpty)
+    }
+
+    /// A list left scrolled passes the form check when its rows share one text shape, so a list the runner dragged down but could not drag back up is relaunched, not trusted.
+    @Test
+    func aListTheRunnerCouldNotDragBackUpIsRelaunchedBeforeItsFirstRowIsTapped() throws {
+        let app = Self.lazyApp(rows: ["Filler 0"] + Self.filler(24), taps: ["Filler 0": "first-screen"], upFails: ["hub"])
+
+        let result = try Self.crawl(app)
+
+        #expect(app.relaunches >= 1)
+        #expect(app.hits.contains("Filler 0"))
+        #expect(result.walkbook.screens.map(\.id).contains("filler-0"))
+        #expect(result.belowTheFold.isEmpty)
+    }
+
+    /// A drag that moved nothing while the last row grew is not a page to join, and is not the end of the list either (SimWalk#208).
+    @Test
+    func aListThatChangesInPlaceOnADragIsListedWithWhy() throws {
+        let app = Self.changingApp(drags: 1)
+
+        let result = try Self.crawl(app)
+
+        #expect(result.belowTheFold == [DiscoverResult.OpenList(screenID: "hub", why: "the list changed without scrolling")])
+        #expect(app.relaunches == 0)
+    }
+
+    /// A drag up after which the list stayed put moved nothing, though the list changed: the drags up end there, with no relaunch.
+    ///
+    /// The fake has more drags than the crawl makes, so without that rule the drags up run out and the crawl relaunches.
+    @Test
+    func aDragUpThatLeavesTheListStayedPutWhileItChangesEndsTheDragsUpWithoutARelaunch() throws {
+        let app = Self.changingApp(drags: 5)
+
+        let result = try Self.crawl(app)
+
+        #expect(app.scrolls == [.down, .up])
+        #expect(app.relaunches == 0)
+        #expect(result.belowTheFold == [DiscoverResult.OpenList(screenID: "hub", why: "the list changed without scrolling")])
+    }
+
+    /// A pinned header is the only anchor over rows that share one label, so rows dropping away under it leave every anchor in place: the list has not stayed put, and the drags up go on until they run out (SimWalk#208).
+    @Test
+    func aListWhoseOnlyAnchorIsAPinnedHeaderIsNotTakenAsAtItsTopWhileItsRowsDropAway() throws {
+        func hub(photos: Int) -> FakeDiscoveryApp.Screen {
+            let rows = ["Today"] + Array(repeating: "Photo", count: photos)
+            return FakeDiscoveryApp.Screen(title: "Hub", rows: rows, tabs: ["Hub"], table: true, plain: Set(rows))
+        }
+        let app = FakeDiscoveryApp(launch: "hub", tabs: ["Hub": "hub"], screens: ["hub": hub(photos: 25)], changesOnDrag: ["hub": (1 ... 5).map { hub(photos: 25 - $0) }])
+
+        _ = try Self.crawl(app)
+
+        #expect(app.scrolls == [.down, .up, .up, .up])
+    }
+
+    /// The same pinned header over rows that keep their count but sit lower after each drag: the header stays and the rows moved, so the list has not stayed put (SimWalk#210).
+    @Test
+    func aListWhoseRowsMoveUnderAPinnedHeaderAtTheSameCountIsNotTakenAsAtItsTop() throws {
+        func hub(gap: Double) -> FakeDiscoveryApp.Screen {
+            let rows = ["Today"] + Array(repeating: "Photo", count: 25)
+            return FakeDiscoveryApp.Screen(title: "Hub", rows: rows, tabs: ["Hub"], table: true, plain: Set(rows), gapAfterFirstRow: gap)
+        }
+        let app = FakeDiscoveryApp(launch: "hub", tabs: ["Hub": "hub"], screens: ["hub": hub(gap: 0)], changesOnDrag: ["hub": (1 ... 5).map { hub(gap: Double($0) * 10) }])
+
+        _ = try Self.crawl(app)
+
+        #expect(app.scrolls == [.down, .up, .up, .up])
+    }
+
+    /// A screen of 20 plain rows (not lazy, so a drag scrolls nothing) whose next `drags` drags each make the last row taller.
+    static func changingApp(drags: Int) -> FakeDiscoveryApp {
+        let rows = Self.filler(20)
+        func hub(_ growth: Double) -> FakeDiscoveryApp.Screen {
+            FakeDiscoveryApp.Screen(title: "Hub", rows: rows, tabs: ["Hub"], table: true, plain: Set(rows), lastRowGrowth: growth)
+        }
+        return FakeDiscoveryApp(launch: "hub", tabs: ["Hub": "hub"], screens: ["hub": hub(0)], changesOnDrag: ["hub": (1 ... drags).map { hub(Double($0) * 10) }])
+    }
+
+    @Test
+    func aListPastThePageLimitIsListedWithWhy() throws {
+        let rows = ["First"] + Self.filler(30) + ["Mid"] + Self.filler(100, prefix: "Far") + ["Last"]
+        let app = Self.lazyApp(rows: rows, taps: ["First": "first-screen", "Mid": "mid-screen", "Last": "last-screen"])
+
+        let result = try Self.crawl(app)
+
+        #expect(result.belowTheFold == [DiscoverResult.OpenList(screenID: "hub", why: "stopped after 10 pages")])
+        #expect(result.lines().contains("hub: the list may continue below the rows read; rows there were not read (stopped after 10 pages)"))
+        #expect(result.answer(header: "discover", output: "draft.json").verdict.isQualified)
+        #expect(app.scrolls.count { $0 == .down } == DiscoverCrawl.pageLimit - 1)
+        #expect(app.hits == ["First", "Mid"])
+    }
+
+    /// `scrollTo` stops at whichever of two rows it meets first, so a label read at two places in the list names neither.
+    @Test
+    func aLabelReadAtTwoPlacesInTheListIsSkippedAndNeverTapped() throws {
+        let app = Self.lazyApp(rows: ["Twice"] + Self.filler(20) + ["Twice"], taps: ["Twice": "twice-screen"])
+
+        let result = try Self.crawl(app)
+        let skips = result.skipped.filter { $0.reason == .labelNotUnique }
+
+        #expect(skips.map(\.name) == ["Twice", "Twice"])
+        #expect(skips[0].frame.y < skips[1].frame.y)
+        #expect(app.hits.isEmpty)
+        #expect(result.walkbook.screens.map(\.id) == ["hub"])
+    }
+
+    @Test
+    func aScreenAtTheDepthBoundIsNotScrolledAndSaysWhy() throws {
+        let app = Self.lazyApp(rows: Self.filler(20) + ["Open form"], taps: ["Open form": "form"])
+
+        let result = try Self.crawl(app, depth: 0)
+
+        #expect(app.scrolls.isEmpty)
+        #expect(result.belowTheFold == [DiscoverResult.OpenList(screenID: "hub", why: "not scrolled: beyond depth")])
+        #expect(result.lines().contains("hub: the list may continue below the rows read; rows there were not read (not scrolled: beyond depth)"))
     }
 
     /// A list's backgrounds reach the bottom whatever it holds — the fixture's two-row danger zone, frames as captured — so its rows are its cells: a short list says nothing, and the same list with a cell at the tab bar may continue.
@@ -330,6 +507,18 @@ struct DiscoverCrawlTests {
         #expect(String(bytes: first, encoding: .utf8)?.hasSuffix("}\n") == true)
     }
 
+    @Test
+    func twoCrawlsOfALazyAppGiveByteIdenticalDrafts() throws {
+        func draft() throws -> Data {
+            try Self.crawl(Self.lazyApp(rows: ["First"] + Self.filler(20) + ["Last"], taps: ["First": "first-screen", "Last": "last-screen"])).encoded()
+        }
+
+        let first = try draft()
+
+        #expect(try first == draft())
+        #expect(try WalkbookLoader.load(from: first, source: "draft").screens.map(\.id) == ["hub", "first", "last"])
+    }
+
     /// An id is the tapped label's slug; the parent's id goes before it when that slug is taken.
     @Test
     func aScreenIDIsTheTappedLabelsSlugWithTheParentsBreakingATie() throws {
@@ -362,6 +551,20 @@ struct DiscoverCrawlTests {
 extension DiscoverCrawlTests {
     static func crawl(_ app: FakeDiscoveryApp, depth: Int = 2, maxScreens: Int = 25) throws -> DiscoverResult {
         try DiscoverCrawl(appBundleID: "dev.simwalk.discover", state: Walkbook.CaptureState(theme: .light), depth: depth, maxScreens: maxScreens).run(on: app)
+    }
+
+    /// `count` plain rows named `<prefix> 1…`, which no tap lands on.
+    static func filler(_ count: Int, prefix: String = "Filler") -> [String] {
+        (1 ... count).map { "\(prefix) \($0)" }
+    }
+
+    /// An app whose one tab, Hub, is a lazy list of `rows`: those named in `taps` push a screen and the rest are filler.
+    static func lazyApp(rows: [String], taps: [String: String], upFails: Set<String> = []) -> FakeDiscoveryApp {
+        var screens = ["hub": FakeDiscoveryApp.Screen(title: "Hub", rows: rows, tabs: ["Hub"], table: true, taps: taps, plain: Set(rows.filter { taps[$0] == nil }), lazy: true)]
+        for target in Set(taps.values) {
+            screens[target] = FakeDiscoveryApp.Screen(title: target, back: true, tabs: ["Hub"])
+        }
+        return FakeDiscoveryApp(launch: "hub", tabs: ["Hub": "hub"], screens: screens, upFails: upFails)
     }
 
     /// Two tabs; a Settings tab with three rows and the controls a crawl must leave alone, a nested row, and a Profile tab.

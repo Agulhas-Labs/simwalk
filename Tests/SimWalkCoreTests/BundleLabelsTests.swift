@@ -148,6 +148,19 @@ struct BundleLabelsTests {
         #expect(larger.manual.contains("general: 'Notifications' reads truncated at the default size too, so larger type did not cause it; check whether that is by design"), "\(larger.manual)")
     }
 
+    /// SimWalk#219: the drawn text differs by size ("Notific..." beside "Noti..."), yet it is one control truncated at the default size too, so it stays a manual line.
+    @Test
+    func truncationThatReadsDifferentlyAtEachSizeIsStillAManualLineNotAFail() throws {
+        let directory = try TemporaryDirectory()
+        let bundle = try Self.bundle(in: directory, screens: ["root"], states: [Self.light(), Self.light(size: Self.ax3)], setup: true, tree: { _ in Self.titled() })
+        let recognizer = PerSizeRecognizer(accessibilityText: "Noti...", otherwiseText: "Notific...")
+
+        let larger = try #require(try BundleLabels(bundle, claims: [.largerText], recognizer: recognizer).run().claims.first)
+
+        #expect(larger.fails.isEmpty, "\(larger.fails)")
+        #expect(larger.manual.contains("root: 'Notifications' reads truncated at the default size too, so larger type did not cause it; check whether that is by design"), "\(larger.manual)")
+    }
+
     /// A label cut at a larger non-accessibility size but whole at the default size is not by design: the default size is the only comparison that clears larger type.
     @Test
     func truncationThatAppearsAtALargerNonAccessibilitySizeButNotTheDefaultStillFails() throws {
@@ -245,12 +258,12 @@ struct BundleLabelsTests {
     func identicalFailLinesCollapseWithACountAndTheFindingCountStaysTrue() throws {
         let directory = try TemporaryDirectory()
         let nearly = Self.issue("contrast", description: "Contrast nearly passed", element: false)
-        let bundle = try Self.bundle(in: directory, screens: ["root"], states: [Self.light()], setup: true, audit: { _ in AppleAuditRecord(milliseconds: 1, issues: [nearly, nearly]) })
+        let bundle = try Self.bundle(in: directory, screens: ["root"], states: [Self.light()], setup: true, audit: { _ in AppleAuditRecord(milliseconds: 1, issues: [nearly, nearly], elementsRead: true) })
 
         let report = try BundleLabels(bundle, claims: [.sufficientContrast]).run()
         let claim = try #require(report.claims.first)
 
-        #expect(claim.fails == ["root: appleContrast — (no element) — Contrast nearly passed [light] ×2"])
+        #expect(claim.fails == ["root: appleContrast — Apple named no element — Contrast nearly passed ×2 [light]"])
         #expect(claim.findingCount == 2)
         #expect(BundleLabelsSummary(report, of: bundle).render().contains("2 findings"))
     }
@@ -507,6 +520,17 @@ private extension BundleLabelsTests {
             }
             guard let fragment = readsNothingFromPathsContaining else { return lines }
             return url.path.contains(fragment) ? [] : lines
+        }
+    }
+
+    /// A text recogniser that reads one text from accessibility-size screenshots and another from the rest.
+    struct PerSizeRecognizer: ScreenTextRecognizing {
+        let accessibilityText: String
+        let otherwiseText: String
+
+        func lines(inPNGAt url: URL) throws -> [MirrorTextLine] {
+            let text = url.path.contains("accessibility") ? accessibilityText : otherwiseText
+            return [MirrorTextLine(text: text, centreX: 0.236, centreY: 0.126, width: 0.2, height: 0.02, confidence: 1)]
         }
     }
 }

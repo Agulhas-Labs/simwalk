@@ -8,7 +8,7 @@ import Foundation
 import SimWalkCore
 import SimWalkDriver
 
-/// `simwalk lease acquire [--device <udid|name>] [--clone-from <udid>] [--physical <udid>] [--ttl 30m]` — takes a device for the caller alone and prints its UDID and the lease's token, one line each.
+/// `simwalk lease acquire [--device <udid|name>] [--clone-from <udid>] [--physical <udid>] [--family iphone|ipad] [--ttl 30m]` — takes a device for the caller alone and prints its UDID and the lease's token, one line each.
 ///
 /// The lease lives as long as the session asking (``HolderProcess/sessionHolder()``) or `--ttl`, whichever ends first; the token is printed here and nowhere else.
 struct LeaseAcquireCommand: ParsableCommand {
@@ -17,8 +17,11 @@ struct LeaseAcquireCommand: ParsableCommand {
         abstract: "Lease a simulator: prints `udid: <UDID>` and `token: <token>`, one line each."
     )
 
-    @Option(name: .long, help: "Simulator name or UDID. Defaults to an unleased device on the newest iOS runtime, a shut-down one first.")
+    @Option(name: .long, help: "Simulator name or UDID. Defaults to an unleased device on the newest iOS runtime, a shut-down one first, an iPhone before an iPad.")
     var device: String?
+
+    @Option(name: .long, help: "iphone or ipad: lease only that family. Without it a bare acquire prefers an iPhone.")
+    var family: DeviceFamily?
 
     @Option(name: .long, help: "Clone this shut-down device (by UDID) and lease the clone; releasing the lease deletes the clone.")
     var cloneFrom: String?
@@ -38,6 +41,9 @@ struct LeaseAcquireCommand: ParsableCommand {
         }
         if physical != nil, device != nil || cloneFrom != nil {
             throw ValidationError("--physical leases a phone by its UDID; pass it without --device or --clone-from")
+        }
+        if family != nil, device != nil || cloneFrom != nil || physical != nil {
+            throw ValidationError("--family chooses among unnamed devices; pass it without --device, --clone-from or --physical — the device named decides")
         }
         guard Self.seconds(ttl) != nil else {
             throw ValidationError("--ttl takes a positive whole number of seconds, minutes or hours — 90s, 30m, 2h — not '\(ttl)'")
@@ -79,7 +85,7 @@ struct LeaseAcquireCommand: ParsableCommand {
                 ]
             )
         }
-        let grant = try leasing.acquire(device: device, cloneFrom: cloneFrom, ttl: ttlSeconds, holderPID: holderPID, now: now)
+        let grant = try leasing.acquire(device: device, cloneFrom: cloneFrom, family: family, ttl: ttlSeconds, holderPID: holderPID, now: now)
         let made = grant.lease.clonedFrom.map { ", cloned from \($0) — releasing it deletes the clone" } ?? ""
         let summary = "leased \(grant.simulator.name) (iOS \(grant.simulator.osVersion))\(made)"
         let verdict: AnswerVerdict = holderWarning.map { .reporting(qualifications: [$0], detail: summary) } ?? .unqualified(summary)
@@ -101,3 +107,5 @@ struct LeaseAcquireCommand: ParsableCommand {
         return TimeInterval(count) * unit
     }
 }
+
+extension DeviceFamily: ExpressibleByArgument {}

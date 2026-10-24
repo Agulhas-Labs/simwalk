@@ -28,6 +28,22 @@ struct SessionDeviceExchangeTests {
         #expect(fixture.sentTokens == [Fixture.token])
     }
 
+    /// A device read's image is filed under the number the runner gave the response, not one the host counted: the second read's is `read-2.png`.
+    @Test
+    func aReadsScreenshotIsFiledUnderTheRunnersNumber() throws {
+        let fixture = try Fixture()
+        fixture.screenshotPNG = try SessionCommandTests.png(width: 402, height: 874)
+        _ = try fixture.read(["s1"])
+
+        let answer = try fixture.read(["s1", "--screenshot"])
+
+        let file = fixture.store.layout(id: "s1").screenshot(read: 2)
+
+        #expect(file.lastPathComponent == "read-2.png")
+        #expect(FileManager.default.fileExists(atPath: file.path))
+        #expect(answer.residue[1].hasPrefix("screenshot: \(file.path) (402×874 px, point scale"))
+    }
+
     /// Two reads are numbered by the runner 1 and 2, and both are filed.
     @Test
     func twoReadsAreNumberedOneAndTwo() throws {
@@ -378,6 +394,8 @@ extension SessionDeviceExchangeTests {
         /// A failure the runner answers every request with, instead of serving it.
         let runnerFailure: String?
         private(set) var lockReads = 0
+        /// The image a `read` that asks for one is answered with.
+        var screenshotPNG: Data?
 
         init(address: String = "::1", commandClock: TimeInterval = 10, tunnelAddress: String = "::1", exitOnPhone: LiveSessionExit? = nil, exitSession: String? = "s1", passcodeRequired: Bool? = false, runnerFailure: String? = nil) throws {
             self.exitSession = exitSession
@@ -421,7 +439,7 @@ extension SessionDeviceExchangeTests {
                     let tree = try #require(SessionCommandTests.screen.tree)
                     return try LiveSessionResponse(n: number, action: .step, screen: SessionCommandTests.screen, step: .landed(#require(request.step), delta: ScreenDelta(from: tree, to: tree)))
                 default:
-                    return LiveSessionResponse(n: number, action: request.action, screen: SessionCommandTests.screen)
+                    return LiveSessionResponse(n: number, action: request.action, screen: SessionCommandTests.screen, screenshot: request.screenshot ? screenshotPNG : nil)
                 }
             }
         }

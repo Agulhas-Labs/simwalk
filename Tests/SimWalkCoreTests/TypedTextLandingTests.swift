@@ -8,6 +8,56 @@ import Testing
 
 /// The post-condition a `type` step reports itself by, and the placeholder trap that makes the obvious version of it wrong.
 struct TypedTextLandingTests {
+    /// A replace sends one delete keystroke per character the field reads, its placeholder included, since a real value can equal it (SimWalk#198).
+    @Test
+    func aReplaceDeletesOneKeystrokePerCharacterRead() {
+        #expect(TypedTextLanding.deleteKeystrokes(value: "Draft") == 5)
+        #expect(TypedTextLanding.deleteKeystrokes(value: "0") == 1)
+        #expect(TypedTextLanding.deleteKeystrokes(value: nil) == 0)
+        #expect(TypedTextLanding.deleteKeystrokes(value: "") == 0)
+    }
+
+    /// What remains after the delete is nothing for an empty field or one reading its placeholder, and the text otherwise.
+    @Test
+    func aFieldReadingItsPlaceholderHasNothingRemaining() {
+        #expect(TypedTextLanding.remainingText(value: "Nickname", placeholder: "Nickname") == "")
+        #expect(TypedTextLanding.remainingText(value: nil, placeholder: "Nickname") == "")
+        #expect(TypedTextLanding.remainingText(value: "", placeholder: nil) == "")
+        #expect(TypedTextLanding.remainingText(value: "Draft", placeholder: "Nickname") == "Draft")
+        #expect(TypedTextLanding.stillHeldRefusal(label: "Notes", remaining: "") == nil)
+        #expect(TypedTextLanding.stillHeldRefusal(label: "Notes", remaining: "Line") == "'Notes' still held 'Line' after its text was deleted")
+    }
+
+    /// A replace whose text is the placeholder's lands when the field reads it, and a value equal to the placeholder is deleted in full (SimWalk#198).
+    @Test
+    func aReplaceWithTheTextOfThePlaceholderLands() {
+        #expect(TypedTextLanding.replaceRefusal(label: "Count", text: "0", after: "0", placeholder: "0") == nil)
+        #expect(TypedTextLanding.deleteKeystrokes(value: "0") == 1)
+    }
+
+    /// A replace is verified by what the field reads back, and the refusal names the value found.
+    @Test
+    func aReplaceIsRefusedNamingTheValueTheFieldHolds() {
+        #expect(TypedTextLanding.replaceRefusal(label: "Nickname", text: "Robin", after: "Robin", placeholder: "Name") == nil)
+        #expect(TypedTextLanding.replaceRefusal(label: "Nickname", text: "Robin", after: "Robinx", placeholder: "Name") == "'Nickname' holds 'Robinx' after replacing its text")
+        #expect(TypedTextLanding.replaceRefusal(label: "Nickname", text: "Robin", after: "Name", placeholder: "Name") == "'Nickname' holds '' after replacing its text")
+    }
+
+    /// An empty text is satisfied by a field that reads back empty or as its placeholder, and by nothing else.
+    @Test
+    func anEmptyReplaceIsSatisfiedByAnEmptyFieldOrItsPlaceholder() {
+        #expect(TypedTextLanding.replaceRefusal(label: "Nickname", text: "", after: "Name", placeholder: "Name") == nil)
+        #expect(TypedTextLanding.replaceRefusal(label: "Nickname", text: "", after: "", placeholder: nil) == nil)
+        #expect(TypedTextLanding.replaceRefusal(label: "Nickname", text: "", after: "Draft", placeholder: "Name") == "'Nickname' holds 'Draft' after replacing its text")
+    }
+
+    /// A secure field cannot be read back, so replace is refused by name.
+    @Test
+    func aSecureFieldRefusesReplaceByName() {
+        #expect(TypedTextLanding.secureReplaceRefusal(label: "Password") == "'Password' is a secure field, whose value cannot be read back, so replace is refused")
+        #expect(TypedTextLanding.unfocusedReplaceRefusal(label: "Notes") == "'Notes' did not take keyboard focus when tapped, so its text was not replaced")
+    }
+
     /// The specimen: an app's search field reports `Search boats, crew, harbours…` while empty, so a containment check alone reports a step that never typed anything as having landed.
     @Test
     func aplaceholderContainingTheTextIsNotAFieldThatTookIt() {

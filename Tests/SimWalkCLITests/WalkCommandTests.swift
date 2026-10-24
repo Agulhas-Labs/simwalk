@@ -278,6 +278,131 @@ struct WalkCommandTests {
         #expect((outcome.survivedRunnerFailure != nil) == (runnerStatus != 0))
     }
 
+    /// XCTest blamed the walk for a crash of a process named `xctest` on the Mac (SimWalk#176).
+    ///
+    /// The Mac's own crash reports say that process was not this walk's, so the runner failure is excused: the walk is `ok`, with no survived-failure qualification or note, and the excused line in the answer.
+    @Test
+    func aRunnerFailureThatIsXCTestBlamingAHostXCTestCrashLeavesTheWalkOk() throws {
+        let directory = try TemporaryDirectory()
+        let reports = try TemporaryDirectory()
+        try Self.hostCrashReport.write(to: reports.url.appendingPathComponent("xctest-2026-10-21-102515.ips"), atomically: true, encoding: .utf8)
+        let writes = try Self.runnerWrites(in: directory)
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 65, writes: writes)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", writes.to.path, "--device", "UDID-1"])
+
+        let outcome = try command.performWalk(shell: Self.crashBlamingShell(script, failures: 2), pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory), crashReports: XCTestCrashEvidence(directory: reports.url))
+        let answer = outcome.answer()
+
+        #expect(answer.verdict.exitCode == 0)
+        #expect(!answer.verdict.line.contains("a runner failure this bundle survived"))
+        #expect(!answer.text.contains("the runner reported a failure and this bundle survived it"))
+        #expect(answer.text.contains("XCTest reported 2 \"Critical process xctest crashed\" failures for crash reports of a host process named xctest, not this walk"))
+    }
+
+    /// The same failure with no crash report to explain it keeps its qualification and its note, and the answer adds what was searched.
+    @Test
+    func aRunnerFailureThatIsXCTestBlamingACrashNoReportExplainsStaysQualified() throws {
+        let directory = try TemporaryDirectory()
+        let reports = try TemporaryDirectory()
+        let writes = try Self.runnerWrites(in: directory)
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 65, writes: writes)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", writes.to.path, "--device", "UDID-1"])
+
+        let outcome = try command.performWalk(shell: Self.crashBlamingShell(script, failures: 1), pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory), crashReports: XCTestCrashEvidence(directory: reports.url))
+        let answer = outcome.answer()
+
+        #expect(answer.verdict.exitCode == AnswerVerdict.qualifiedExitCode)
+        #expect(answer.verdict.line.contains("a runner failure this bundle survived"))
+        #expect(answer.text.contains("the runner reported a failure and this bundle survived it"))
+        #expect(answer.text.contains("the runner failure is 1 \"Critical process xctest crashed\" failure; "))
+    }
+
+    /// The appearance retry's runner fails with exit 65, blaming a host `xctest` crash (SimWalk#176): the retry is folded in, and the walk is not qualified by that runner failure and carries the excused line.
+    @Test
+    func aRetryRunnerFailureThatIsXCTestBlamingAHostXCTestCrashLeavesTheWalkOk() throws {
+        let (directory, retryDirectory, reports) = try (TemporaryDirectory(), TemporaryDirectory(), TemporaryDirectory())
+        try Self.hostCrashReport.write(to: reports.url.appendingPathComponent("xctest-2026-10-21-102515.ips"), atomically: true, encoding: .utf8)
+        let writes = try (bundle: Self.refusingDark(in: directory).url, to: directory.url.appendingPathComponent("walked.\(CaptureBundleLayout.directoryExtension)"))
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 0, writes: writes, retryWrites: Self.progressAgain(in: retryDirectory, refusingDark: false).url, retryStatus: 65)
+        let command = try WalkCommand.parse([Self.lightAndDarkWalkbook(in: directory), "--output", writes.to.path, "--device", "UDID-1"])
+
+        let outcome = try command.performWalk(shell: Self.crashBlamingShell(script, failures: 2), pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory), crashReports: XCTestCrashEvidence(directory: reports.url))
+        let answer = outcome.answer()
+
+        #expect(outcome.bundle.manifest.appearanceSettle?.folded == true)
+        #expect(!outcome.isQualified)
+        #expect(answer.verdict.exitCode == 0)
+        #expect(answer.text.contains("XCTest reported 2 \"Critical process xctest crashed\" failures for crash reports of a host process named xctest, not this walk"))
+    }
+
+    /// The appearance retry's crash-blame window ends when the retry's runner did, not when the blame is asked for: a host `xctest` crash captured after the runner ended explains nothing (SimWalk#179).
+    @Test
+    func aHostXCTestCrashCapturedAfterTheRetryRunnerEndedDoesNotExcuseItsFailure() throws {
+        let (directory, retryDirectory, reports) = try (TemporaryDirectory(), TemporaryDirectory(), TemporaryDirectory())
+        let writes = try (bundle: Self.refusingDark(in: directory).url, to: directory.url.appendingPathComponent("walked.\(CaptureBundleLayout.directoryExtension)"))
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 0, writes: writes, retryWrites: Self.progressAgain(in: retryDirectory, refusingDark: false).url, retryStatus: 65)
+        let command = try WalkCommand.parse([Self.lightAndDarkWalkbook(in: directory), "--output", writes.to.path, "--device", "UDID-1"])
+        // Nothing scripted runs once the retry runner has returned, so the scripts' clock stands at the runner's end. This clock, from the retry runner's return, reads that instant and then moves 30 s on with every read: the end the walk records is the runner's, any later read is well past it. The blame's `xcresulttool` call, before it reads the crash reports, files a host crash captured 3 s after the runner's end on the scripts' clock: outside a window that ends with the runner, inside one that ends at a later read.
+        var skew: TimeInterval = 0
+        let now: () -> Date = {
+            guard script.walkedScreens.count > 1 else { return script.now() }
+            defer { skew += 30 }
+            return script.now().addingTimeInterval(skew)
+        }
+        let atTheBlame = {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(identifier: "UTC")
+            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSS"
+            let capturedAt = formatter.string(from: script.now().addingTimeInterval(3))
+            let report = Self.hostCrashReport.replacingOccurrences(of: "1969-12-31 23:59:59.0000", with: capturedAt)
+            do {
+                try report.write(to: reports.url.appendingPathComponent("xctest-2026-10-21-102515.ips"), atomically: true, encoding: .utf8)
+            } catch {
+                Issue.record(error)
+            }
+        }
+
+        let outcome = try command.performWalk(shell: Self.crashBlamingShell(script, failures: 2, atTheBlame: atTheBlame), pause: { _ in }, now: now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory), crashReports: XCTestCrashEvidence(directory: reports.url))
+        let answer = outcome.answer()
+
+        // Without the report there is nothing to excuse the failure, and the expectations below would pass for no reason.
+        #expect(FileManager.default.fileExists(atPath: reports.url.appendingPathComponent("xctest-2026-10-21-102515.ips").path))
+        #expect(outcome.isQualified)
+        #expect(answer.verdict.exitCode == AnswerVerdict.qualifiedExitCode)
+        #expect(answer.verdict.line.contains("a runner failure the appearance retry survived"))
+        #expect(!answer.text.contains("not this walk"))
+    }
+
+    /// A host `xctest` crash report, captured one second before the epoch the scripts' clock counts from: inside the hour before the run.
+    static var hostCrashReport: String {
+        """
+        {"app_name":"xctest","timestamp":"1969-12-31 23:59:59.00 +0000","bug_type":"309","os_version":"macOS 27.0.1 (26A434)","name":"xctest"}
+        {"procName":"xctest","procPath":"/private/var/folders/*/xctest","captureTime":"1969-12-31 23:59:59.0000 +0000","parentProc":"sleep","exception":{"type":"EXC_CRASH","signal":"SIGKILL (Code Signature Invalid)"},"termination":{"namespace":"CODESIGNING","indicator":"Launch Constraint Violation"}}
+        """
+    }
+
+    /// `xcresulttool get test-results tests` as it lists `failures` XCTest failure messages blaming a crash of `xctest`.
+    static func crashFailuresJSON(_ failures: Int) -> String {
+        let messages = Array(repeating: #"{"name":"Critical process xctest crashed in (null)","nodeType":"Failure Message"}"#, count: failures).joined(separator: ",")
+        return #"{"devices":[],"testPlanConfigurations":[],"testNodes":[{"nodeType":"Test Plan","name":"SimWalkRunner","children":[{"nodeType":"UI test bundle","name":"SimWalkRunner","children":[{"nodeType":"Test Suite","name":"WalkRunner","children":[{"nodeType":"Test Case","name":"testWalk()","children":["# + messages + "]}]}]}]}]}"
+    }
+
+    /// `script` as a runner that fails with exit 65 having made its result bundle, and whose result bundle lists `failures` crash-blaming failures; `atTheBlame` runs when the blame reads that bundle, before it reads the crash reports.
+    private static func crashBlamingShell(_ script: WalkScript, failures: Int, atTheBlame: @escaping () -> Void = {}) -> Shell {
+        Shell(script: { executable, arguments, environment in
+            if arguments.starts(with: ["xcresulttool", "get", "test-results", "tests"]) {
+                atTheBlame()
+                return Shell.Result(status: 0, standardOutput: crashFailuresJSON(failures), standardError: "")
+            }
+            let result = try script.run(executable, arguments, environment)
+            if arguments.contains("test-without-building"), let flag = arguments.firstIndex(of: "-resultBundlePath") {
+                try FileManager.default.createDirectory(atPath: arguments[flag + 1], withIntermediateDirectories: true)
+            }
+            return result
+        })
+    }
+
     /// SimWalk#107: an `--output` left without `.simwalk` is completed rather than refused, and the answer's first line says so.
     @Test
     func anOutputWithoutTheSuffixIsCompletedAndTheHeaderSaysSo() throws {
@@ -955,6 +1080,80 @@ struct WalkCommandTests {
         #expect(!FileManager.default.fileExists(atPath: scratch))
     }
 
+    /// The pass over a second runner whose `progress` light audit timed out, its moves going through `fileManager`.
+    ///
+    /// SimWalk#195: the timed-out audits ride out of `secondPass` on every return that read its bundle. Through a whole walk `.folded` is redundant (the walk re-reads the folded bundle), so each is asserted on the pass's `retryTimeouts` directly.
+    private func passOverATimedOutRetry(fileManager: (_ first: CaptureBundle) -> FileManager, sourceLocation: SourceLocation = #_sourceLocation) throws -> AppearanceRetryPass.Outcome {
+        let (directory, retryDirectory) = try (TemporaryDirectory(), TemporaryDirectory())
+        let first = try Self.refusingDark(in: directory)
+        let retry = try CaptureBundleFixture.writeWalk(in: retryDirectory, screens: [
+            CaptureBundleFixture.ScreenSpec(id: "progress", captures: [
+                CaptureBundleFixture.Capture(screenID: "progress", state: Walkbook.CaptureState(theme: .light), tree: CaptureBundleFixture.plainScreen(), appleAudit: TestManagerRestartTests.timedOut),
+                CaptureBundleFixture.Capture(screenID: "progress", state: Walkbook.CaptureState(theme: .dark), tree: CaptureBundleFixture.plainScreen()),
+            ]),
+        ], nonce: "retry-nonce")
+        let bookPath = try Self.lightAndDarkWalkbook(in: directory)
+        let book = try WalkbookLoader.load(contentsOf: URL(fileURLWithPath: bookPath))
+        var outputs: [String] = []
+        defer {
+            for output in outputs {
+                try? FileManager.default.removeItem(atPath: output)
+            }
+        }
+        let pass = AppearanceRetryPass(udid: "UDID-1", found: .light, walkbookPath: bookPath, mayReboot: true, buildHash: "a1b2c3d4", fileManager: fileManager(first), nonce: { "retry-nonce" }, renew: { _ in nil }, walk: { _, output, _ in
+            outputs.append(output)
+            try FileManager.default.copyItem(at: retry.url, to: URL(fileURLWithPath: output))
+        })
+        return try #require(pass.perform(after: first, of: book, run: Self.settlingDevice(), now: { Date(timeIntervalSince1970: 0) }), sourceLocation: sourceLocation)
+    }
+
+    /// The one timed-out audit the retry bundle records, named by screen, state and Apple's own sentence.
+    private static let progressLightTimedOut = ["progress light: Audit failed to complete in time"]
+
+    private static func named(_ timeouts: [AppleAuditScan.Failure]) -> [String] {
+        timeouts.map { "\($0.screenID) \($0.stateSlug): \($0.reason)" }
+    }
+
+    @Test
+    func aFoldedRetryAnswersTheTimedOutAuditsItsSecondRunnerRecorded() throws {
+        let outcome = try passOverATimedOutRetry { _ in .default }
+
+        guard case .folded = outcome.report else {
+            Issue.record("a retry whose fold held must be answered as folded, got \(outcome.report)")
+            return
+        }
+
+        #expect(Self.named(outcome.retryTimeouts) == Self.progressLightTimedOut)
+    }
+
+    @Test
+    func aFoldThatCouldNotBeUndoneAnswersTheTimedOutAuditsItsSecondRunnerRecorded() throws {
+        let failing = FailingMoves.fileManager { source, _ in source.path.contains("/simwalk-retry-") }
+        let outcome = try passOverATimedOutRetry { _ in failing }
+
+        guard case .foldNotUndone = outcome.report else {
+            Issue.record("a fold that could not be undone must be answered as one, got \(outcome.report)")
+            return
+        }
+
+        #expect(Self.named(outcome.retryTimeouts) == Self.progressLightTimedOut)
+    }
+
+    @Test
+    func aRetryKeptAtItsScratchBundleAnswersTheTimedOutAuditsItsSecondRunnerRecorded() throws {
+        let outcome = try passOverATimedOutRetry { first in
+            let progress = CaptureBundleLayout.url(forRelativePath: CaptureBundleLayout.screenDirectory(screenID: "progress"), in: first.url).path
+            return FailingMoves.partwayFileManager { source, _ in source.path == progress }
+        }
+
+        guard case let .retryFailed(_, keptAt) = outcome.report, keptAt != nil else {
+            Issue.record("a fold undone whose record could not be written must be answered with the scratch bundle kept, got \(outcome.report)")
+            return
+        }
+
+        #expect(Self.named(outcome.retryTimeouts) == Self.progressLightTimedOut)
+    }
+
     /// And the second guard: a fold undone, whose record over the first attempt could not be written after it, keeps the scratch bundle — it holds what the fold set aside — and the answer says where.
     ///
     /// Here the move setting the first attempt's `progress` aside fails partway, as a copy and a delete between volumes does: the set-aside holds a whole copy, the bundle has lost a file of it, the move was never recorded, and the manifest put back names an artefact that is gone — so the record is refused. Removing the scratch bundle then would delete the only whole copy.
@@ -1370,6 +1569,110 @@ struct WalkCommandTests {
         #expect(refusal as? ShellError == .timedOut(command: stalled, seconds: 300))
         #expect(WalkClaim.walkedDevices(in: leases, isAlive: HolderProcess.isAlive).isEmpty)
         #expect(leases.all().isEmpty)
+    }
+
+    /// SimWalk#182: a serial walk interrupted during its runner gives back its lease and its claim on the device before the cancel returns, since the signal then ends the process without reaching the walk's own release.
+    ///
+    /// Read at the cancel, not after the walk: here the walk carries on once the cancel returns, and its own release would hide a cancel that gave nothing back.
+    @Test
+    func anInterruptionDuringASerialWalksRunnerReleasesItsLeaseAndClaimBeforeTheCancelReturns() throws {
+        let directory = try TemporaryDirectory()
+        let leases = Self.leases(in: directory)
+        let writes = try Self.runnerWrites(in: directory)
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 0, writes: writes)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", writes.to.path, "--device", "UDID-1"])
+        let interruption = Cancellation()
+        var heldBeforeCancel: (leased: [String], claimed: Set<String>)?
+        var heldAtCancel: (leased: [String], claimed: Set<String>)?
+        let shell = Shell { executable, arguments, environment in
+            if arguments.contains("test-without-building"), heldAtCancel == nil {
+                heldBeforeCancel = (leases.all().map(\.udid), WalkClaim.walkedDevices(in: leases, isAlive: HolderProcess.isAlive))
+                interruption.cancel()
+                heldAtCancel = (leases.all().map(\.udid), WalkClaim.walkedDevices(in: leases, isAlive: HolderProcess.isAlive))
+            }
+            return try script.run(executable, arguments, environment)
+        }
+
+        // The cancel is raised on the walk's own thread, which cannot hand the device back while it waits, so the interruption waits for no handback (SimWalk#187; `HandbackGateTests` raises it from another).
+        _ = try? command.performWalk(shell: shell, pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: leases, interruption: interruption, handbackBound: 0, interruptionNote: { _ in })
+
+        let before = try #require(heldBeforeCancel)
+        let atCancel = try #require(heldAtCancel)
+
+        #expect(before.leased == ["UDID-1"])
+        #expect(before.claimed == ["UDID-1"])
+        #expect(atCancel.leased.isEmpty)
+        #expect(atCancel.claimed.isEmpty)
+    }
+
+    /// SimWalk#187: a walk interrupted while `prepare` builds its runner gives back its lease and its claim on the device before the cancel returns, since the signal then ends the process before the walk's own release is registered.
+    ///
+    /// Read at the cancel, not after the walk: here the walk carries on once the cancel returns, and its own release would hide a cancel that gave nothing back.
+    @Test
+    func anInterruptionDuringPrepareReleasesTheLeaseAndClaimBeforeTheCancelReturns() throws {
+        let directory = try TemporaryDirectory()
+        let leases = Self.leases(in: directory)
+        let writes = try Self.runnerWrites(in: directory)
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 0, writes: writes)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", writes.to.path, "--device", "UDID-1"])
+        let interruption = Cancellation()
+        var heldBeforeCancel: (leased: [String], claimed: Set<String>)?
+        var heldAtCancel: (leased: [String], claimed: Set<String>)?
+        let shell = Shell { executable, arguments, environment in
+            if arguments.contains("build-for-testing"), heldAtCancel == nil {
+                heldBeforeCancel = (leases.all().map(\.udid), WalkClaim.walkedDevices(in: leases, isAlive: HolderProcess.isAlive))
+                interruption.cancel()
+                heldAtCancel = (leases.all().map(\.udid), WalkClaim.walkedDevices(in: leases, isAlive: HolderProcess.isAlive))
+            }
+            return try script.run(executable, arguments, environment)
+        }
+
+        _ = try? command.performWalk(shell: shell, pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: leases, interruption: interruption)
+
+        let before = try #require(heldBeforeCancel)
+        let atCancel = try #require(heldAtCancel)
+
+        #expect(before.leased == ["UDID-1"])
+        #expect(before.claimed == ["UDID-1"])
+        #expect(atCancel.leased.isEmpty)
+        #expect(atCancel.claimed.isEmpty)
+    }
+
+    /// SimWalk#187: a serial walk's runner runs on a shell the interruption's stop reaches, so an interruption landing once the runner is built leaves no runner driving the device after the lease and claim are given back.
+    ///
+    /// A scripted child cannot be ended mid-run, so this pins what puts the runner in the stop's reach: a launch after the stop is refused, as a running child registered with it is stopped (``ChildStopTests``). Before the fix the runner launched on a device no longer held.
+    @Test
+    func anInterruptionDuringASerialWalkReachesItsRunnerSoNoneLaunchesOnADeviceNoLongerHeld() throws {
+        let directory = try TemporaryDirectory()
+        let leases = Self.leases(in: directory)
+        let writes = try Self.runnerWrites(in: directory)
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 0, writes: writes)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", writes.to.path, "--device", "UDID-1"])
+        let interruption = Cancellation()
+        let childStop = ChildStop()
+        var built = false
+        var heldAtCancel: (leased: [String], claimed: Set<String>)?
+        var runnerLaunched = false
+        let shell = Shell { executable, arguments, environment in
+            if arguments.contains("test-without-building") {
+                runnerLaunched = true
+            } else if built, heldAtCancel == nil {
+                interruption.cancel()
+                heldAtCancel = (leases.all().map(\.udid), WalkClaim.walkedDevices(in: leases, isAlive: HolderProcess.isAlive))
+            }
+            built = built || arguments.contains("build-for-testing")
+            return try script.run(executable, arguments, environment)
+        }
+
+        // Raised on the walk's own thread, so the interruption waits for no handback, as above.
+        _ = try? command.performWalk(shell: shell, pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: leases, interruption: interruption, childStop: childStop, handbackBound: 0, interruptionNote: { _ in })
+
+        let atCancel = try #require(heldAtCancel)
+
+        #expect(childStop.isStopped)
+        #expect(!runnerLaunched)
+        #expect(atCancel.leased.isEmpty)
+        #expect(atCancel.claimed.isEmpty)
     }
 
     /// SimWalk#136: the appearance read before the runner, stalled behind `xcodebuild -runFirstLaunch`, refuses the walk naming the cause and the fix, before the runner runs, and releases the device.
@@ -2016,7 +2319,7 @@ struct WalkCommandTests {
     }
 
     /// A bundle staged beside the walk, and the `--output` path — a different one — the scripted runner copies it to when it runs.
-    private static func runnerWrites(in directory: TemporaryDirectory) throws -> (bundle: URL, to: URL) {
+    static func runnerWrites(in directory: TemporaryDirectory) throws -> (bundle: URL, to: URL) {
         try (bundle(in: directory).url, directory.url.appendingPathComponent("walked.\(CaptureBundleLayout.directoryExtension)"))
     }
 
@@ -2097,7 +2400,7 @@ struct WalkCommandTests {
     }
 
     /// A one-screen walkbook on disk, returning its path.
-    private static func walkbook(in directory: TemporaryDirectory) throws -> String {
+    static func walkbook(in directory: TemporaryDirectory) throws -> String {
         let url = directory.url.appendingPathComponent("book.json")
         let json = #"{"name":"probe","appBundleID":"com.example.probe","screens":[{"id":"progress","route":[{"tab":{"label":"Progress"}}],"states":[{"theme":"light"}]}]}"#
         try Data(json.utf8).write(to: url)
@@ -2210,6 +2513,8 @@ extension WalkCommandTests {
         private let booted: Bool
         /// The device `simctl list` reports; a test of the override directory needs one named like a UUID, which that directory keys on.
         private let udid: String
+        /// The `deviceTypeIdentifier` `simctl list` reports, `nil` as a device that reports none (SimWalk#219).
+        private let deviceType: String?
         /// Whether the settle's wait for the boot wedges: it outlives its bound, and from then on every call to the device would hang — one made with a bound times out, one made without is recorded in `unboundedAfterWedge`.
         private let wedging: Bool
         private var wedged = false
@@ -2231,9 +2536,11 @@ extension WalkCommandTests {
             failing: [String] = [],
             booted: Bool = true,
             udid: String = "UDID-1",
+            deviceType: String? = nil,
             wedging: Bool = false
         ) {
             self.udid = udid
+            self.deviceType = deviceType
             self.booted = booted
             self.wedging = wedging
             self.appPath = appPath
@@ -2323,7 +2630,8 @@ extension WalkCommandTests {
         }
 
         private func answer(_ arguments: [String]) -> Shell.Result {
-            let devices = #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"udid":"\#(udid)","name":"iPhone 17 Pro","state":""# + (booted ? "Booted" : "Shutdown") + #""}]}}"#
+            let typeField = deviceType.map { #","deviceTypeIdentifier":"\#($0)""# } ?? ""
+            let devices = #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"udid":"\#(udid)","name":"iPhone 17 Pro","state":""# + (booted ? "Booted" : "Shutdown") + #""\#(typeField)}]}}"#
             let output: String
             var status: Int32 = 0
             switch arguments {

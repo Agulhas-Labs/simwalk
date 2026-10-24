@@ -18,15 +18,60 @@ struct SimctlStallTests {
         let stub = try StubXcrun(waitingOnFirstLaunch: true)
         defer { stub.remove() }
 
+        // The evidence is injected because the real tree's timing under load is the flake (SimWalk#164); the next test reads the real tree.
+        let firstLaunch = [stub.directory.appendingPathComponent("xcodebuild").path, "-runFirstLaunch"]
+        let readAtStop = ReadTree()
+        let shell = Shell { root, group in
+            let real = ProcessTree.commandLines(of: root, group: group)
+            readAtStop.record(real)
+            return real + [firstLaunch]
+        }
         let error = #expect(throws: ShellError.self) {
-            try Shell().run(stub.xcrun, ["simctl", "ui", "UDID-1", "appearance"], timeout: 0.5)
+            try shell.run(stub.xcrun, ["simctl", "ui", "UDID-1", "appearance"], timeout: 0.5)
         }
 
+        // The tree is read before the stop (SimWalk#136): the stalled call's root is still alive when it is read.
+        #expect(readAtStop.lines.contains { $0.contains(stub.xcrun) }, "command lines read: \(readAtStop.lines)")
         #expect(error == .stalledOnFirstLaunch(command: "xcrun simctl ui UDID-1 appearance", seconds: 0.5))
         let text = error.map { String(describing: $0) } ?? ""
         #expect(text.contains("`xcrun simctl ui UDID-1 appearance` did not finish within"))
         #expect(text.contains("`xcodebuild -runFirstLaunch`, which waits on an administrator password"))
         #expect(text.contains("run `sudo xcodebuild -runFirstLaunch` (or open Xcode once)"))
+        #expect(stub.processesLeft().isEmpty)
+    }
+
+    /// The real tree is read: a stub chain waiting on first launch shows `xcodebuild -runFirstLaunch` under the process the call started.
+    @Test
+    func theRealProcessTreeOfAStalledCallShowsFirstLaunch() throws {
+        let stub = try StubXcrun(waitingOnFirstLaunch: true)
+        defer { stub.remove() }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: stub.xcrun)
+        process.arguments = ["simctl", "ui", "UDID-1", "appearance"]
+        try process.run()
+        let pid = process.processIdentifier
+        var stopped = false
+        defer {
+            if !stopped {
+                kill(-pid, SIGKILL)
+                process.waitUntilExit()
+            }
+        }
+
+        var lines: [[String]] = []
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
+            lines = ProcessTree.commandLines(of: pid, group: pid)
+            if XcodeFirstLaunch.isWaiting(in: lines) {
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+
+        #expect(XcodeFirstLaunch.isWaiting(in: lines), "last command lines read: \(lines)")
+        stopped = true
+        kill(-pid, SIGKILL)
+        process.waitUntilExit()
         #expect(stub.processesLeft().isEmpty)
     }
 
@@ -67,6 +112,20 @@ struct SimctlStallTests {
 }
 
 extension SimctlStallTests {
+    /// The real command lines an injected tree reader saw, kept for the test to check after the call returns.
+    final class ReadTree: @unchecked Sendable {
+        private let lock = NSLock()
+        private var recorded: [[String]] = []
+
+        var lines: [[String]] {
+            lock.withLock { recorded }
+        }
+
+        func record(_ lines: [[String]]) {
+            lock.withLock { recorded = lines }
+        }
+    }
+
     /// A temporary directory holding an `xcrun` whose `simctl` blocks — behind a stub `xcodebuild -runFirstLaunch`, or behind a bare `sleep` — and that answers `--find simctl` with a `simctl` script naming `EXPECTED_VERSION="1174.9.2"`.
     ///
     /// Every process it starts appends its pid to `pids`.

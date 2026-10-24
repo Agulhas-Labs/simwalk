@@ -165,40 +165,7 @@ public struct WalkbookLoader {
             found.append(.emptyRoute(screenID: id, index: index))
         }
         for (stepIndex, step) in screen.route.enumerated() {
-            if step.label?.trimmed.isEmpty == true {
-                found.append(.blankRouteStepLabel(screenID: id, index: index, stepIndex: stepIndex))
-            }
-            // Empty text is not "clear the field" — it is a step that taps, types nothing, and reports
-            // having driven the field, which is the silent-discard shape every other axis is refused for.
-            if case let .type(_, text) = step, text.isEmpty {
-                found.append(.blankTypedText(screenID: id, index: index, stepIndex: stepIndex))
-            }
-            // A tab is looked up by its exact label as it reads — `tap`, `scrollTo` and `type` fall
-            // through to the pattern tier where `{n}` stands for a number, a tab step never does — so a
-            // tab step carrying one could never land.
-            if case let .tab(label) = step, label.contains(tabStepPlaceholder) {
-                found.append(.placeholderInTabStep(screenID: id, index: index, stepIndex: stepIndex, label: label))
-            }
-            // Neither does a system sheet's control, which is looked up by its label or identifier as it
-            // reads; and the owner is the runner's record of where it found one, never an author's to claim.
-            if case let .systemTap(label, atLaunch, owner) = step {
-                if label.contains(tabStepPlaceholder) {
-                    found.append(.placeholderInSystemTapStep(screenID: id, index: index, stepIndex: stepIndex, label: label))
-                }
-                if owner != nil {
-                    found.append(.ownerInSystemTapStep(screenID: id, index: index, stepIndex: stepIndex))
-                }
-                // The declaration describes the launch, and only the first step is taken on the launch's screen.
-                if atLaunch, stepIndex > 0 {
-                    found.append(.atLaunchAfterFirstStep(screenID: id, index: index, stepIndex: stepIndex))
-                }
-            }
-            if case let .openURL(url) = step, !Self.isOpenableURL(url) {
-                found.append(.unopenableURL(screenID: id, index: index, stepIndex: stepIndex, url: url))
-            }
-            if case let .tapPoint(label, point) = step {
-                found.append(contentsOf: tapPointProblems(label: label, point: point, screenID: id, index: index, stepIndex: stepIndex))
-            }
+            found.append(contentsOf: problems(in: step, screenID: id, index: index, stepIndex: stepIndex))
         }
         if screen.states.isEmpty {
             found.append(.noCaptureStates(screenID: id, index: index))
@@ -247,6 +214,101 @@ public struct WalkbookLoader {
         return found
     }
 
+    /// The problems a single step carries, for a step sent to a live session rather than read from a walkbook (SimWalk#198).
+    ///
+    /// The text names the step as a screen called `session step`, as a walkbook's own would name its screen, so the walkbook wording names that borrowed screen; `refusals(inSessionStep:)` is what a session shows (SimWalk#218).
+    public static func problems(inSessionStep step: Walkbook.RouteStep) -> [WalkbookProblem] {
+        problems(in: step, screenID: sessionScreenID, index: 0, stepIndex: 0)
+    }
+
+    /// The same problems worded for a session, which has no screen and no step index: the subject a walkbook's wording gives them (`screen 'session step' route step 0`) reads `the step` here (SimWalk#214).
+    public static func refusals(inSessionStep step: Walkbook.RouteStep) -> [String] {
+        let subject = "screen '\(sessionScreenID)' route step 0"
+        return problems(inSessionStep: step).map { problem in
+            let text = problem.description
+            return text.hasPrefix(subject) ? "the step" + text.dropFirst(subject.count) : text
+        }
+    }
+
+    /// The screen id `problems(inSessionStep:)` borrows, which only `refusals(inSessionStep:)` needs to take back out of the wording.
+    private static var sessionScreenID: String {
+        "session step"
+    }
+
+    /// The problems one route step carries on its own, whatever screen or session it is in.
+    ///
+    /// `validate` runs it over every step of a walkbook and `session step` over the one step it is about to send, so a step the walkbook would refuse (a hold that outlasts the step timeout, a swipe in no direction) never reaches the runner by the other door.
+    static func problems(in step: Walkbook.RouteStep, screenID id: String, index: Int, stepIndex: Int) -> [WalkbookProblem] {
+        var found: [WalkbookProblem] = []
+        if step.label?.trimmed.isEmpty == true {
+            found.append(.blankRouteStepLabel(screenID: id, index: index, stepIndex: stepIndex))
+        }
+        // Empty text is not "clear the field" — it is a step that taps, types nothing, and reports
+        // having driven the field, which is the silent-discard shape every other axis is refused for.
+        // With `replace` it is the clearing, verified by the read-back, so it is allowed there.
+        if case let .type(_, text, replace) = step, text.isEmpty, !replace {
+            found.append(.blankTypedText(screenID: id, index: index, stepIndex: stepIndex))
+        }
+        // A tab is looked up by its exact label as it reads — `tap`, `scrollTo` and `type` fall
+        // through to the pattern tier where `{n}` stands for a number, a tab step never does — so a
+        // tab step carrying one could never land.
+        if case let .tab(label) = step, label.contains(tabStepPlaceholder) {
+            found.append(.placeholderInTabStep(screenID: id, index: index, stepIndex: stepIndex, label: label))
+        }
+        // Neither does a system sheet's control, which is looked up by its label or identifier as it
+        // reads; and the owner is the runner's record of where it found one, never an author's to claim.
+        if case let .systemTap(label, atLaunch, owner) = step {
+            if label.contains(tabStepPlaceholder) {
+                found.append(.placeholderInSystemTapStep(screenID: id, index: index, stepIndex: stepIndex, label: label))
+            }
+            if owner != nil {
+                found.append(.ownerInSystemTapStep(screenID: id, index: index, stepIndex: stepIndex))
+            }
+            // The declaration describes the launch, and only the first step is taken on the launch's screen.
+            if atLaunch, stepIndex > 0 {
+                found.append(.atLaunchAfterFirstStep(screenID: id, index: index, stepIndex: stepIndex))
+            }
+        }
+        if case let .openURL(url) = step, !Self.isOpenableURL(url) {
+            found.append(.unopenableURL(screenID: id, index: index, stepIndex: stepIndex, url: url))
+        }
+        if case let .longPress(_, seconds) = step, !Walkbook.RouteStep.longPressSeconds.contains(seconds) {
+            found.append(.longPressSecondsOutOfRange(screenID: id, index: index, stepIndex: stepIndex, seconds: seconds))
+        }
+        if case let .swipe(_, direction) = step, Walkbook.RouteStep.SwipeDirection(rawValue: direction) == nil {
+            found.append(.unknownSwipeDirection(screenID: id, index: index, stepIndex: stepIndex, value: direction))
+        }
+        if case let .tapPoint(label, point) = step, let fault = pointFault(label: label, point: point) {
+            let problem: WalkbookProblem = switch fault {
+            case let .malformed(count): .malformedTapPoint(screenID: id, index: index, stepIndex: stepIndex, count: count)
+            case .outsideElement: .tapPointOutsideElement(screenID: id, index: index, stepIndex: stepIndex, label: label ?? "", point: point)
+            case .offScreen: .tapPointOffScreen(screenID: id, index: index, stepIndex: stepIndex, point: point)
+            case .fractionalWithoutLabel: .tapPointFractionalWithoutLabel(screenID: id, index: index, stepIndex: stepIndex, point: point)
+            }
+            found.append(problem)
+        }
+        if case let .drag(label, from, to, hold, seconds) = step {
+            for (field, point) in [("from", from), ("to", to)] {
+                guard let fault = pointFault(label: label, point: point) else { continue }
+                let problem: WalkbookProblem = switch fault {
+                case let .malformed(count): .malformedDragPoint(screenID: id, index: index, stepIndex: stepIndex, field: field, count: count)
+                case .outsideElement: .dragPointOutsideElement(screenID: id, index: index, stepIndex: stepIndex, field: field, label: label ?? "", point: point)
+                case .offScreen: .dragPointOffScreen(screenID: id, index: index, stepIndex: stepIndex, field: field, point: point)
+                case .fractionalWithoutLabel: .dragPointFractionalWithoutLabel(screenID: id, index: index, stepIndex: stepIndex, field: field, point: point)
+                }
+                found.append(problem)
+            }
+            let limit = Walkbook.RouteStep.maxDragSeconds
+            if !(0 ... limit).contains(hold) {
+                found.append(.dragHoldOutOfRange(screenID: id, index: index, stepIndex: stepIndex, hold: hold))
+            }
+            if !(seconds > 0 && seconds <= limit) {
+                found.append(.dragSecondsOutOfRange(screenID: id, index: index, stepIndex: stepIndex, seconds: seconds))
+            }
+        }
+        return found
+    }
+
     /// Whether an `openURL` step's URL can be opened at all: one `URL(string:)` parses and that names a scheme.
     ///
     /// Without a scheme there is no app or system handler to route it to, and the step would report a landing it never attempted.
@@ -255,29 +317,25 @@ public struct WalkbookLoader {
         return !scheme.isEmpty
     }
 
-    /// A `tapPoint` step whose point could never be tapped as written (SimWalk#29).
+    /// A point whose touch could never land as written, or `nil` for one that can (SimWalk#29, shared by `drag` for SimWalk#148).
     ///
     /// **Two numbers, and within what they are measured against.** A point within an element is two fractions of its frame, so a coordinate outside 0…1 lands on something else — whatever is drawn beside the element — while the step reports having tapped it. A point on the screen is in device points, which are never negative; whether one fits the screen depends on a device `validate` is not told about, so that half is checked when the walk runs, and a point beyond the screen is refused there rather than tapped. Each coordinate must *satisfy* its range rather than merely not break it, so a NaN a walkbook built in code could carry is refused rather than waved through by every comparison failing.
-    private static func tapPointProblems(label: String?, point: [Double], screenID: String, index: Int, stepIndex: Int) -> [WalkbookProblem] {
+    private static func pointFault(label: String?, point: [Double]) -> PointFault? {
         guard point.count == 2 else {
-            return [.malformedTapPoint(screenID: screenID, index: index, stepIndex: stepIndex, count: point.count)]
+            return .malformed(count: point.count)
         }
-        if let label {
-            return point.allSatisfy { (0 ... 1).contains($0) }
-                ? []
-                : [.tapPointOutsideElement(screenID: screenID, index: index, stepIndex: stepIndex, label: label, point: point)]
+        if label != nil {
+            return point.allSatisfy { (0 ... 1).contains($0) } ? nil : .outsideElement
         }
         guard point.allSatisfy({ $0 >= 0 }) else {
-            return [.tapPointOffScreen(screenID: screenID, index: index, stepIndex: stepIndex, point: point)]
+            return .offScreen
         }
         // Written without a `label`, `at` is a screen point in device points — but one whose coordinates
         // are both at most 1 is a fraction of an element's frame in every worked example this format has,
         // never a plausible screen point on a real device. `validate` cannot tell "meant to be absolute"
         // from "the label was dropped", so it refuses either way and names the likelier of the two rather
         // than silently tapping the status bar (SimWalk#29 review, item 2).
-        return point.allSatisfy { $0 <= 1 }
-            ? [.tapPointFractionalWithoutLabel(screenID: screenID, index: index, stepIndex: stepIndex, point: point)]
-            : []
+        return point.allSatisfy { $0 <= 1 } ? .fractionalWithoutLabel : nil
     }
 
     /// State axes naming a value the simulator would discard without saying so.
@@ -385,14 +443,26 @@ private extension Walkbook.RouteStep {
         switch self {
         case let .tab(label), let .tap(label), let .scrollTo(label):
             label
-        case let .type(label, _):
+        case let .type(label, _, _), let .longPress(label, _):
             label
-        case let .tapPoint(label, _):
+        case let .swipe(label, _):
+            label
+        case let .tapPoint(label, _), let .drag(label, _, _, _, _):
             label
         case let .systemTap(label, _, _):
             label
         case .openURL, .back:
             nil
         }
+    }
+}
+
+private extension WalkbookLoader {
+    /// How a point written for `tapPoint` (SimWalk#29) or `drag` (SimWalk#148) could never be touched as written.
+    enum PointFault {
+        case malformed(count: Int)
+        case outsideElement
+        case offScreen
+        case fractionalWithoutLabel
     }
 }

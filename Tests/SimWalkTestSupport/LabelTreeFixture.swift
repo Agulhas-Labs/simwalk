@@ -17,6 +17,8 @@ public struct LabelTreeFixture {
         _ type: String,
         label: String? = nil,
         identifier: String? = nil,
+        value: String? = nil,
+        placeholder: String? = nil,
         y: Double,
         enabled: Bool = true,
         children: [AXNode] = []
@@ -26,6 +28,8 @@ public struct LabelTreeFixture {
             frame: AXNode.Frame(x: 16, y: y, width: 370, height: 44),
             label: label,
             identifier: identifier,
+            value: value,
+            placeholder: placeholder,
             isEnabled: enabled,
             children: children
         )

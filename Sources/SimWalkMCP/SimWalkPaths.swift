@@ -26,23 +26,6 @@ public struct SimWalkPaths {
         UsageLog.standard().directory.appendingPathComponent("statusline", isDirectory: true)
     }
 
-    /// `~/.claude` — Claude Code's own configuration directory, which this tool reads and writes only at the two paths below.
-    public static var claudeHome: URL {
-        HomeDirectories.user().appendingPathComponent(".claude", isDirectory: true)
-    }
-
-    /// The settings file a status-line registration lands in when sift is not on the machine to carry it.
-    public static var claudeSettings: URL {
-        claudeHome.appendingPathComponent("settings.json")
-    }
-
-    /// The agent guide, installed as a path-scoped user rule so it costs nothing in a session that never touches a walkbook, a capture bundle or a UI-test target.
-    public static var claudeRule: URL {
-        claudeHome
-            .appendingPathComponent("rules", isDirectory: true)
-            .appendingPathComponent("\(binaryName).md")
-    }
-
     /// Whether `command` runs this tool.
     public static func namesThisTool(_ command: String) -> Bool {
         command.contains(binaryName)

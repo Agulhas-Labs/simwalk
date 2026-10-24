@@ -28,4 +28,14 @@ struct LeaseAcquireHolderTests {
         #expect(answer.text.contains("may exit with it and free the lease at once — pass --holder-pid <pid> naming the session's long-lived process"))
         #expect(answer.text.contains("udid: SHUT-1"))
     }
+
+    /// SimWalk#166: `--family` chooses among unnamed devices, so it is refused beside a named one.
+    @Test
+    func familyIsRefusedBesideANamedDevice() throws {
+        #expect(throws: (any Error).self) { try LeaseAcquireCommand.parse(["--family", "ipad", "--device", "x"]) }
+        #expect(throws: (any Error).self) { try LeaseAcquireCommand.parse(["--family", "ipad", "--clone-from", "x"]) }
+        #expect(throws: (any Error).self) { try LeaseAcquireCommand.parse(["--family", "ipad", "--physical", "x"]) }
+        #expect(throws: (any Error).self) { try LeaseAcquireCommand.parse(["--family", "tablet"]) }
+        #expect(try LeaseAcquireCommand.parse(["--family", "ipad"]).family == .ipad)
+    }
 }

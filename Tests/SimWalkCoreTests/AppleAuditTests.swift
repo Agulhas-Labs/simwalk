@@ -4,6 +4,7 @@
 
 import Foundation
 @testable import SimWalkCore
+import SimWalkTestSupport
 import Testing
 
 /// Apple's accessibility audit recorded per state (E1a): the opt-in, the record, the manifest entry and the answer's line.
@@ -88,6 +89,43 @@ struct AppleAuditTests {
     }
 
     @Test
+    func theElementsReadMarkerRoundTripsAndAbsenceDecodesAsNil() throws {
+        let marked = AppleAuditRecord(milliseconds: 1, elementsRead: true)
+        let data = try AppleAuditRecord.encoder().encode(marked)
+        let bare = try AppleAuditRecord.encoder().encode(AppleAuditRecord(milliseconds: 1))
+
+        #expect(String(decoding: data, as: UTF8.self).contains(#""elementsRead":true"#))
+        #expect(try JSONDecoder().decode(AppleAuditRecord.self, from: data) == marked)
+        #expect(!String(decoding: bare, as: UTF8.self).contains("elementsRead"))
+        #expect(try JSONDecoder().decode(AppleAuditRecord.self, from: bare).elementsRead == nil)
+    }
+
+    @Test
+    func anIssueDecodesWithElementUnreadableWithElementOrWithNeither() throws {
+        func decode(_ extra: String) throws -> AppleAuditRecord.Issue {
+            let json = #"{"compactDescription":"c","detailedDescription":"d","type":"contrast"\#(extra)}"#
+            return try JSONDecoder().decode(AppleAuditRecord.Issue.self, from: Data(json.utf8))
+        }
+
+        let unreadable = try decode(#","elementUnreadable":"gone""#)
+        #expect(unreadable.elementUnreadable == "gone")
+        #expect(unreadable.element == nil)
+
+        let neither = try decode("")
+        #expect(neither.elementUnreadable == nil)
+        #expect(neither.element == nil)
+
+        let named = try decode(#","element":{"frame":{"height":4,"width":3,"x":1,"y":2},"identifier":"i","label":"l","type":"Button"}"#)
+        #expect(named.element?.label == "l")
+        #expect(named.elementUnreadable == nil)
+
+        let record = AppleAuditRecord(milliseconds: 1, issues: [unreadable])
+        let data = try AppleAuditRecord.encoder().encode(record)
+        #expect(String(decoding: data, as: UTF8.self).contains(#""elementUnreadable":"gone""#))
+        #expect(try JSONDecoder().decode(AppleAuditRecord.self, from: data) == record)
+    }
+
+    @Test
     func theLayoutPathIsPerStateAndTheEntryIsDerivedFromIt() {
         let record = AppleAuditRecord(milliseconds: 5, error: "boom")
         let capture = CaptureManifest.StateCapture(screenID: "today", state: Walkbook.CaptureState(theme: .light), appleAudit: record)
@@ -165,5 +203,62 @@ struct AppleAuditTests {
         let lines = CaptureBundleSummary.appleAuditLines(Self.manifest(auditing: records))
 
         #expect(lines == ["apple audit: 3 states asked, none completed (3 failed) — opt-in (appleAudit / --apple-audit)"])
+    }
+
+    /// SimWalk#173: XCTest's audit timeout is told by its domain and code, so a different code or domain under the same message is not one.
+    @Test(arguments: [
+        (#"Error Domain=com.apple.xcode.xctest.accessibilityAudit Code=-56 "Audit failed to complete in time" UserInfo={NSLocalizedDescription=Audit failed to complete in time}"#, true),
+        (#"Error Domain=com.apple.xcode.xctest.accessibilityAudit Code=-5 "Audit failed to complete in time""#, false),
+        (#"Error Domain=com.apple.xcode.xctest.accessibilityAudit Code=-560 "Audit failed to complete in time""#, false),
+        (#"Error Domain=NSCocoaErrorDomain Code=-56 "Audit failed to complete in time""#, false),
+        ("Audit failed to complete in time", false),
+    ])
+    func aTimeoutIsXCTestsAuditDomainWithCodeMinus56(error: String, timedOut: Bool) {
+        #expect(AppleAuditRecord(milliseconds: 15009, error: error).timedOut == timedOut)
+    }
+
+    @Test
+    func aRecordThatReturnedIsNotATimeout() {
+        #expect(!AppleAuditRecord(milliseconds: 2000).timedOut)
+    }
+
+    /// SimWalk#190: a state's directory reads back as the screen slug and state slug it was derived from, and a path `stateDirectory` cannot derive reads as no state.
+    @Test
+    func aStateDirectoryReadsBackAsTheScreenAndStateItWasDerivedFrom() {
+        let slug = Walkbook.CaptureState(theme: .dark, dynamicTypeSize: "XXL", locale: "fr-FR").slug
+        let derived = CaptureBundleLayout.stateDirectory(screenID: "Progress Tab", stateSlug: slug)
+
+        let state = CaptureBundleLayout.state(atStateDirectory: derived)
+
+        #expect(state.map { [$0.screenSlug, $0.stateSlug] } == [CaptureBundleLayout.screenSlug("Progress Tab"), slug])
+        #expect(state.map { CaptureBundleLayout.stateDirectory(screenID: $0.screenSlug, stateSlug: $0.stateSlug) } == derived)
+        let screen = CaptureBundleLayout.screenDirectory(screenID: "progress")
+        for underived in [screen, "\(screen)/", "\(derived)/light", "x\(derived)", derived.replacingOccurrences(of: "progress_tab", with: "Progress Tab")] {
+            #expect(CaptureBundleLayout.state(atStateDirectory: underived) == nil, "\(underived)")
+        }
+    }
+
+    /// SimWalk#190: with no manifest, the timeouts are read from the records on disk, in path order, a returned audit and an unreadable record left out.
+    @Test
+    func theTimeoutsOfABundleWithNoManifestAreReadFromItsRecords() throws {
+        let directory = try TemporaryDirectory()
+        let timedOut = AppleAuditRecord(milliseconds: 15009, error: #"Error Domain=com.apple.xcode.xctest.accessibilityAudit Code=-56 "Audit failed to complete in time""#)
+        let capture = { (screen: String, theme: Walkbook.Theme, audit: AppleAuditRecord) in
+            CaptureBundleFixture.Capture(screenID: screen, state: Walkbook.CaptureState(theme: theme), tree: CaptureBundleFixture.plainScreen(), appleAudit: audit)
+        }
+        let screens = [
+            CaptureBundleFixture.ScreenSpec(id: "today", captures: [capture("today", .light, timedOut)]),
+            CaptureBundleFixture.ScreenSpec(id: "browse", captures: [capture("browse", .light, AppleAuditRecord(milliseconds: 2000)), capture("browse", .dark, timedOut)]),
+        ]
+        let bundle = try CaptureBundleFixture.writeWalk(in: directory, screens: screens)
+        try FileManager.default.removeItem(at: CaptureBundle.manifestURL(in: bundle.url))
+        let malformed = CaptureBundleLayout.url(forRelativePath: CaptureBundleLayout.appleAuditPath(screenID: "settings", stateSlug: "light"), in: bundle.url)
+        try FileManager.default.createDirectory(at: malformed.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{".utf8).write(to: malformed)
+
+        let timeouts = AppleAuditScan.timeouts(recordedIn: bundle.url)
+
+        #expect(timeouts.map { "\($0.screenID) \($0.stateSlug)" } == ["browse dark", "today light"])
+        #expect(timeouts.map(\.reason) == ["Audit failed to complete in time", "Audit failed to complete in time"])
     }
 }

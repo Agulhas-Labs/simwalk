@@ -16,4 +16,7 @@ public protocol DiscoverySession {
 
     /// Ends the app and launches it again in the session's capture state, returning the launch screen.
     func relaunch() throws -> LiveScreen
+
+    /// Drags the list in `scroll.container` once and returns the screen it settled on, or `nil` when the runner answered that it could not.
+    func scroll(_ scroll: LiveSessionScroll) throws -> LiveScreen?
 }

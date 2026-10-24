@@ -1,0 +1,2 @@
+{"app_name":"xctest","timestamp":"2026-10-21 10:25:15.00 +0100","bug_type":"309","os_version":"macOS 27.0.1 (26A434)","name":"xctest"}
+{"procName":"xctest","procPath":"/private/var/folders/*/xctest","captureTime":"2026-10-21 10:25:15.6053 +0100","parentProc":"sleep","exception":{"type":"EXC_CRASH","signal":"SIGKILL (Code Signature Invalid)"},"termination":{"namespace":"CODESIGNING","indicator":"Launch Constraint Violation"}}

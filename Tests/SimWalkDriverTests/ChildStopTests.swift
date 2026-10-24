@@ -190,9 +190,9 @@ private extension ChildStopTests {
             directory.appendingPathComponent(name)
         }
 
-        /// The pid a child wrote to `file`, waited for up to five seconds.
+        /// The pid a child wrote to `file`, waited for up to thirty seconds: the write is a precondition, and a loaded machine can take seconds to spawn the child (SimWalk#183).
         func pid(in file: URL) -> pid_t? {
-            let deadline = Date().addingTimeInterval(5)
+            let deadline = Date().addingTimeInterval(30)
             while Date() < deadline {
                 if let text = try? String(contentsOf: file, encoding: .utf8), let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
                     return pid

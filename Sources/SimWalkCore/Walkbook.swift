@@ -87,7 +87,11 @@ public extension Walkbook {
         ///
         /// For a route that ends by opening a SwiftUI system `Menu`, whose open state hides the screen's identifier and has none of its own, so `expect` cannot verify it. `ExpectedMenuCheck` holds every capture's `Button` labels to these as an ordered subsequence, each matched exactly; a mismatch is the screen's outcome (`ScreenOutcome.unexpectedScreen`). Independent of `expect` — and since an open menu hides the screen's identifier, `expect` beside `expectMenu` normally fails. Left out of the canonical encoding when absent, so a walkbook without it hashes as it always did.
         public var expectMenu: [String]?
-        /// Free-form notes carried through to the differ (per-screen segmentation hints, known quirks).
+        /// The appearance the app, not the device, draws this screen in, whatever a state's `theme` says; `nil` when the screen follows the device (SimWalk#19).
+        ///
+        /// Written `"fixedAppearance": "dark"` or `"light"`, decoded as `theme` is. The appearance comparisons are not made for such a screen and nothing is refused on appearance (`StateApplicationCheck`); the walk's line for it says so. Left out of the canonical encoding when absent, so a walkbook without it hashes as it always did.
+        public var fixedAppearance: Theme?
+        /// Free text for whoever reads or edits the walkbook (hints, known quirks), kept with the screen and read by nothing in a walk, audit or diff (SimWalk#168).
         public var notes: String?
         /// The figures on this screen whose values the walk's `oracle` is asked for, in every state the screen captures; `nil` checks none.
         public var figures: [Figure]?
@@ -102,6 +106,7 @@ public extension Walkbook {
             budgets: Budgets? = nil,
             expect: String? = nil,
             expectMenu: [String]? = nil,
+            fixedAppearance: Theme? = nil,
             notes: String? = nil,
             figures: [Figure]? = nil
         ) {
@@ -114,6 +119,7 @@ public extension Walkbook {
             self.budgets = budgets
             self.expect = expect
             self.expectMenu = expectMenu
+            self.fixedAppearance = fixedAppearance
             self.notes = notes
             self.figures = figures
         }
@@ -216,7 +222,17 @@ public extension Walkbook {
         /// Tap the element with the given accessibility label and type `text` into it.
         ///
         /// The vocabulary could reach a search field and not drive it, so a search screen was capturable only empty (SimWalk#1 item 2). Tapping is part of the step rather than something an author writes before it: typing into a field that never took focus is an XCUITest failure and not a value the route loop can report, so the runner takes the focus itself, resolves the label among elements that can actually take text, and reports the step as not landed unless the field is afterwards carrying what was typed.
-        case type(label: String, text: String)
+        ///
+        /// **`replace` swaps the field's text for `text`** (SimWalk#198) rather than typing after what is there, and is a flag on `type` rather than a `clear` step because the runner must read the value it is deleting. It is written only when true, so a plain `type` encodes as it always did. `validate` allows an empty `text` only with it, which clears the field.
+        case type(label: String, text: String, replace: Bool = false)
+        /// Press and hold the element with the given accessibility label for `seconds` — to raise a context menu (SimWalk#198).
+        ///
+        /// A step of its own rather than a `tap` with an extra field, so a route says at a glance that the touch was held. The element is found as a `tap` finds it, `{n}` and the swipe towards a label not yet on screen included, and the step lands as a `tap` lands. `seconds` is written only when it is not ``defaultLongPressSeconds``; `validate` refuses one outside ``longPressSeconds``.
+        case longPress(label: String, seconds: Double = defaultLongPressSeconds)
+        /// Swipe once in `direction`, on the element with the given accessibility label, or on the app when there is none (SimWalk#198).
+        ///
+        /// Never a search: `scrollTo` swipes until it finds something, this swipes once in the direction written. A swipe often reveals rather than navigates (a swipe action's button), so it lands one quiet period after the gesture, unconditionally, as `tapPoint` does. `direction` is held as written, one of ``SwipeDirection``'s raw values, so a walkbook naming another is refused by `validate` with the value named rather than as an undecodable file.
+        case swipe(label: String?, direction: String)
         /// Scroll until the element with the given accessibility label is on screen.
         case scrollTo(label: String)
         /// Tap a point rather than an element found by its label — for an accessibility tree that lies (SimWalk#29).
@@ -225,6 +241,10 @@ public extension Walkbook {
         ///
         /// A step of its own rather than a `tap` with an extra field, so a route — a manifest's `routeTaken` above all — says at a glance that this step was not resolved by label. Its landing is the touch delivered inside the screen (and inside the element's frame), never that the screen changed: a bar lighting up is a change within a screen, which `ScreenIdentity` deliberately cannot see.
         case tapPoint(label: String?, point: [Double])
+        /// Press at `from`, move to `to` over `seconds`, and lift — a slider, a map pan, a canvas stroke, a game's on-screen stick (SimWalk#148).
+        ///
+        /// **With a `label`, `from` and `to` are points within that element's frame**, each coordinate a fraction from 0 to 1, as for ``tapPoint(label:point:)``; **without one they are points on the screen in device points**. `hold` is how long the finger rests before it moves and `seconds` how long the move takes; each is written only when it is not ``defaultDragHold`` / ``defaultDragSeconds``. It lands one quiet period after the release, unconditionally, as `swipe` and `tapPoint` do.
+        case drag(label: String?, from: [Double], to: [Double], hold: Double = defaultDragHold, seconds: Double = defaultDragSeconds)
         /// Tap a control on a system sheet — a permission prompt the app asked the system for, not a screen of its own (SimWalk#28).
         ///
         /// **The label resolves in SpringBoard's tree first, then in the app's**, because the system draws its sheets in two places: the notifications alert is SpringBoard's, while HealthKit's authorization sheet is hosted inside the app's own window. An identifier matches as well as a label, and HealthKit's controls carry stable ones (`UIA.Health.AuthSheet.AllCategoryButton`, `UIA.Health.Allow.Button`), so a walkbook need not pin wording that counts the topics asked for.
@@ -253,14 +273,24 @@ public extension Walkbook {
                 "tab '\(label)'"
             case let .tap(label):
                 "tap '\(label)'"
-            case let .type(label, text):
-                "type '\(text)' into '\(label)'"
+            case let .type(label, text, replace):
+                "type '\(text)' into '\(label)'" + (replace ? ", replacing its text" : "")
             case let .scrollTo(label):
                 "scrollTo '\(label)'"
+            case let .longPress(label, seconds):
+                "longPress '\(label)'" + (seconds == Self.defaultLongPressSeconds ? "" : " for \(Self.rendered([seconds])) s")
+            case let .swipe(label?, direction):
+                "swipe \(direction) on '\(label)'"
+            case let .swipe(nil, direction):
+                "swipe \(direction)"
             case let .tapPoint(label?, point):
                 "tap '\(label)' at \(Self.rendered(point)) of its frame"
             case let .tapPoint(nil, point):
                 "tap at \(Self.rendered(point)) pt"
+            case let .drag(label?, from, to, _, _):
+                "drag '\(label)' from \(Self.rendered(from)) to \(Self.rendered(to)) of its frame"
+            case let .drag(nil, from, to, _, _):
+                "drag from \(Self.rendered(from)) pt to \(Self.rendered(to)) pt"
             case let .systemTap(label, atLaunch, owner):
                 "systemTap '\(label)'" + (atLaunch ? " at launch" : "") + (owner.map { " in \($0.rendered)" } ?? "")
             case let .openURL(url):
@@ -270,13 +300,21 @@ public extension Walkbook {
             }
         }
 
+        /// Whether this step is placed by screen points (a `tapPoint` or `drag` with no `label`), so the frame those points were taken in is worth naming (SimWalk#149, SimWalk#148).
+        var isScreenPointStep: Bool {
+            switch self {
+            case .tapPoint(nil, _), .drag(nil, _, _, _, _): true
+            default: false
+            }
+        }
+
         /// How a step is written into a progress file's `currentStep.action` (`Docs/SIMWALK-PROGRESS.md`): ``description`` without what can hold a secret.
         ///
         /// A status line puts that file on screen. A `type` step's text may be a password (SimWalk#90); an `openURL` step's URL may carry a token in its userinfo, path, query or fragment, so only its scheme and host are kept (SimWalk#91).
         var progressLine: String {
             switch self {
-            case let .type(label, _):
-                "type into '\(label)'"
+            case let .type(label, _, replace):
+                "type into '\(label)'" + (replace ? ", replacing its text" : "")
             case let .openURL(url):
                 "openURL '\(Self.redactedURL(url))'"
             default:
@@ -298,6 +336,18 @@ public extension Walkbook {
                 && components.user == nil && components.password == nil && components.port == nil
             return "\(scheme)://\(host)" + (trimmed ? "" : "/…")
         }
+
+        /// How long a `longPress` holds when its `seconds` is not written.
+        public static let defaultLongPressSeconds = 1.0
+        /// How long a `drag`'s finger rests before it moves, when the step does not say (SimWalk#148).
+        public static let defaultDragHold = 0.1
+        /// How long a `drag`'s move takes, when the step does not say (SimWalk#148).
+        public static let defaultDragSeconds = 0.5
+        /// The most a `drag`'s `hold` or `seconds` may be; `validate` refuses more (SimWalk#148).
+        public static let maxDragSeconds = 10.0
+
+        /// The holds a `longPress` may ask for: shorter than half a second is a tap, longer than five is a wait.
+        public static let longPressSeconds = 0.5 ... 5.0
 
         /// A point's coordinates as an author wrote them — `201,610`, `0.8,0.5` — without the `.0` a `Double` would print on every whole number.
         static func rendered(_ point: [Double]) -> String {
@@ -336,6 +386,12 @@ public extension Walkbook {
         ///
         /// So a state whose route answers a permission sheet finds the sheet there on every walk, not only the first. Applied by the runner (`XCUIApplication.resetAuthorizationStatus(for:)`) after the previous state's app is terminated and before this one's launches; nothing checks it against the artefact beyond the route itself, which is UNREACHABLE at a `systemTap` whose sheet never came. Names are checked at validate against `ProtectedResourceName`.
         public var resetPermissions: [String]?
+        /// The interface orientation the app is launched into.
+        ///
+        /// A state without one is walked in the orientation the device was found in once any state of the walkbook sets one (portrait when it was found face up, face down or unknown), so an unset state follows a landscape one back; a walkbook that sets none rotates nothing (SimWalk#199).
+        ///
+        /// Set by the runner on the device (`XCUIDevice.orientation`) before the launch, `landscape` always as `.landscapeLeft` so runs repeat, and held to its artefact by `OrientationCheck`: a capture whose root frame shows the other orientation is refused, one whose root frame is square or empty is filed as set and unverified.
+        public var orientation: Orientation?
 
         public init(
             theme: Theme,
@@ -345,7 +401,8 @@ public extension Walkbook {
             environment: [String: String]? = nil,
             layoutDirection: LayoutDirection? = nil,
             location: Location? = nil,
-            resetPermissions: [String]? = nil
+            resetPermissions: [String]? = nil,
+            orientation: Orientation? = nil
         ) {
             self.theme = theme
             self.dynamicTypeSize = dynamicTypeSize
@@ -355,13 +412,14 @@ public extension Walkbook {
             self.layoutDirection = layoutDirection
             self.location = location
             self.resetPermissions = resetPermissions
+            self.orientation = orientation
         }
 
         /// A stable, filename-safe identifier for the state — the directory name a capture bundle files this state's artefacts under.
         ///
         /// Each optional axis carries a prefix (`dt_`, `loc_`) rather than being dropped positionally, because `dynamicTypeSize: "en_GB"` and `locale: "en_GB"` are different states and would otherwise slug identically. Two states with the same slug would overwrite each other inside a bundle, which is why `WalkbookLoader` rejects a screen carrying both rather than letting the runner discover it. The reduction itself belongs to `CaptureBundleLayout` — it is the one place a string becomes a path component.
         ///
-        /// The later axes append after these, so a state that sets none of them slugs exactly as it did before they existed: `layoutDirection` as its own value (`rtl`, `ltr`), then `location` as `geo_<h>` over its latitude and longitude as Swift prints them, then `resetPermissions` as `reset_<h>` over its names de-duplicated and sorted — the same resets written in another order are the same state.
+        /// The later axes append after these, so a state that sets none of them slugs exactly as it did before they existed: `layoutDirection` as its own value (`rtl`, `ltr`), then `location` as `geo_<h>` over its latitude and longitude as Swift prints them, then `resetPermissions` as `reset_<h>` over its names de-duplicated and sorted — the same resets written in another order are the same state — then `orientation` as its own value (`portrait`, `landscape`).
         ///
         /// **Arguments and environment are slugged by a hash, not reduced** (`args_<h>`, `env_<h>`, after the other axes): `<h>` is the first 8 hex characters of the SHA-256 of the arguments, or of the environment's key/value pairs sorted by key. Reducing them to letters would collide — `-a b` and `-a_b` are different launches and reduce to one segment — and would grow without bound with the list. The slug only has to tell states apart; the manifest's `state` carries the exact list for a reader.
         public var slug: String {
@@ -387,6 +445,9 @@ public extension Walkbook {
             }
             if let resetPermissions {
                 segments.append("reset_\(Self.slugHash(Array(Set(resetPermissions)).sorted()))")
+            }
+            if let orientation {
+                segments.append(orientation.rawValue)
             }
             return segments.joined(separator: "-")
         }
@@ -425,6 +486,12 @@ public extension Walkbook {
         case rtl
         case ltr
     }
+
+    /// The interface orientation a capture is taken in — `landscape` is the device turned to `.landscapeLeft`, never the other way, so two walks of one walkbook draw one picture.
+    enum Orientation: String, Codable, Equatable, Sendable {
+        case portrait
+        case landscape
+    }
 }
 
 extension Walkbook.RouteStep {
@@ -452,8 +519,16 @@ extension Walkbook.RouteStep {
         }
     }
 
+    /// The directions a `swipe` may be written with, as its `direction` spells them.
+    public enum SwipeDirection: String, CaseIterable, Sendable {
+        case up
+        case down
+        case left
+        case right
+    }
+
     /// The name each case is written under — the only key its JSON object carries (`{"tab":{"label":"Progress"}}`).
-    static let caseNames = ["tab", "tap", "type", "scrollTo", "tapPoint", "systemTap", "openURL", "back"]
+    static let caseNames = ["tab", "tap", "type", "longPress", "swipe", "scrollTo", "tapPoint", "drag", "systemTap", "openURL", "back"]
 
     /// Decodes strictly rather than relying on synthesis, so a step naming a key its case does not take (SimWalk#10's sibling hole, one vocabulary over) is a decode failure instead of a silently ignored field.
     ///
@@ -501,10 +576,24 @@ extension Walkbook.RouteStep {
             try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label"], decoder: decoder)
             self = try .tap(label: Self.label(in: payload, decoder: decoder))
         case "type":
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "text"], decoder: decoder)
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "text", "replace"], decoder: decoder)
             self = try .type(
                 label: Self.label(in: payload, decoder: decoder),
-                text: StrictKeyDecoding.required(String.self, forKey: AnyCodingKey("text"), in: payload, decoder: decoder, placeholder: "")
+                text: StrictKeyDecoding.required(String.self, forKey: AnyCodingKey("text"), in: payload, decoder: decoder, placeholder: ""),
+                replace: payload.decodeIfPresent(Bool.self, forKey: AnyCodingKey("replace")) ?? false
+            )
+        case "longPress":
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "seconds"], decoder: decoder)
+            self = try .longPress(
+                label: Self.label(in: payload, decoder: decoder),
+                seconds: payload.decodeIfPresent(Double.self, forKey: AnyCodingKey("seconds")) ?? Self.defaultLongPressSeconds
+            )
+        case "swipe":
+            // `label` absent is the app element, as for `tapPoint`; written `null` is refused by name, not read as absent.
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "direction"], decoder: decoder)
+            self = try .swipe(
+                label: Self.optionalLabel(named: "swipe", in: payload),
+                direction: StrictKeyDecoding.required(String.self, forKey: AnyCodingKey("direction"), in: payload, decoder: decoder, placeholder: "")
             )
         case "scrollTo":
             try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label"], decoder: decoder)
@@ -518,6 +607,15 @@ extension Walkbook.RouteStep {
             self = try .tapPoint(
                 label: Self.tapPointLabel(in: payload, decoder: decoder),
                 point: StrictKeyDecoding.required([Double].self, forKey: AnyCodingKey("at"), in: payload, decoder: decoder, placeholder: [])
+            )
+        case "drag":
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "from", "to", "hold", "seconds"], decoder: decoder)
+            self = try .drag(
+                label: Self.optionalLabel(named: "drag", in: payload),
+                from: StrictKeyDecoding.required([Double].self, forKey: AnyCodingKey("from"), in: payload, decoder: decoder, placeholder: []),
+                to: StrictKeyDecoding.required([Double].self, forKey: AnyCodingKey("to"), in: payload, decoder: decoder, placeholder: []),
+                hold: payload.decodeIfPresent(Double.self, forKey: AnyCodingKey("hold")) ?? Self.defaultDragHold,
+                seconds: payload.decodeIfPresent(Double.self, forKey: AnyCodingKey("seconds")) ?? Self.defaultDragSeconds
             )
         case "systemTap":
             try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "atLaunch", "owner"], decoder: decoder)
@@ -542,12 +640,33 @@ extension Walkbook.RouteStep {
         switch self {
         case let .tab(label), let .tap(label), let .scrollTo(label):
             try payload.encode(label, forKey: AnyCodingKey("label"))
-        case let .type(label, text):
+        case let .type(label, text, replace):
             try payload.encode(label, forKey: AnyCodingKey("label"))
             try payload.encode(text, forKey: AnyCodingKey("text"))
+            if replace {
+                try payload.encode(replace, forKey: AnyCodingKey("replace"))
+            }
+        case let .longPress(label, seconds):
+            try payload.encode(label, forKey: AnyCodingKey("label"))
+            if seconds != Self.defaultLongPressSeconds {
+                try payload.encode(seconds, forKey: AnyCodingKey("seconds"))
+            }
+        case let .swipe(label, direction):
+            try payload.encodeIfPresent(label, forKey: AnyCodingKey("label"))
+            try payload.encode(direction, forKey: AnyCodingKey("direction"))
         case let .tapPoint(label, point):
             try payload.encodeIfPresent(label, forKey: AnyCodingKey(TapPointCodingKeys.label.rawValue))
             try payload.encode(point, forKey: AnyCodingKey(TapPointCodingKeys.point.rawValue))
+        case let .drag(label, from, to, hold, seconds):
+            try payload.encodeIfPresent(label, forKey: AnyCodingKey("label"))
+            try payload.encode(from, forKey: AnyCodingKey("from"))
+            try payload.encode(to, forKey: AnyCodingKey("to"))
+            if hold != Self.defaultDragHold {
+                try payload.encode(hold, forKey: AnyCodingKey("hold"))
+            }
+            if seconds != Self.defaultDragSeconds {
+                try payload.encode(seconds, forKey: AnyCodingKey("seconds"))
+            }
         case let .systemTap(label, atLaunch, owner):
             try payload.encode(label, forKey: AnyCodingKey("label"))
             if atLaunch {
@@ -567,8 +686,11 @@ extension Walkbook.RouteStep {
         case .tab: "tab"
         case .tap: "tap"
         case .type: "type"
+        case .longPress: "longPress"
+        case .swipe: "swipe"
         case .scrollTo: "scrollTo"
         case .tapPoint: "tapPoint"
+        case .drag: "drag"
         case .systemTap: "systemTap"
         case .openURL: "openURL"
         case .back: "back"
@@ -584,12 +706,21 @@ extension Walkbook.RouteStep {
     ///
     /// Absent is still "no label, `at` is a screen point"; written `null` is refused by name instead.
     private static func tapPointLabel(in payload: KeyedDecodingContainer<AnyCodingKey>, decoder _: Decoder) throws -> String? {
+        try optionalLabel(named: "tapPoint", in: payload)
+    }
+
+    /// The optional `label` of a step that may name no element (`tapPoint`, `swipe`): absent is none, `null` is refused by name.
+    private static func optionalLabel(named step: String, in payload: KeyedDecodingContainer<AnyCodingKey>) throws -> String? {
         let key = AnyCodingKey("label")
         guard payload.contains(key) else { return nil }
         guard try !payload.decodeNil(forKey: key) else {
             throw DecodingError.dataCorrupted(DecodingError.Context(
                 codingPath: payload.codingPath + [key],
-                debugDescription: "a tapPoint step's label is null — omit the key entirely for a point on the screen, or name the element for a point within it"
+                debugDescription: step == "tapPoint"
+                    ? "a tapPoint step's label is null — omit the key entirely for a point on the screen, or name the element for a point within it"
+                    : step == "drag"
+                    ? "a drag step's label is null — omit the key entirely for points on the screen, or name the element for points within it"
+                    : "a \(step) step's label is null — omit the key entirely for the app, or name the element"
             ))
         }
         return try payload.decode(String.self, forKey: key)
@@ -610,7 +741,7 @@ public extension Walkbook.CaptureState {
     /// Decodes strictly rather than relying on synthesis (SimWalk#10): a misspelled `textSize` beside a correctly spelled `theme` decoded today, captured the device's default size, and filed it under a slug asserting the size — with `walk` reporting `0 state-not-applied`, since nothing had asked the runner to apply an axis it never saw.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: AnyCodingKey.self)
-        try StrictKeyDecoding.checkUnknownKeys(in: container, allowing: ["theme", "dynamicTypeSize", "locale", "arguments", "environment", "layoutDirection", "location", "resetPermissions"], decoder: decoder)
+        try StrictKeyDecoding.checkUnknownKeys(in: container, allowing: ["theme", "dynamicTypeSize", "locale", "arguments", "environment", "layoutDirection", "location", "resetPermissions", "orientation"], decoder: decoder)
         theme = try StrictKeyDecoding.required(Walkbook.Theme.self, forKey: AnyCodingKey("theme"), in: container, decoder: decoder, placeholder: .light)
         dynamicTypeSize = try container.decodeIfPresent(String.self, forKey: AnyCodingKey("dynamicTypeSize"))
         locale = try container.decodeIfPresent(String.self, forKey: AnyCodingKey("locale"))
@@ -619,6 +750,7 @@ public extension Walkbook.CaptureState {
         layoutDirection = try container.decodeIfPresent(Walkbook.LayoutDirection.self, forKey: AnyCodingKey("layoutDirection"))
         location = try container.decodeIfPresent(Walkbook.Location.self, forKey: AnyCodingKey("location"))
         resetPermissions = try container.decodeIfPresent([String].self, forKey: AnyCodingKey("resetPermissions"))
+        orientation = try container.decodeIfPresent(Walkbook.Orientation.self, forKey: AnyCodingKey("orientation"))
     }
 
     /// The resources this state resets before its launch, de-duplicated and in `ProtectedResourceName`'s order — what the runner hands to `resetAuthorizationStatus(for:)`, one call each.
@@ -669,7 +801,7 @@ public extension Walkbook.CaptureState {
 }
 
 public extension Walkbook.Screen {
-    private static let knownKeys = ["id", "route", "states", "settle", "motion", "measure", "budgets", "expect", "expectMenu", "notes", "figures"]
+    private static let knownKeys = ["id", "route", "states", "settle", "motion", "measure", "budgets", "expect", "expectMenu", "fixedAppearance", "notes", "figures"]
 
     /// Decodes strictly rather than relying on synthesis (round 2, finding 2): `{"expects": "…"}` on a screen — the spec's own wording, misspelled — used to decode cleanly with `expect` left `nil`, turning the check silently off on the one screen an author meant to turn it on for.
     init(from decoder: Decoder) throws {
@@ -689,6 +821,7 @@ public extension Walkbook.Screen {
         budgets = try container.decodeIfPresent(Walkbook.Budgets.self, forKey: AnyCodingKey("budgets"))
         expect = try container.decodeIfPresent(String.self, forKey: AnyCodingKey("expect"))
         expectMenu = try container.decodeIfPresent([String].self, forKey: AnyCodingKey("expectMenu"))
+        fixedAppearance = try container.decodeIfPresent(Walkbook.Theme.self, forKey: AnyCodingKey("fixedAppearance"))
         notes = try container.decodeIfPresent(String.self, forKey: AnyCodingKey("notes"))
         figures = try container.decodeIfPresent([Walkbook.Figure].self, forKey: AnyCodingKey("figures"))
     }

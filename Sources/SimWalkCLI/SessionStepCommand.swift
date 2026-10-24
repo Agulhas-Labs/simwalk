@@ -10,7 +10,7 @@ import SimWalkDriver
 
 /// `simwalk session step <id> '<step json>' [--guard <hash>]` — one route step in the session's app, taken exactly as a walk takes it, answered with the step that replays it, the screen's hash and what changed.
 ///
-/// The step is a walkbook route step (`{"tap":{"label":"Next"}}`), decoded by the walkbook's own strict decoder, so a step this takes is one a walkbook can hold. `--guard` is the `screen <hash>` a read printed: the runner refuses the step, without acting, when the screen no longer has it.
+/// The step is a walkbook route step (`{"tap":{"label":"Next"}}`), decoded by the walkbook's own strict decoder, so a step this takes is one a walkbook can hold. `--guard` is the `screen <hash>` a read printed: the runner refuses the step, without acting, when the screen no longer has it; on a screen whose tree has no text, a picture that moved by no more than a tenth since the read still holds the guard (SimWalk#226).
 struct SessionStepCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "step",
@@ -23,7 +23,7 @@ struct SessionStepCommand: ParsableCommand {
     @Argument(help: #"One walkbook route step, as JSON: {"tap":{"label":"Next"}}, {"openURL":{"url":"myapp://x"}}, {"back":{}}."#)
     var step: String
 
-    @Option(name: .customLong("guard"), help: "The `screen <hash>` a read printed; the step is refused, and nothing done, when the screen no longer has it.")
+    @Option(name: .customLong("guard"), help: "The `screen <hash>` a read printed; the step is refused, and nothing done, when the screen no longer has it (on a text-less screen, when over a tenth of the picture moved).")
     var guardHash: String?
 
     func run() throws {
@@ -52,6 +52,9 @@ struct SessionStepCommand: ParsableCommand {
         } catch {
             throw ValidationError("'\(step)' is not a walkbook route step (\(error)); write one as a walkbook does, e.g. {\"tap\":{\"label\":\"Next\"}}")
         }
+        if let problem = WalkbookLoader.refusals(inSessionStep: routeStep).first {
+            throw ValidationError("'\(step)' would be refused by validate, so nothing was sent: \(problem)")
+        }
         guard let record = store.record(id: id) else {
             throw LiveSessionHostError.unknownSession(id: id)
         }
@@ -64,7 +67,11 @@ struct SessionStepCommand: ParsableCommand {
             number = response.n
         } else {
             number = try channel.send(.step, step: routeStep, guardHash: guardHash)
-            response = try channel.awaitResponse(to: number, timeout: Self.stepTimeout, isRunnerAlive: { processes.isRunning(record) }, pause: pause, now: now)
+            do {
+                response = try channel.awaitResponse(to: number, timeout: Self.stepTimeout, isRunnerAlive: { processes.isRunning(record) }, pause: pause, now: now)
+            } catch let error as LiveSessionError {
+                throw error.explained(by: store.layout(id: id), testID: SessionStartCommand.testID, shell: shell)
+            }
         }
         guard let stepAnswer = response.step else {
             let failure = response.failure ?? "it answered with no step outcome"

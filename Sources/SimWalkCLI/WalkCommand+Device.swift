@@ -56,10 +56,11 @@ extension WalkCommand {
     ///
     /// The device path takes none of the simulator path's pause or nonce, and its progress file holds only what `begin` and the end write plus the device it resolved (marked `physical`); its waits are the runner's own.
     ///
-    /// `firstLaunch` is the walk's one preflight, made before its first `simctl` call on either path (SimWalk#136).
+    /// `firstLaunch` is the walk's one preflight, made before its first `simctl` call on either path (SimWalk#136). `logFileURL` is the usage log a simulator walk writes to, resolved at the face as `performWalk`'s is.
     func walked(
         shell: Shell = Shell(),
         runner resolveRunner: (() throws -> RunnerSource)? = nil,
+        logFileURL: URL = UsageLog.standard().fileURL,
         builds: RunnerBuilds,
         leases: LeaseStore,
         now: @escaping () -> Date = { Date() },
@@ -73,7 +74,7 @@ extension WalkCommand {
     ) throws -> Answer {
         let target = try target(shell: shell, leases: leases, firstLaunch: firstLaunch)
         guard case let .device(walk) = target else {
-            return try performWalk(shell: shell, now: now, runner: resolveRunner, builds: builds, leases: leases, telemetry: telemetry, firstLaunch: firstLaunch, provisioning: provisioning, animationsLibrary: animationsLibrary, interruption: interruption, note: note).servedAnswer(junit: junit)
+            return try performWalk(shell: shell, now: now, runner: resolveRunner, logFileURL: logFileURL, builds: builds, leases: leases, telemetry: telemetry, firstLaunch: firstLaunch, provisioning: provisioning, animationsLibrary: animationsLibrary, interruption: interruption, note: note).servedAnswer(junit: junit)
         }
         var reporting = walk
         reporting.junit = junit

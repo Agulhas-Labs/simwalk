@@ -87,8 +87,7 @@ struct AnimationsHandDownTests {
                 shell: Shell(script: fixture.script.run),
                 runner: { throw RunnerRefused() },
                 builds: RunnerBuilds(directory: fixture.directory.url.appendingPathComponent("runner-builds", isDirectory: true)),
-                environment: [:],
-                logFileURL: fixture.directory.url.appendingPathComponent("usage.jsonl"),
+                environment: [UsageLog.overrideVariable: fixture.directory.url.appendingPathComponent("usage.jsonl").path],
                 animationsLibrary: recording.provider
             )
         }

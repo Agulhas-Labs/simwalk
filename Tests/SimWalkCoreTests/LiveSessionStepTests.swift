@@ -75,6 +75,7 @@ struct LiveSessionStepTests {
             request,
             screen: CountingTreeSource(tree: Self.home),
             sheetReads: sheet,
+            pixels: { _ in nil },
             perform: { _, _ in
                 performed += 1
                 return .landed(.tap(label: "First"), sheetClosed: false, bound: nil)
@@ -101,6 +102,7 @@ struct LiveSessionStepTests {
             LiveSessionRequest(n: 1, action: .step, step: .systemTap(label: "Allow"), guardHash: ScreenHash.of(Self.home)),
             screen: CountingTreeSource(tree: Self.home),
             sheetReads: CountingTreeSource(tree: Self.home),
+            pixels: { _ in nil },
             perform: { step, scope in
                 taken.append(step)
                 #expect(scope != nil)
@@ -122,6 +124,7 @@ struct LiveSessionStepTests {
             LiveSessionRequest(n: 2, action: .step, step: .tap(label: "Nowhere")),
             screen: CountingTreeSource(tree: Self.home),
             sheetReads: CountingTreeSource(tree: Self.home),
+            pixels: { _ in nil },
             perform: { _, _ in .blocked(reason: "no element labelled 'Nowhere'") },
             read: { Self.screen(Self.home) }
         )
@@ -140,6 +143,7 @@ struct LiveSessionStepTests {
             LiveSessionRequest(n: 1, action: .step, step: .back),
             screen: screen,
             sheetReads: CountingTreeSource(tree: Self.home),
+            pixels: { _ in nil },
             perform: { step, _ in .landed(step, sheetClosed: false, bound: nil) },
             read: {
                 readsWhenRead = screen.reads
@@ -161,7 +165,10 @@ struct LiveSessionStepTests {
         let response = try stepper.relaunch(
             LiveSessionRequest(n: 4, action: .relaunch),
             screen: screen,
-            launch: { launched += 1 },
+            launch: {
+                launched += 1
+                return false
+            },
             read: {
                 readsWhenRead = screen.reads
                 return Self.screen(Self.home)
@@ -171,6 +178,95 @@ struct LiveSessionStepTests {
         #expect(launched == 1)
         #expect(readsWhenRead >= 3)
         #expect(response == LiveSessionResponse(n: 4, action: .relaunch, screen: Self.screen(Self.home)))
+    }
+
+    /// A relaunch that turned the device to match a landscape app says so in its answer (SimWalk#225); one that did not turn says nothing.
+    @Test
+    func aRelaunchThatTurnedTheDeviceCarriesTheNote() throws {
+        var stepper = LiveSessionStepper(quiet: 0.25)
+        let screen = CountingTreeSource(trees: [Self.home(x: 60)], then: Self.home)
+
+        let response = try stepper.relaunch(
+            LiveSessionRequest(n: 4, action: .relaunch),
+            screen: screen,
+            launch: { true },
+            read: { Self.screen(Self.home) }
+        )
+
+        #expect(response.notes == [DeviceAlignment.note()])
+        #expect(response.screen == Self.screen(Self.home))
+    }
+
+    /// An answer written before `notes` existed decodes with none, and an answer with none writes no key.
+    @Test
+    func anAnswerWithNoNotesKeyDecodesAndWritesNone() throws {
+        let plain = LiveSessionResponse(n: 4, action: .relaunch, screen: Self.screen(Self.home))
+        let json = try JSONEncoder().encode(plain)
+
+        #expect(try JSONDecoder().decode(LiveSessionResponse.self, from: json).notes == nil)
+        #expect(!String(decoding: json, as: UTF8.self).contains("notes"))
+
+        let noted = LiveSessionResponse(n: 4, action: .relaunch, notes: ["a"])
+        #expect(try JSONDecoder().decode(LiveSessionResponse.self, from: JSONEncoder().encode(noted)) == noted)
+    }
+
+    /// A scroll drags once, waits for the screen to hold still, and answers with the screen read after the drag under its own action.
+    @Test
+    func aScrollDragsOnceThenReadsTheScreenOnceItHasHeldStill() throws {
+        var stepper = LiveSessionStepper(quiet: 0.25)
+        let screen = CountingTreeSource(trees: [Self.home(x: 60), Self.home(x: 40)], then: Self.home)
+        let scroll = LiveSessionScroll(direction: .down, container: AXNode.Frame(x: 0, y: 100, width: 390, height: 600))
+        var dragged = 0
+        var readsWhenRead = 0
+
+        let response = try stepper.scroll(
+            LiveSessionRequest(n: 5, action: .scroll, scroll: scroll),
+            screen: screen,
+            drag: { dragged += 1 },
+            read: {
+                readsWhenRead = screen.reads
+                return Self.screen(Self.home)
+            }
+        )
+
+        #expect(dragged == 1)
+        #expect(readsWhenRead >= 3)
+        #expect(response == LiveSessionResponse(n: 5, action: .scroll, screen: Self.screen(Self.home)))
+    }
+
+    /// A scroll request that names no scroll is refused with nothing dragged.
+    @Test
+    func aScrollRequestWithNoScrollIsRefusedAndNothingIsDragged() {
+        var stepper = LiveSessionStepper(quiet: 0.25)
+        var dragged = 0
+
+        #expect(throws: (any Error).self) {
+            try stepper.scroll(
+                LiveSessionRequest(n: 5, action: .scroll),
+                screen: CountingTreeSource(trees: [], then: Self.home),
+                drag: { dragged += 1 },
+                read: { Self.screen(Self.home) }
+            )
+        }
+        #expect(dragged == 0)
+    }
+
+    /// A scroll request is one JSON object with its direction and the container's box, on the simulator's file and the device's frame alike.
+    @Test
+    func aScrollRequestKeepsItsScrollOnTheWire() throws {
+        let scroll = LiveSessionScroll(direction: .up, container: AXNode.Frame(x: 0, y: 100, width: 390, height: 600))
+        let request = LiveSessionRequest(n: 3, action: .scroll, scroll: scroll)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let json = try String(decoding: encoder.encode(request), as: UTF8.self)
+
+        #expect(json.contains(#""action":"scroll""#))
+        #expect(json.contains(#""scroll":{"container":{"height":600,"width":390,"x":0,"y":100},"direction":"up"}"#))
+        #expect(try JSONDecoder().decode(LiveSessionRequest.self, from: Data(json.utf8)) == request)
+        #expect(DeviceSessionRequest(action: .scroll, scroll: scroll).numbered(3) == request)
+        let device = try encoder.encode(DeviceSessionRequest(action: .scroll, scroll: scroll))
+        #expect(try JSONDecoder().decode(DeviceSessionRequest.self, from: device).scroll == scroll)
     }
 
     // MARK: - The route, and the answer
@@ -235,6 +331,32 @@ struct LiveSessionStepTests {
         #expect(answer.residue.prefix(3) == [#"step: {"openURL":{"url":"x://detail"}}"#, "screen \(ScreenHash.of(Self.detail))", "delta: 1 appeared, 3 disappeared"])
     }
 
+    /// A landed screen-point `tapPoint` names the frame its point was taken in, from the tree's root, so a landscape app's reader is not misled by a portrait screenshot (SimWalk#149).
+    @Test(arguments: [
+        (AXNode.Frame(x: 0, y: 0, width: 874, height: 402), " in the app's 874×402 pt frame (landscape)"),
+        (AXNode.Frame(x: 0, y: 0, width: 402, height: 874), " in the app's 402×874 pt frame (portrait)"),
+        (AXNode.Frame(x: 0, y: 0, width: 500, height: 500), " in the app's 500×500 pt frame"),
+        (AXNode.Frame(x: 0, y: 0, width: 0, height: 0), ""),
+    ])
+    func aLandedScreenPointTapNamesTheFrameItWasTakenIn(frame: AXNode.Frame, clause: String) throws {
+        let root = AXNode(type: "Application", frame: frame, label: "RouteFixture")
+        let step = Walkbook.RouteStep.tapPoint(label: nil, point: [437, 273])
+
+        let answer = try LiveSessionStepQuery(sent: step, answer: .landed(step, delta: ScreenDelta(from: Self.home, to: root)), screen: Self.screen(root)).answer()
+
+        #expect(answer.verdict.line.contains("landed tap at 437,273 pt\(clause) — now on root"))
+    }
+
+    @Test
+    func aLabelledTapPointNamesNoFrame() throws {
+        let step = Walkbook.RouteStep.tapPoint(label: "Steps chart", point: [0.8, 0.5])
+        let root = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 874, height: 402), label: "RouteFixture")
+
+        let answer = try LiveSessionStepQuery(sent: step, answer: .landed(step, delta: ScreenDelta(from: Self.home, to: root)), screen: Self.screen(root)).answer()
+
+        #expect(!answer.verdict.line.contains("in the app's"))
+    }
+
     /// A landed step that bound an element names it on one line after `step:`, in the form `inspect` prints a node (SimWalk#93).
     @Test
     func aBoundElementPrintsAfterTheStepLine() throws {
@@ -288,6 +410,270 @@ extension LiveSessionStepTests {
 
     static let home = home()
 
+    // MARK: - Pixels for a tree with no text (SimWalk#150)
+
+    /// A game's tree: one view, nothing a reader lists.
+    static let canvas = AXNode(type: "Application", frame: screenFrame, children: [AXNode(type: "Other", frame: screenFrame)])
+
+    /// A step on `source`'s canvas, whose after-read carries `after`'s picture.
+    private func stepOnCanvas(_ source: CountingTreeSource, after: Data, guardHash: String? = nil) throws -> LiveSessionResponse {
+        var stepper = LiveSessionStepper(quiet: 0.25)
+        return try stepper.answer(
+            LiveSessionRequest(n: 1, action: .step, step: .tapPoint(label: nil, point: [200, 400]), guardHash: guardHash),
+            screen: source,
+            sheetReads: CountingTreeSource(tree: Self.canvas),
+            pixels: { _ in PixelSignature(png: source.screenshot()) },
+            perform: { _, _ in .landed(.tapPoint(label: nil, point: [200, 400]), sheetClosed: false, bound: nil) },
+            read: { Self.screen(Self.canvas, pixels: PixelSignature(png: after)) }
+        )
+    }
+
+    @Test
+    func aTextlessScreenThatChangedItsPixelsIsToldApartAndSaysHowMuch() throws {
+        let black = try PixelSignatureTests.png()
+        let half = try PixelSignatureTests.png(whiteTopFraction: 0.5)
+        let source = CountingTreeSource(tree: Self.canvas)
+        source.pictures = [black]
+
+        let response = try stepOnCanvas(source, after: half)
+
+        let step = try #require(response.step)
+        let delta = try #require(step.delta)
+        #expect(delta.residue.contains { $0.hasPrefix("pixels: 5") && $0.contains("% of the screen changed") })
+        let hash = try ScreenHash.of(Self.canvas, pixels: PixelSignatureTests.signature(half))
+        let printed = try LiveSessionStepQuery(sent: .tapPoint(label: nil, point: [200, 400]), answer: step, screen: response.screen).answer()
+        #expect(printed.residue.contains("screen \(hash)"))
+        #expect(try hash != ScreenHash.of(Self.canvas, pixels: PixelSignatureTests.signature(black)))
+        #expect(source.screenshots == 1)
+    }
+
+    @Test
+    func aTextlessScreenWithTheSamePixelsIsTheSameScreen() throws {
+        let black = try PixelSignatureTests.png()
+        let source = CountingTreeSource(tree: Self.canvas)
+        source.pictures = [black]
+
+        let response = try stepOnCanvas(source, after: black)
+
+        let delta = try #require(response.step?.delta)
+        let residue = delta.residue
+
+        #expect(residue.first == "delta: nothing appeared or disappeared")
+        #expect(residue.contains { $0.hasPrefix("pixels: nothing changed") })
+    }
+
+    @Test
+    func aGuardBuiltFromTheHashAReadPrintedMatchesAnUntouchedTextlessScreenAndRefusesAChangedOne() throws {
+        let black = try PixelSignatureTests.png()
+        let half = try PixelSignatureTests.png(whiteTopFraction: 0.5)
+        let printed = try ScreenHash.of(Self.canvas, pixels: PixelSignatureTests.signature(black))
+        let untouched = CountingTreeSource(tree: Self.canvas)
+        untouched.pictures = [black]
+
+        let landed = try stepOnCanvas(untouched, after: black, guardHash: printed)
+        #expect(landed.step?.outcome == .landed)
+
+        let changed = CountingTreeSource(tree: Self.canvas)
+        changed.pictures = [half]
+        let refused = try stepOnCanvas(changed, after: black, guardHash: printed)
+        #expect(try refused.step == .snapshotChanged(expected: printed, found: ScreenHash.of(Self.canvas, pixels: PixelSignatureTests.signature(half))))
+    }
+
+    /// A step on `source`'s canvas by `stepper`, which keeps what it remembers from call to call.
+    private func step(_ stepper: inout LiveSessionStepper, on source: CountingTreeSource, of tree: AXNode, guardHash: String?) throws -> LiveSessionResponse {
+        try stepper.answer(
+            LiveSessionRequest(n: 1, action: .step, step: .tapPoint(label: nil, point: [200, 400]), guardHash: guardHash),
+            screen: source,
+            sheetReads: CountingTreeSource(tree: tree),
+            pixels: { _ in PixelSignature(png: source.screenshot()) },
+            perform: { _, _ in .landed(.tapPoint(label: nil, point: [200, 400]), sheetClosed: false, bound: nil) },
+            read: { Self.screen(tree, pixels: PixelSignature(png: source.screenshot())) }
+        )
+    }
+
+    /// A stepper that has read `tree` with `picture`, as a `session read` would have.
+    private func stepperThatRead(_ tree: AXNode, _ picture: Data) throws -> (LiveSessionStepper, printed: String) {
+        var stepper = LiveSessionStepper(quiet: 0.25)
+        let signature = try PixelSignatureTests.signature(picture)
+        stepper.remember(Self.screen(tree, pixels: signature))
+        return (stepper, ScreenHash.of(tree, pixels: signature))
+    }
+
+    /// SimWalk#226: an idle animation moves a few cells and must not refuse the guard.
+    @Test
+    func aTextlessGuardHoldsWhenThePictureMovedUnderTheToleranceAndTheStepSaysSo() throws {
+        let black = try PixelSignatureTests.png()
+        let nudged = try PixelSignatureTests.png(whiteTopFraction: 0.05)
+        var (stepper, printed) = try stepperThatRead(Self.canvas, black)
+        let source = CountingTreeSource(tree: Self.canvas)
+        source.pictures = [nudged]
+        #expect(try ScreenHash.of(Self.canvas, pixels: PixelSignatureTests.signature(nudged)) != printed)
+
+        let response = try step(&stepper, on: source, of: Self.canvas, guardHash: printed)
+
+        #expect(response.step?.outcome == .landed)
+        let moved = try #require(response.step?.pixelsMoved)
+        #expect(moved > 0 && moved <= PixelSignature.guardTolerance)
+        let residue = try LiveSessionStepQuery(sent: .back, answer: #require(response.step), screen: response.screen).answer().residue
+        #expect(residue.contains { $0.hasPrefix("guard: held, ") && $0.contains("of the screen moved since \(printed)") })
+    }
+
+    @Test
+    func aTextlessGuardOverTheToleranceIsRefusedNamingHowMuchChanged() throws {
+        let black = try PixelSignatureTests.png()
+        let third = try PixelSignatureTests.png(whiteTopFraction: 0.3)
+        var (stepper, printed) = try stepperThatRead(Self.canvas, black)
+        let source = CountingTreeSource(tree: Self.canvas)
+        source.pictures = [third]
+
+        let response = try step(&stepper, on: source, of: Self.canvas, guardHash: printed)
+
+        let moved = try #require(response.step?.pixelsMoved)
+        #expect(moved > PixelSignature.guardTolerance)
+        let error = try #require(throws: LiveSessionError.self) {
+            try LiveSessionStepQuery(sent: .back, answer: #require(response.step), screen: nil).answer()
+        }
+        #expect(error.description.contains("\(Int((moved * 100).rounded()))% of the screen changed since it was read"))
+    }
+
+    /// SimWalk#226: the picture is compared only for the same tree; a different text-less screen whose picture is close is still another screen.
+    @Test
+    func aTextlessGuardIsRefusedWhenTheTreeIsNotTheOneTheHashWasPrintedFor() throws {
+        let black = try PixelSignatureTests.png()
+        let nudged = try PixelSignatureTests.png(whiteTopFraction: 0.05)
+        let otherCanvas = AXNode(type: "Application", frame: Self.screenFrame, children: [
+            AXNode(type: "Other", frame: AXNode.Frame(x: 0, y: 0, width: 200, height: 874)),
+        ])
+        var (stepper, printed) = try stepperThatRead(Self.canvas, black)
+        let source = CountingTreeSource(tree: otherCanvas)
+        source.pictures = [nudged]
+
+        let response = try step(&stepper, on: source, of: otherCanvas, guardHash: printed)
+
+        #expect(response.step?.outcome == .snapshotChanged)
+        #expect(response.step?.pixelsMoved == nil)
+    }
+
+    /// SimWalk#226: a step remembers the screen it left, so the next step can guard on the hash this one printed.
+    @Test
+    func aStepRemembersItsAfterScreenSoTheNextGuardOnItsHashHolds() throws {
+        let black = try PixelSignatureTests.png()
+        let nudged = try PixelSignatureTests.png(whiteTopFraction: 0.05)
+        var stepper = LiveSessionStepper(quiet: 0.25)
+        let source = CountingTreeSource(tree: Self.canvas)
+        // Step 1 reads black before and after; step 2 finds the canvas nudged.
+        source.pictures = [black, black, nudged]
+        let first = try step(&stepper, on: source, of: Self.canvas, guardHash: nil)
+        let printed = try ScreenHash.of(Self.canvas, pixels: #require(first.screen?.pixels))
+
+        let second = try step(&stepper, on: source, of: Self.canvas, guardHash: printed)
+
+        #expect(second.step?.outcome == .landed)
+        #expect(try #require(second.step?.pixelsMoved) <= PixelSignature.guardTolerance)
+    }
+
+    @Test
+    func aHashTheSessionNeverPrintedIsRefusedWithNoPictureComparedAndATreeWithTextStillNeedsTheExactHash() throws {
+        let black = try PixelSignatureTests.png()
+        let nudged = try PixelSignatureTests.png(whiteTopFraction: 0.05)
+        var (stepper, _) = try stepperThatRead(Self.canvas, black)
+        let source = CountingTreeSource(tree: Self.canvas)
+        source.pictures = [nudged]
+        let refused = try step(&stepper, on: source, of: Self.canvas, guardHash: "00000000")
+        #expect(refused.step?.outcome == .snapshotChanged)
+        #expect(refused.step?.pixelsMoved == nil)
+
+        var other = LiveSessionStepper(quiet: 0.25)
+        other.remember(Self.screen(Self.home))
+        let text = CountingTreeSource(tree: Self.home)
+        let stale = try step(&other, on: text, of: Self.home, guardHash: "00000000")
+        #expect(stale.step == .snapshotChanged(expected: "00000000", found: ScreenHash.of(Self.home)))
+    }
+
+    @Test
+    func theSessionRemembersTheLast32TextlessHashesAndDropsTheOldest() throws {
+        let black = try PixelSignatureTests.png()
+        let nudged = try PixelSignatureTests.png(whiteTopFraction: 0.05)
+        func tree(_ i: Int) -> AXNode {
+            AXNode(type: "Application", frame: Self.screenFrame, children: [AXNode(type: "Other", frame: AXNode.Frame(x: Double(i), y: 0, width: 402, height: 874))])
+        }
+        var (stepper, first) = try stepperThatRead(tree(0), black)
+        let source = CountingTreeSource(tree: tree(0))
+        source.pictures = [nudged]
+        var kept = stepper
+        #expect(try step(&kept, on: source, of: tree(0), guardHash: first).step?.outcome == .landed)
+
+        for i in 1 ..< LiveSessionStepper.memory {
+            try stepper.remember(Self.screen(tree(i), pixels: PixelSignatureTests.signature(black)))
+        }
+        kept = stepper
+        #expect(try step(&kept, on: source, of: tree(0), guardHash: first).step?.outcome == .landed)
+        try stepper.remember(Self.screen(tree(LiveSessionStepper.memory), pixels: PixelSignatureTests.signature(black)))
+        let forgotten = try step(&stepper, on: source, of: tree(0), guardHash: first)
+        #expect(forgotten.step?.outcome == .snapshotChanged)
+        #expect(forgotten.step?.pixelsMoved == nil)
+    }
+
+    /// SimWalk#150: the before-hash comes from the injected picture source (the runner's one function, shared with a read), never from the screen source's own screenshot, which can be the device's grid in another orientation.
+    @Test
+    func theBeforeHashTakesItsPictureFromTheInjectedSourceAndNotTheScreensOwn() throws {
+        let black = try PixelSignatureTests.png()
+        let half = try PixelSignatureTests.png(whiteTopFraction: 0.5)
+        let source = CountingTreeSource(tree: Self.canvas)
+        source.pictures = [black]
+        var asked = 0
+        var stepper = LiveSessionStepper(quiet: 0.25)
+
+        let response = try stepper.answer(
+            LiveSessionRequest(n: 1, action: .step, step: .tapPoint(label: nil, point: [200, 400]), guardHash: "00000000"),
+            screen: source,
+            sheetReads: CountingTreeSource(tree: Self.canvas),
+            pixels: { _ in
+                asked += 1
+                return PixelSignature(png: half)
+            },
+            perform: { _, _ in .landed(.tapPoint(label: nil, point: [200, 400]), sheetClosed: false, bound: nil) },
+            read: { Self.screen(Self.canvas) }
+        )
+
+        #expect(asked == 1)
+        #expect(source.screenshots == 0)
+        #expect(try response.step == .snapshotChanged(expected: "00000000", found: ScreenHash.of(Self.canvas, pixels: PixelSignatureTests.signature(half))))
+    }
+
+    @Test
+    func aTreeWithTextTakesNoScreenshotAndAnswersAsBefore() throws {
+        var stepper = LiveSessionStepper(quiet: 0.25)
+        let source = CountingTreeSource(tree: Self.home)
+
+        let response = try stepper.answer(
+            LiveSessionRequest(n: 1, action: .step, step: .tap(label: "First"), guardHash: ScreenHash.of(Self.home)),
+            screen: source,
+            sheetReads: CountingTreeSource(tree: Self.home),
+            pixels: { _ in nil },
+            perform: { _, _ in .landed(.tap(label: "First"), sheetClosed: false, bound: nil) },
+            read: { Self.screen(Self.detail) }
+        )
+
+        #expect(source.screenshots == 0)
+        #expect(response.step == .landed(.tap(label: "First"), delta: ScreenDelta(from: Self.home, to: Self.detail)))
+        #expect(response.step?.delta?.pixelsChanged == nil)
+    }
+
+    @Test
+    func aReadWrittenBeforeThePixelsExistedStillDecodes() throws {
+        let withPixels = try Self.screen(Self.canvas, pixels: PixelSignature(png: PixelSignatureTests.png()))
+        let data = try CaptureBundle.encoder().encode(withPixels)
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["pixels"] != nil)
+        object["pixels"] = nil
+
+        let decoded = try CaptureBundle.decoder().decode(LiveScreen.self, from: JSONSerialization.data(withJSONObject: object))
+
+        #expect(decoded.pixels == nil)
+        #expect(decoded == Self.screen(Self.canvas))
+    }
+
     /// RouteFixture's home: an HStack of three buttons.
     static func home(label: String = "Third", value: String? = nil, x: Double = 16, width: Double = 100) -> AXNode {
         AXNode(type: "Application", frame: screenFrame, label: "RouteFixture", children: [
@@ -305,7 +691,7 @@ extension LiveSessionStepTests {
         ]),
     ])
 
-    static func screen(_ tree: AXNode) -> LiveScreen {
+    static func screen(_ tree: AXNode, pixels: PixelSignature? = nil) -> LiveScreen {
         LiveScreen(
             appBundleID: "dev.simwalk.route-fixture",
             device: CaptureManifest.Device(name: "iPhone 17", udid: "UDID-1", osVersion: "27.0"),
@@ -315,15 +701,19 @@ extension LiveSessionStepTests {
             appState: .foreground,
             tree: tree,
             settled: true,
-            screenPixels: nil
+            screenPixels: nil,
+            pixels: pixels
         )
     }
 
     /// A screen that counts its reads, on a clock that moves only when it is paused.
-    final class CountingTreeSource: TreeSource {
+    final class CountingTreeSource: CaptureSource {
         private let trees: [AXNode]
         private let rest: AXNode
         private(set) var reads = 0
+        /// The pictures `screenshot()` returns in turn, the last for ever; how many it was asked for is `screenshots`.
+        var pictures: [Data] = []
+        private(set) var screenshots = 0
         private var clock: TimeInterval = 0
 
         init(tree: AXNode) {
@@ -340,6 +730,15 @@ extension LiveSessionStepTests {
         func appTree() throws -> AXNode {
             reads += 1
             return reads <= trees.count ? trees[reads - 1] : rest
+        }
+
+        func springboardTree() throws -> AXNode {
+            AXNode(type: "Application", frame: LiveSessionStepTests.screenFrame)
+        }
+
+        func screenshot() -> Data {
+            screenshots += 1
+            return pictures.isEmpty ? Data() : pictures[min(screenshots, pictures.count) - 1]
         }
 
         func elapsed() -> TimeInterval {

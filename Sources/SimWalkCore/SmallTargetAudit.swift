@@ -12,6 +12,7 @@ import Foundation
 /// - **A control whose tappable area is its enclosing cell is left out.** Apple's Settings lists `About`, `Fonts` and `Keyboard` as 28-point-high buttons inside 53-point cells; the row is what the finger lands on. It holds only when the cell is at least 44×44, the control is the only target in it, and the control *is* the row: it shares the cell's label or identifier, or spans at least 80% of the cell's width. A 24×24 trailing Info button in a row of text, or a small button beside a `Switch`, is a small target in a big cell, and still fires; two small controls sharing a cell each need their own room.
 /// - **A control nested inside another control, or inside a text field, is part of that one.** The `Dictate` button in Settings' search field is 17×22 and is the field's accessory; the field is the target.
 /// - **An inline link is left out.** A `Link` sitting in a run of text (inside a `StaticText` or `TextView`, or overlapping one beside it) is as tall as a line of type by construction; padding a sentence is not the fix.
+/// - **A link inside a web view is left out (SimWalk#239).** A `Link` with a `WebView` ancestor is inline text in a web page; target-size guidance exempts a link inline in a body of text, and its height is a line of type. A `Button` stays judged however text-like, and a `Link` outside any web view stays judged.
 /// - **A disabled, zero-sized or off-screen control never fires.** Off-screen is judged against the root frame.
 public struct SmallTargetAudit: PerTreeLabelAuditRule {
     public static let name = AuditRuleName.smallTarget
@@ -42,6 +43,9 @@ public struct SmallTargetAudit: PerTreeLabelAuditRule {
     private static let bars: Set<String> = ["TabBar", "NavigationBar"]
     private static let fields: Set<String> = ["TextField", "SecureTextField", "SearchField"]
     private static let textTypes: Set<String> = ["StaticText", "TextView"]
+    private static var webViewType: String {
+        "WebView"
+    }
 
     public init() {}
 
@@ -69,7 +73,8 @@ public struct SmallTargetAudit: PerTreeLabelAuditRule {
     ///
     /// The identity is what the element shows — type, label, identifier, frame — and which of its look-alikes it is among its siblings: the copies of one element under two parents share it, and two elements that look the same side by side in one parent (two unlabelled buttons on one frame) do not (SimWalk#75). The parent itself is left out because it is what differs between the copies; look-alikes that are each also listed under a second parent pair up by that order.
     private func visit(_ node: AXNode, ancestors: [AXNode], siblings: [AXNode], index: Int, screen: AXNode.Frame, examine: (AXNode, [AXNode], String) -> Void) {
-        if Self.bars.contains(node.type) {
+        // The keyboard is input laid over the screen, not the screen being judged (an input view the app draws itself included): its keys and suggestion buttons are not the app's targets (SimWalk#215).
+        if Self.bars.contains(node.type) || ScreenIdentifier.isKeyboard(node) {
             return
         }
         if isCandidate(node, ancestors: ancestors, siblings: siblings, screen: screen) {
@@ -93,7 +98,7 @@ public struct SmallTargetAudit: PerTreeLabelAuditRule {
         if ancestors.contains(where: { Self.targetTypes.contains($0.type) || Self.fields.contains($0.type) }) {
             return false
         }
-        if node.type == "Link", isInline(node, ancestors: ancestors, siblings: siblings) {
+        if node.type == "Link", isInline(node, ancestors: ancestors, siblings: siblings) || ancestors.contains(where: { $0.type == Self.webViewType }) {
             return false
         }
         return true

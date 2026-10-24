@@ -14,10 +14,11 @@ public struct ScreenFiling {
         expectMenu: [String]? = nil,
         instead intended: ScreenOutcome,
         deviceAppearance: Walkbook.Theme? = nil,
-        deviceLocale: String? = nil
+        deviceLocale: String? = nil,
+        fixedAppearance: Walkbook.Theme? = nil
     ) -> StateApplicationCheck.Filing {
         let screenChecked = ExpectedScreenCheck.outcome(for: trees, expect: expect, instead: intended)
         let checked = ExpectedMenuCheck.outcome(for: trees, expectMenu: expectMenu, instead: screenChecked)
-        return StateApplicationCheck.filing(for: evidence, instead: checked, deviceAppearance: deviceAppearance, deviceLocale: deviceLocale)
+        return StateApplicationCheck.filing(for: evidence, instead: checked, deviceAppearance: deviceAppearance, deviceLocale: deviceLocale, fixedAppearance: fixedAppearance)
     }
 }

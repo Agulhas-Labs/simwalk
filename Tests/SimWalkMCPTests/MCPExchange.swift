@@ -32,6 +32,18 @@ struct MCPExchange {
         environment: [String: String] = [:],
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> [[String: Any]] {
+        try await decode(written(lines: requests, usage: usage, session: session, answering: answering, environment: environment, log: log))
+    }
+
+    /// Sends request lines exactly as given and returns everything the server wrote, as bytes.
+    static func written(
+        lines requests: [Data],
+        usage: UsageLog? = nil,
+        session: String? = nil,
+        answering: @escaping SimWalkMCPServer.AnswerProvider = { _, _, _, _ in Self.answer },
+        environment: [String: String] = [:],
+        log: @escaping @Sendable (String) -> Void = { _ in }
+    ) async throws -> Data {
         let input = Pipe()
         let output = Pipe()
         let server = SimWalkMCPServer(
@@ -52,8 +64,7 @@ struct MCPExchange {
         await server.run()
         try output.fileHandleForWriting.close()
 
-        let written = try output.fileHandleForReading.readToEnd() ?? Data()
-        return try decode(written)
+        return try output.fileHandleForReading.readToEnd() ?? Data()
     }
 
     /// Every line the server wrote, decoded — and a *throw* for one that is not protocol JSON.

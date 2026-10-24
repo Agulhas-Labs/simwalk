@@ -8,19 +8,25 @@
 
 /* Begin PBXBuildFile section */
 		02819287FC3E4269E6D6F05C /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 6CEAF763E6344E51F7F41C96 /* Localizable.strings */; };
+		093F74921FDCF3D342DC6677 /* DownloadLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F3C093997362F3427F5ED5 /* DownloadLog.swift */; };
 		15E7DE8EC7607AFF26B60DB4 /* AccountRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2881C71B8B669D5BCBBF001D /* AccountRow.swift */; };
+		4FC38C51EBAC4FD3E696F5AC /* downloads.csv in Resources */ = {isa = PBXBuildFile; fileRef = 57FDA2C6050DDE929BE99155 /* downloads.csv */; };
 		8B7E01A0699A78FE70372130 /* DemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 222BE377E06026F72BC7F8C8 /* DemoApp.swift */; };
 		A9217FF7E6E14C10257B1EB3 /* AccountScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = E025A7DEB3C3ABAAA5800B9B /* AccountScreen.swift */; };
+		F65962790A87703EF93F6AEC /* UsageScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4925BD77436663C0EE508F22 /* UsageScreen.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		154FAE636D5E23DF886F3868 /* DemoApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = DemoApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		222BE377E06026F72BC7F8C8 /* DemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoApp.swift; sourceTree = "<group>"; };
 		2881C71B8B669D5BCBBF001D /* AccountRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountRow.swift; sourceTree = "<group>"; };
+		4925BD77436663C0EE508F22 /* UsageScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageScreen.swift; sourceTree = "<group>"; };
+		57FDA2C6050DDE929BE99155 /* downloads.csv */ = {isa = PBXFileReference; path = downloads.csv; sourceTree = "<group>"; };
 		5C73AF7E9D4D4322CBD51778 /* ar */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ar; path = ar.lproj/Localizable.strings; sourceTree = "<group>"; };
 		5FD9816AECC244CDFCF7C07E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		63ABD32CDD64611573BE8C87 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		E025A7DEB3C3ABAAA5800B9B /* AccountScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountScreen.swift; sourceTree = "<group>"; };
+		F1F3C093997362F3427F5ED5 /* DownloadLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadLog.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -46,7 +52,10 @@
 				2881C71B8B669D5BCBBF001D /* AccountRow.swift */,
 				E025A7DEB3C3ABAAA5800B9B /* AccountScreen.swift */,
 				222BE377E06026F72BC7F8C8 /* DemoApp.swift */,
+				F1F3C093997362F3427F5ED5 /* DownloadLog.swift */,
+				57FDA2C6050DDE929BE99155 /* downloads.csv */,
 				5FD9816AECC244CDFCF7C07E /* Info.plist */,
+				4925BD77436663C0EE508F22 /* UsageScreen.swift */,
 				6CEAF763E6344E51F7F41C96 /* Localizable.strings */,
 			);
 			path = DemoApp;
@@ -114,6 +123,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				02819287FC3E4269E6D6F05C /* Localizable.strings in Resources */,
+				4FC38C51EBAC4FD3E696F5AC /* downloads.csv in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -127,6 +137,8 @@
 				15E7DE8EC7607AFF26B60DB4 /* AccountRow.swift in Sources */,
 				A9217FF7E6E14C10257B1EB3 /* AccountScreen.swift in Sources */,
 				8B7E01A0699A78FE70372130 /* DemoApp.swift in Sources */,
+				093F74921FDCF3D342DC6677 /* DownloadLog.swift in Sources */,
+				F65962790A87703EF93F6AEC /* UsageScreen.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

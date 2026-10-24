@@ -293,6 +293,48 @@ struct WalkDryRunTests {
         #expect(LeaseStore(directory: directory.url.appendingPathComponent("leases")).all().isEmpty)
     }
 
+    /// SimWalk#219: an iPhone-only `--app-path` on a shut-down iPad is refused from the bundle on disk, before the device is booted and before the app is installed.
+    @Test
+    func anIPhoneOnlyAppPathOnAShutDownIPadIsRefusedBeforeBootAndInstall() throws {
+        let directory = try TemporaryDirectory()
+        let appPath = try Self.iPhoneOnlyApp(in: directory)
+        let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: 0, booted: false, deviceType: Self.iPadType)
+        let command = try WalkCommand.parse([Self.twoScreenWalkbook(in: directory), "--output", directory.url.appendingPathComponent("probe.json").path, "--device", "UDID-1", "--app-path", appPath])
+
+        let thrown = try #require(#expect(throws: SimulatorError.self) {
+            try command.prepare(shell: Shell(script: script.run), runner: { Self.runner }, builds: Self.builds(in: directory), leases: LeaseStore(directory: directory.url.appendingPathComponent("leases")), now: Date())
+        })
+
+        guard case .iPhoneOnlyAppOnIPad = thrown else {
+            Issue.record("expected the iPhone-only refusal, got \(String(describing: thrown))")
+            return
+        }
+        let simctl = script.calls.map(\.arguments).filter { $0.first == "simctl" }.compactMap { $0.dropFirst().first }
+        #expect(!simctl.contains("boot"))
+        #expect(!simctl.contains("install"))
+        #expect(LeaseStore(directory: directory.url.appendingPathComponent("leases")).all().isEmpty)
+    }
+
+    /// Without `--app-path` the app is read from the installed bundle, which needs a booted device: the check after the install still refuses (SimWalk#166).
+    @Test
+    func anInstalledIPhoneOnlyAppOnABootedIPadIsRefusedAfterTheInstalledPathIsRead() throws {
+        let directory = try TemporaryDirectory()
+        let appPath = try Self.iPhoneOnlyApp(in: directory)
+        let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: 0, booted: true, deviceType: Self.iPadType)
+        let command = try WalkCommand.parse([Self.twoScreenWalkbook(in: directory), "--output", directory.url.appendingPathComponent("probe.json").path, "--device", "UDID-1"])
+
+        let thrown = try #require(#expect(throws: SimulatorError.self) {
+            try command.prepare(shell: Shell(script: script.run), runner: { Self.runner }, builds: Self.builds(in: directory), leases: LeaseStore(directory: directory.url.appendingPathComponent("leases")), now: Date())
+        })
+
+        guard case .iPhoneOnlyAppOnIPad = thrown else {
+            Issue.record("expected the iPhone-only refusal, got \(String(describing: thrown))")
+            return
+        }
+        #expect(script.calls.contains { $0.arguments.starts(with: ["simctl", "get_app_container"]) })
+        #expect(!script.calls.contains { $0.arguments.contains("build-for-testing") })
+    }
+
     /// A walk never tells the runner it is a dry run — the setting is absent, not `0`.
     @Test
     func awalkDoesNotTellTheRunnerItIsADryRun() throws {
@@ -553,6 +595,20 @@ struct WalkDryRunTests {
             commit: "c0ffee0000000000000000000000000000000000",
             origin: .installed
         )
+    }
+
+    private static var iPadType: String {
+        "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M5"
+    }
+
+    /// An `.app` whose `Info.plist` declares iPhone only.
+    private static func iPhoneOnlyApp(in directory: TemporaryDirectory) throws -> String {
+        let url = directory.url.appendingPathComponent("PhoneOnly.app")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let plist = try PropertyListSerialization.data(fromPropertyList: ["CFBundleExecutable": "PhoneOnly", "UIDeviceFamily": [1]] as [String: Any], format: .xml, options: 0)
+        try plist.write(to: url.appendingPathComponent("Info.plist"))
+        try Data("binary".utf8).write(to: url.appendingPathComponent("PhoneOnly"))
+        return url.path
     }
 
     private static func command() throws -> WalkCommand {

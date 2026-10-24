@@ -80,6 +80,16 @@ public struct LiveSessionLayout: Equatable, Sendable {
         directory.appendingPathComponent("responses", isDirectory: true)
     }
 
+    /// Screenshots a `read --screenshot` wrote, removed with the session's directory.
+    public var screenshots: URL {
+        directory.appendingPathComponent("screenshots", isDirectory: true)
+    }
+
+    /// The screenshot of read request `number`.
+    public func screenshot(read number: Int) -> URL {
+        screenshots.appendingPathComponent("read-\(number).png")
+    }
+
     /// Request `number`'s file.
     public func request(_ number: Int) -> URL {
         requests.appendingPathComponent(Self.fileName(number))

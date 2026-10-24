@@ -41,7 +41,7 @@ public extension TranscriptScan {
     ///
     /// Spelled here rather than read off the command tree because `SimWalkMCP` cannot see the executable target that owns it. `SimWalkCommandTests` fails when the two disagree, which is the same guarantee from the one side that can have it.
     static var invocationVerbs: Set<String> {
-        ["validate", "walk", "inspect", "bundle", "usage", "mcp", "statusline", "install", "doctor", "install-hook", "uninstall-hook", "prune", "hook", "lease", "session", "mirror", "device", "discover"]
+        ["validate", "walk", "inspect", "bundle", "usage", "mcp", "statusline", "install", "doctor", "install-hook", "uninstall-hook", "uninstall", "prune", "hook", "lease", "session", "mirror", "device", "discover"]
     }
 
     /// The argument vectors a shell command hands this tool — one per invocation, each the words after the binary, verb first, as the shell will split them.

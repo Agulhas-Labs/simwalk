@@ -28,7 +28,8 @@ public struct RouteProbeFixture {
         outcomes: [RouteProbe.Outcome] = [],
         buildHash: String = buildHash,
         startedAt: Date = startedAt,
-        nonce: String = nonce
+        nonce: String = nonce,
+        deviceTurns: [String]? = nil
     ) throws -> RouteProbeReport {
         let probes = walkbook.screens.enumerated().map { index, screen in
             RouteProbe(screenID: screen.id, route: screen.route, outcome: outcomes.indices.contains(index) ? outcomes[index] : .resolved)
@@ -42,7 +43,8 @@ public struct RouteProbeFixture {
             device: CaptureManifest.Device(name: "iPhone 17 Pro", udid: "UDID-1", osVersion: "26.5"),
             startedAt: startedAt,
             nonce: nonce,
-            probes: probes
+            probes: probes,
+            deviceTurns: deviceTurns
         )
     }
 }

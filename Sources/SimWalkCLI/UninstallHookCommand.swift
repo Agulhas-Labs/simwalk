@@ -19,10 +19,10 @@ struct UninstallHookCommand: ParsableCommand {
         )
     }
 
-    @Option(name: .customLong("settings"), help: "Settings file to edit (defaults to ~/.claude/settings.json).")
+    @Option(name: .customLong("settings"), help: "Settings file to edit (defaults to ~/.claude/settings.json, or settings.json in CLAUDE_CONFIG_DIR when set).")
     var settings: String?
 
-    @Option(name: .customLong("rule"), help: "The installed agent guide to remove (defaults to ~/.claude/rules/simwalk.md).")
+    @Option(name: .customLong("rule"), help: "The installed agent guide to remove (defaults to ~/.claude/rules/simwalk.md, or rules/simwalk.md in CLAUDE_CONFIG_DIR when set).")
     var rule: String?
 
     func run() throws {
@@ -37,10 +37,11 @@ struct UninstallHookCommand: ParsableCommand {
     }
 
     func answer() throws -> Answer {
-        try Self.answer(
-            locations: HookLocations.standard(settings: settings, rule: rule),
+        let environment = ProcessInfo.processInfo.environment
+        return try Self.answer(
+            locations: HookLocations.standard(settings: settings, rule: rule, environment: environment),
             executable: ExecutablePath.current,
-            claude: ClaudeCLI(environment: ProcessInfo.processInfo.environment)
+            claude: ClaudeCLI(environment: environment)
         )
     }
 
@@ -48,36 +49,75 @@ struct UninstallHookCommand: ParsableCommand {
     ///
     /// The files go first and the call out of the process last, mirroring the install for the same reason: the step that reaches another tool is the one that can fail in a way this cannot put back.
     static func answer(locations: HookLocations, executable: String, claude: any ClaudeMcpRunner) throws -> Answer {
+        try uninstall(locations: locations, executable: executable, claude: claude).answer
+    }
+
+    /// ``answer(locations:executable:claude:)`` and whether the run took anything out, decided from what each step did rather than from the words of its report (SimWalk#167).
+    ///
+    /// A file counts when the step rewrote or deleted it; the server counts when it was registered before the call and is not after. After the server's removal the config is read again: a `claude` that is not on PATH reports its manual command as an ordinary line, not a failure, so the registration still standing is only visible there, and it qualifies the answer instead of letting "nothing registered" stand.
+    static func uninstall(locations: HookLocations, executable: String, claude: any ClaudeMcpRunner) throws -> (answer: Answer, removedAnything: Bool) {
         var qualifications: [String] = []
         var settingsBackedUp = false
-        var residue = try removeStatusline(locations: locations, qualifications: &qualifications, settingsBackedUp: &settingsBackedUp)
-        try residue.append(removePreToolUseHook(settings: locations.settings, qualifications: &qualifications, settingsBackedUp: &settingsBackedUp))
+        var removedAnything = false
+        var residue = try removeStatusline(locations: locations, qualifications: &qualifications, settingsBackedUp: &settingsBackedUp, removedAnything: &removedAnything)
+        try residue.append(removePreToolUseHook(settings: locations.settings, qualifications: &qualifications, settingsBackedUp: &settingsBackedUp, removedAnything: &removedAnything))
         let rule = SimWalkClaudeSetup.rule.uninstall(destination: locations.rule)
         let backup = SimWalkClaudeSetup.rule.uninstall(destination: SettingsBackupFile.url(beside: locations.rule, tool: .simwalk))
+        let registeredBefore = serverRegistered(in: locations.config)
         let server = SimWalkClaudeSetup.mcp.uninstall(config: locations.config, runner: claude)
-        residue += rule.lines + rule.notes + backup.lines + backup.notes + server.lines + server.notes
+        let registeredAfter = serverRegistered(in: locations.config)
+        residue += rule.lines + rule.notes + backup.lines + backup.notes
         let failures = rule.failures + backup.failures + server.failures
+        // A refusal keeps Fieldwork's own server line, which carries the removal command for a `claude` that is not on PATH: the qualification below, which would otherwise state it, is never reached (SimWalk#197).
         guard failures.isEmpty else {
-            throw HookInstallError.claudeRefused(failures: failures, written: residue)
+            throw HookInstallError.claudeRefused(failures: failures, written: residue + server.lines + server.notes)
         }
+        // Past the refusal the qualification states that command for a registration still standing; left in the line, it would say it twice (SimWalk#197).
+        let command = SimWalkClaudeSetup.server.removalCommand
+        let serverLines = registeredAfter
+            ? server.lines.map { $0.contains(command) ? "mcp: `claude` is not on PATH — the registration was left as it was" : $0 }
+            : server.lines
+        residue += serverLines + server.notes
+        if registeredAfter {
+            qualifications.append("the simwalk server is still registered in \(locations.config.path.tildedPath) — remove it with: \(SimWalkClaudeSetup.server.removalCommand)")
+        }
+        removedAnything = removedAnything || rule.changed || backup.changed || (registeredBefore && !registeredAfter)
         residue.append("      \(SimWalkPaths.home.path.tildedPath) is left as it is — delete that directory to remove the usage log, the status line's cache, and the walk runner's snapshots and builds too")
-        return Answer(
+        let answer = Answer(
             header: "binary: \(executable.tildedPath)",
             verdict: .reporting(qualifications: qualifications, detail: "removed from Claude Code"),
             residue: residue
         )
+        return (answer, removedAnything)
     }
 }
 
 private extension UninstallHookCommand {
+    /// Whether Claude Code's config at `config` registers this tool's server at user scope, or at local scope in any project: both places its removal reaches.
+    ///
+    /// The local half mirrors Fieldwork's `ClaudeMcpServer.hasLocalEntry(in:)`, which it does not export.
+    static func serverRegistered(in config: URL) -> Bool {
+        if SimWalkClaudeSetup.server.userEntry(in: config) != nil {
+            return true
+        }
+        guard let data = try? Data(contentsOf: config),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let projects = object["projects"] as? [String: Any]
+        else { return false }
+        return projects.values.contains { project in
+            ((project as? [String: Any])?["mcpServers"] as? [String: Any])?[SimWalkClaudeSetup.server.name] != nil
+        }
+    }
+
     /// The status line, from whichever of its two homes it went into.
     ///
     /// Both are checked rather than only the one this machine would install into today, because a machine that gained or lost sift between the install and the uninstall would otherwise keep whichever half no longer matches.
-    static func removeStatusline(locations: HookLocations, qualifications: inout [String], settingsBackedUp: inout Bool) throws -> [String] {
+    static func removeStatusline(locations: HookLocations, qualifications: inout [String], settingsBackedUp: inout Bool, removedAnything: inout Bool) throws -> [String] {
         var lines: [String] = []
         if let segments = locations.segments {
             switch try segments.remove() {
             case .removed:
+                removedAnything = true
                 lines.append("statusline: removed — \(segments.fileURL.path.tildedPath)")
             case .absent:
                 break
@@ -93,6 +133,7 @@ private extension UninstallHookCommand {
         switch try StatuslineRegistration.remove(from: original, path: path) {
         case let .removed(updated, command):
             try SettingsRewrite.write(updated, to: settingsURL, original: original, backedUp: &settingsBackedUp, qualifications: &qualifications)
+            removedAnything = true
             lines.append("statusline: removed from \(path) — \(command.tildedPath)")
         case .absent:
             break
@@ -105,7 +146,7 @@ private extension UninstallHookCommand {
     }
 
     /// This tool's `PreToolUse` entry, and no other hook beside it (SimWalk#14).
-    static func removePreToolUseHook(settings settingsURL: URL, qualifications: inout [String], settingsBackedUp: inout Bool) throws -> String {
+    static func removePreToolUseHook(settings settingsURL: URL, qualifications: inout [String], settingsBackedUp: inout Bool, removedAnything: inout Bool) throws -> String {
         let path = settingsURL.path.tildedPath
         let original = try? Data(contentsOf: settingsURL)
         let removal: HookRegistration.Removal
@@ -119,6 +160,7 @@ private extension UninstallHookCommand {
             return "hook: nothing registered"
         }
         try SettingsRewrite.write(removal.data, to: settingsURL, original: original, backedUp: &settingsBackedUp, qualifications: &qualifications)
+        removedAnything = true
         return "hook: PreToolUse removed from \(path) — \(command.tildedPath)"
     }
 }

@@ -77,6 +77,7 @@ public extension UsageFailureKind {
             ("it takes an array of screen ids", .inputRefused),
             ("every entry is a screen id", .inputRefused),
             ("takes a quiet period in milliseconds", .inputRefused),
+            ("declares iPhone only (UIDeviceFamily", .inputRefused),
         ]
     }
 }

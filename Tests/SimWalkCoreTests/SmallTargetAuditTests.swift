@@ -155,6 +155,40 @@ struct SmallTargetAuditTests {
         #expect(result.findings.map(\.label) == ["Help"])
     }
 
+    /// A web article's byline link has no text ancestor or sibling, so only the web view says it is inline text (SimWalk#239).
+    ///
+    /// Does not pin how deep the web view sits.
+    @Test
+    func aLinkInsideAWebViewIsInlineTextAndIsNotJudged() {
+        let link = Self.node("Link", 19, 147, 152, 23, label: "NetNewsWire Blog", children: [Self.node("StaticText", 19, 147, 152, 23, label: "NetNewsWire Blog")])
+        let banner = Self.node("Other", 19, 125, 380, 68, label: "banner", children: [Self.node("Other", 19, 125, 289, 67, children: [link])])
+        let webView = Self.node("WebView", 0, 0, 402, 874, children: [Self.node("WebView", 0, 0, 402, 874, children: [banner])])
+
+        let result = Self.evaluate([Self.node("ScrollView", 0, 0, 402, 874, children: [webView])])
+
+        #expect(result.findings.isEmpty)
+    }
+
+    @Test
+    func theSameLinkOutsideAWebViewIsJudged() {
+        let link = Self.node("Link", 19, 147, 152, 23, label: "NetNewsWire Blog", children: [Self.node("StaticText", 19, 147, 152, 23, label: "NetNewsWire Blog")])
+        let banner = Self.node("Other", 19, 125, 380, 68, label: "banner", children: [Self.node("Other", 19, 125, 289, 67, children: [link])])
+
+        let result = Self.evaluate([Self.node("ScrollView", 0, 0, 402, 874, children: [banner])])
+
+        #expect(result.findings.map(\.label) == ["NetNewsWire Blog"])
+    }
+
+    @Test
+    func aTextLikeButtonOnAScreenWithoutAWebViewIsJudged() {
+        let button = Self.node("Button", 32, 754, 105, 20, label: "Privacy Policy")
+        let cell = Self.node("Cell", 16, 739, 370, 87, children: [Self.node("Other", 16, 739, 370, 87, children: [button])])
+
+        let result = Self.evaluate([Self.node("CollectionView", 0, 0, 402, 874, children: [cell])])
+
+        #expect(result.findings.map(\.label) == ["Privacy Policy"])
+    }
+
     @Test
     func barControlsAndSwitchesAreLeftOut() {
         let bar = Self.node("TabBar", 0, 780, 402, 94, children: [Self.node("Button", 10, 790, 30, 30, label: "Home")])

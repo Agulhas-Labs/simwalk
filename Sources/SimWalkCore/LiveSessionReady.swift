@@ -12,8 +12,11 @@ public struct LiveSessionReady: Codable, Equatable, Sendable {
     public let runnerCommit: String?
     /// When the runner started polling, by its own clock.
     public let readyAt: Date
+    /// Lines the runner has for the start's answer: that it turned the device to match a landscape-only app (SimWalk#222). Absent from a runner that has none.
+    public let notes: [String]?
 
-    public init(device: CaptureManifest.Device, runnerCommit: String?, readyAt: Date) {
+    public init(device: CaptureManifest.Device, runnerCommit: String?, readyAt: Date, notes: [String]? = nil) {
+        self.notes = notes
         self.device = device
         self.runnerCommit = runnerCommit
         self.readyAt = readyAt

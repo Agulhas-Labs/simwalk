@@ -44,6 +44,8 @@ struct WalkbookCodingTests {
             .type(label: "Search", text: "resting"),
             .tapPoint(label: "Steps chart", point: [0.8, 0.5]),
             .tapPoint(label: nil, point: [201, 610]),
+            .drag(label: "Volume", from: [0.1, 0.5], to: [0.9, 0.5], hold: 0.3, seconds: 0.5),
+            .drag(label: nil, from: [40, 600], to: [300, 600]),
             .systemTap(label: "Allow"),
             .systemTap(label: "UIA.Health.Allow.Button", owner: .appWindow),
             .openURL(url: "simwalk-fixture://detail"),
@@ -101,6 +103,9 @@ struct WalkbookCodingTests {
         (Walkbook.RouteStep.scrollTo(label: "Rows"), #"{"scrollTo":{"label":"Rows"}}"#),
         (Walkbook.RouteStep.tapPoint(label: "Steps chart", point: [0.8, 0.5]), #"{"tapPoint":{"at":[0.8,0.5],"label":"Steps chart"}}"#),
         (Walkbook.RouteStep.tapPoint(label: nil, point: [201, 610]), #"{"tapPoint":{"at":[201,610]}}"#),
+        (Walkbook.RouteStep.drag(label: "Volume", from: [0.1, 0.5], to: [0.9, 0.5], hold: 0.3, seconds: 0.6), #"{"drag":{"from":[0.1,0.5],"hold":0.3,"label":"Volume","seconds":0.6,"to":[0.9,0.5]}}"#),
+        (Walkbook.RouteStep.drag(label: nil, from: [40, 600], to: [300, 600]), #"{"drag":{"from":[40,600],"to":[300,600]}}"#),
+        (Walkbook.RouteStep.drag(label: nil, from: [40, 600], to: [300, 600], hold: 0.1, seconds: 2), #"{"drag":{"from":[40,600],"seconds":2,"to":[300,600]}}"#),
         (Walkbook.RouteStep.systemTap(label: "Allow"), #"{"systemTap":{"label":"Allow"}}"#),
         (Walkbook.RouteStep.systemTap(label: "Allow", owner: .springboard), #"{"systemTap":{"label":"Allow","owner":"springboard"}}"#),
         (Walkbook.RouteStep.systemTap(label: "UIA.Health.Allow.Button", atLaunch: true), #"{"systemTap":{"atLaunch":true,"label":"UIA.Health.Allow.Button"}}"#),
@@ -228,5 +233,129 @@ struct WalkbookCodingTests {
         let route: [Walkbook.RouteStep] = [.tap(label: "Browse"), .type(label: "Search", text: "resting")]
 
         #expect(route.rendered == "tap 'Browse' → type 'resting' into 'Search'")
+    }
+
+    /// A step is written back as it was written (SimWalk#198): a default-length `longPress` carries no `seconds`, so a walkbook that never wrote one is byte-identical after a save.
+    @Test(arguments: [
+        #"{"longPress":{"label":"Row"}}"#,
+        #"{"longPress":{"label":"Row","seconds":2.5}}"#,
+        #"{"swipe":{"direction":"left","label":"Row"}}"#,
+        #"{"swipe":{"direction":"up"}}"#,
+    ])
+    func longPressAndSwipeStepsRoundTripAsWritten(_ json: String) throws {
+        let step = try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(json.utf8))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+
+        #expect(try String(decoding: encoder.encode(step), as: UTF8.self) == json)
+    }
+
+    /// Absent `seconds` is one second, and writing one explicitly is the same step written the same way.
+    @Test
+    func aLongPressWithoutSecondsHoldsForOneSecond() throws {
+        let absent = try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(#"{"longPress":{"label":"Row"}}"#.utf8))
+        let written = try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(#"{"longPress":{"label":"Row","seconds":1}}"#.utf8))
+
+        #expect(absent == .longPress(label: "Row", seconds: 1))
+        #expect(written == absent)
+        #expect(try String(decoding: JSONEncoder().encode(written), as: UTF8.self) == #"{"longPress":{"label":"Row"}}"#)
+    }
+
+    /// `replace` is written only when true (SimWalk#198), so a plain `type` encodes as it always did and a replacing one round-trips as written.
+    @Test(arguments: [
+        (#"{"type":{"label":"Nickname","text":"Robin"}}"#, false),
+        (#"{"type":{"label":"Nickname","replace":true,"text":"Robin"}}"#, true),
+    ])
+    func atypeStepsReplaceIsWrittenOnlyWhenTrue(_ json: String, _ replace: Bool) throws {
+        let step = try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(json.utf8))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+
+        #expect(step == .type(label: "Nickname", text: "Robin", replace: replace))
+        #expect(try String(decoding: encoder.encode(step), as: UTF8.self) == json)
+    }
+
+    /// `replace: false` written out is the plain step, and encodes without the key.
+    @Test
+    func aTypeStepWithReplaceFalseIsTheSameAsOneWithoutIt() throws {
+        let step = try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(#"{"type":{"label":"N","replace":false,"text":"R"}}"#.utf8))
+
+        #expect(step == .type(label: "N", text: "R"))
+        #expect(try String(decoding: JSONEncoder().encode(step), as: UTF8.self).contains("replace") == false)
+    }
+
+    /// The written form and the progress line say the text was replaced; the progress line still redacts the text.
+    @Test
+    func aReplacingTypeStepRendersAsWrittenAndRedactsItsText() {
+        let step = Walkbook.RouteStep.type(label: "Nickname", text: "Robin", replace: true)
+
+        #expect(step.description == "type 'Robin' into 'Nickname', replacing its text")
+        #expect(step.progressLine == "type into 'Nickname', replacing its text")
+        #expect(Walkbook.RouteStep.type(label: "Nickname", text: "Robin").description == "type 'Robin' into 'Nickname'")
+    }
+
+    /// A route step reads as an author writes it, in the line an UNREACHABLE verdict prints.
+    @Test
+    func longPressAndSwipeStepsRenderAsWritten() {
+        #expect(Walkbook.RouteStep.longPress(label: "Row").description == "longPress 'Row'")
+        #expect(Walkbook.RouteStep.longPress(label: "Row", seconds: 2.5).description == "longPress 'Row' for 2.5 s")
+        #expect(Walkbook.RouteStep.longPress(label: "Row", seconds: 2).description == "longPress 'Row' for 2 s")
+        #expect(Walkbook.RouteStep.swipe(label: "Row", direction: "left").description == "swipe left on 'Row'")
+        #expect(Walkbook.RouteStep.swipe(label: nil, direction: "up").description == "swipe up")
+    }
+
+    /// A `swipe` that writes `"label":null` is not the app swipe a missing label is, as for `tapPoint`.
+    @Test
+    func aSwipeWithAnExplicitNullLabelIsRefused() {
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(#"{"swipe":{"label":null,"direction":"up"}}"#.utf8))
+        }
+    }
+
+    /// A key the new steps do not take is a decode failure, as for every other step.
+    @Test(arguments: [
+        #"{"longPress":{"label":"Row","second":2}}"#,
+        #"{"swipe":{"label":"Row","direction":"left","distance":3}}"#,
+    ])
+    func anUnknownKeyOnALongPressOrSwipeIsRefused(_ json: String) {
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(json.utf8))
+        }
+    }
+
+    /// A `drag` step reads as its docs show it, in both forms (SimWalk#148).
+    @Test
+    func aDragStepDescribesItselfInBothForms() {
+        #expect(Walkbook.RouteStep.drag(label: "Volume", from: [0.1, 0.5], to: [0.9, 0.5]).description == "drag 'Volume' from 0.1,0.5 to 0.9,0.5 of its frame")
+        #expect(Walkbook.RouteStep.drag(label: nil, from: [40, 600], to: [300, 600]).description == "drag from 40,600 pt to 300,600 pt")
+    }
+
+    /// Omitted `hold` and `seconds` decode to their defaults (SimWalk#148).
+    @Test
+    func aDragStepWithoutHoldOrSecondsTakesTheDefaults() throws {
+        let step = try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(#"{"drag":{"from":[40,600],"to":[300,600]}}"#.utf8))
+
+        #expect(step == .drag(label: nil, from: [40, 600], to: [300, 600], hold: 0.1, seconds: 0.5))
+    }
+
+    /// A `drag` that writes `"label":null` is not the screen drag a missing label is, and the refusal names the step (SimWalk#148).
+    @Test
+    func aDragWithAnExplicitNullLabelIsRefusedByName() {
+        do {
+            _ = try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(#"{"drag":{"label":null,"from":[40,600],"to":[300,600]}}"#.utf8))
+            Issue.record("a null label decoded")
+        } catch let DecodingError.dataCorrupted(context) {
+            #expect(context.debugDescription.contains("a drag step's label is null"))
+        } catch {
+            Issue.record("wrong error: \(error)")
+        }
+    }
+
+    /// A key a `drag` does not take is a decode failure (SimWalk#148).
+    @Test
+    func anUnknownKeyOnADragIsRefused() {
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(#"{"drag":{"from":[40,600],"to":[300,600],"speed":3}}"#.utf8))
+        }
     }
 }

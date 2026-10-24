@@ -11,9 +11,10 @@ import Foundation
 ///
 /// Printed at ``ShortHash/digits`` hex digits, the length every hash in an answer carries; a collision would pass a guard on a changed screen once in four billion comparisons.
 public struct ScreenHash {
-    /// The printed hash of `tree`.
-    public static func of(_ tree: AXNode) -> String {
-        let hashed = SHA256.hash(data: Data(description(of: tree).utf8))
+    /// The printed hash of `tree`, and of `pixels` when the tree has no text of its own to tell screens apart (SimWalk#150).
+    public static func of(_ tree: AXNode, pixels: PixelSignature? = nil) -> String {
+        let pixelText = pixels.map { "|px:" + $0.hashToken } ?? ""
+        let hashed = SHA256.hash(data: Data((description(of: tree) + pixelText).utf8))
         return ShortHash.of(hashed.map { String(format: "%02x", $0) }.joined())
     }
 

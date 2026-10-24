@@ -1,0 +1,21 @@
+{
+  "name": "demo-app-usage",
+  "appBundleID": "dev.simwalk.demo",
+  "oracle": { "command": ["./downloads-oracle.sh"] },
+  "screens": [
+    {
+      "id": "usage",
+      "expect": "usage-screen",
+      "route": [{ "tap": { "label": "Usage" } }],
+      "states": [
+        { "theme": "light", "locale": "en_US" },
+        { "theme": "light", "locale": "de_DE" }
+      ],
+      "figures": [
+        { "id": "downloads-today", "element": "downloads-today", "windows": ["today", "last24h"] },
+        { "id": "data-today", "element": "data-today", "windows": ["today", "last24h"] },
+        { "id": "average-download", "element": "average-download", "windows": ["today", "last24h"] }
+      ]
+    }
+  ]
+}

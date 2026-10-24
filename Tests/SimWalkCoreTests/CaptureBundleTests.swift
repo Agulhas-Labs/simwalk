@@ -281,6 +281,14 @@ struct CaptureBundleTests {
         #expect(supported == formatSixReader)
     }
 
+    /// Format 11 is the `drag` route step (SimWalk#148), after format 10's state `orientation` (SimWalk#199) and format 9's route steps `longPress`, `swipe` and `type`'s `replace` (SimWalk#198): this build reads 11 and every format before it, and refuses 12 by name.
+    @Test
+    func formatElevenIsTheCurrentFormatAndTwelveIsNotReadable() {
+        #expect(CaptureManifest.currentFormatVersion == 11)
+        #expect(CaptureManifest.readableFormatVersions == [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1])
+        #expect(!CaptureManifest.readableFormatVersions.contains(12))
+    }
+
     /// Format 8 is a state's own launch arguments and environment (SimWalk#44): a format-7 reader decodes a state strictly and would meet `arguments` as an unknown key, so it refuses by version instead — and this build reads the state back exactly as it was written.
     @Test
     func aReaderOfTheFormatsBeforeLaunchArgumentsRefusesABundleHoldingThemByName() throws {
@@ -307,9 +315,40 @@ struct CaptureBundleTests {
             return
         }
 
-        #expect(found == 8)
+        #expect(found == CaptureManifest.currentFormatVersion)
         #expect(supported == formatSevenReader)
         #expect(try CaptureBundle.read(at: bundle.url).manifest.screens[0].captures[0].state == seeding)
+    }
+
+    /// Format 10 is a state's `orientation` (SimWalk#199): a format-9 reader decodes a state strictly and would meet `orientation` as an unknown key, so it refuses by version instead — and this build reads the state back exactly as it was written.
+    @Test
+    func aReaderOfTheFormatsBeforeOrientationRefusesABundleHoldingOneByName() throws {
+        let directory = try TemporaryDirectory()
+        let landscape = Walkbook.CaptureState(theme: .light, orientation: .landscape)
+        var manifest = Self.manifest()
+        manifest.screens = [
+            CaptureManifest.ScreenRecord(
+                id: "today",
+                outcome: .captured,
+                routeTaken: [],
+                captures: [CaptureManifest.StateCapture(screenID: "today", state: landscape)]
+            ),
+        ]
+        let bundle = try Self.writtenBundle(in: directory, manifest: manifest)
+        let data = try Data(contentsOf: CaptureBundle.manifestURL(in: bundle.url))
+        let formatNineReader = [9, 8, 7, 6, 5, 4, 3, 2, 1]
+
+        let thrown = try #require(#expect(throws: CaptureBundleError.self) {
+            try CaptureBundle.requireReadableFormat(of: data, at: "manifest.json", readable: formatNineReader)
+        })
+        guard case let .unsupportedFormatVersion(_, found, supported) = thrown else {
+            Issue.record("expected a refusal by format version, got \(thrown)")
+            return
+        }
+
+        #expect(found == CaptureManifest.currentFormatVersion)
+        #expect(supported == formatNineReader)
+        #expect(try CaptureBundle.read(at: bundle.url).manifest.screens[0].captures[0].state == landscape)
     }
 
     @Test

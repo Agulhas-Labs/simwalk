@@ -115,7 +115,7 @@ public enum RunnerFailureDiagnosis: Equatable, Sendable {
     }
 
     /// Bounded, so a wedged tool costs the refusal a line rather than the walk its answer.
-    private static func xcresulttool(_ arguments: [String], shell: Shell) throws -> Shell.Result {
+    static func xcresulttool(_ arguments: [String], shell: Shell) throws -> Shell.Result {
         try shell.run("/usr/bin/xcrun", ["xcresulttool"] + arguments, timeout: 120)
     }
 }

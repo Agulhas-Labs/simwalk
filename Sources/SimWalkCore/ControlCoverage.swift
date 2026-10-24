@@ -84,9 +84,9 @@ public struct ControlCoverage {
     /// The label a step resolves by, or `nil` for a step that names no element.
     private static func label(of step: Walkbook.RouteStep) -> String? {
         switch step {
-        case let .tab(label), let .tap(label), let .type(label, _), let .scrollTo(label), let .systemTap(label, _, _):
+        case let .tab(label), let .tap(label), let .type(label, _, _), let .scrollTo(label), let .systemTap(label, _, _), let .longPress(label, _):
             label
-        case let .tapPoint(label, _):
+        case let .tapPoint(label, _), let .swipe(label, _), let .drag(label, _, _, _, _):
             label
         case .openURL, .back:
             nil

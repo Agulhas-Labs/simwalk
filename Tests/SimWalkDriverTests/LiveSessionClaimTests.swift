@@ -13,6 +13,8 @@ struct LiveSessionClaimTests {
     private static let deadHolder: Int32 = 900_000
     private static let starts = 8
     private static let rounds = 150
+    /// Seconds a wait that succeeds at once allows before it is called failed: far above any scheduling delay, since under a machine load of ~120 a global-queue block missed a 10-second budget (SimWalk#204), and only a hang ever spends it.
+    private static let ceiling = 120.0
 
     /// The reclaim's read, judge, remove and create is one step: a start that finds the claim's lock held waits for it rather than reclaiming beside its holder, and takes the claim once it is released.
     ///
@@ -29,16 +31,20 @@ struct LiveSessionClaimTests {
         #expect(flock(lock, LOCK_EX) == 0)
         defer { close(lock) }
 
+        let started = DispatchSemaphore(value: 0)
         let finished = DispatchSemaphore(value: 0)
         let results = Results()
         DispatchQueue.global().async {
+            started.signal()
             results.add(Result { try LiveSessionClaim.take(udid: "UDID-1", in: store, holder: 801_001, isAlive: { $0 == 801_001 }) })
             finished.signal()
         }
 
+        // The start is running before the window opens, so the window measures the start rather than when the queue got to it.
+        #expect(started.wait(timeout: .now() + Self.ceiling) == .success)
         #expect(finished.wait(timeout: .now() + 0.4) == .timedOut, "the start took the claim while another reclaim held its lock")
         #expect(flock(lock, LOCK_UN) == 0)
-        #expect(finished.wait(timeout: .now() + 10) == .success)
+        #expect(finished.wait(timeout: .now() + Self.ceiling) == .success)
         #expect(results.winners == 1)
     }
 

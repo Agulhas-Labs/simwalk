@@ -8,7 +8,7 @@ import Foundation
 ///
 /// The refusals are the reason this exists as a rendering rather than a directory listing: a screen that was not reached, and a build that did not match, each print their evidence on the line that reports them. A summary that showed only counts would be the vacuous visual pass the differ was built to end (Brief §2.2), one level up.
 ///
-/// **The shape is the shared answer contract** (Sift's answer contract, Docs/AnswerContract.md in github.com/Agulhas-Labs/sift): the header names the build, the plan, the device and how much of the bundle settled; the verdict names every qualification before the counters; the residue carries the screens and their evidence; the last line prices what the answer stood in for. Nothing that is empty is printed as a heading, so a clean walk's report is the header, the verdict, its screens and the saving.
+/// **The shape is the shared answer contract** (SwiftSure's answer contract, Docs/AnswerContract.md in github.com/Agulhas-Labs/swift-sure): the header names the build, the plan, the device and how much of the bundle settled; the verdict names every qualification before the counters; the residue carries the screens and their evidence; the last line prices what the answer stood in for. Nothing that is empty is printed as a heading, so a clean walk's report is the header, the verdict, its screens and the saving.
 public struct CaptureBundleSummary {
     private let bundle: CaptureBundle
     private let qualifications: [String]
@@ -35,6 +35,7 @@ public struct CaptureBundleSummary {
         // What the host set on the device for the walk and put back after it — the record, so `bundle inspect` says it a week later.
         residue += bundle.manifest.deviceSetup.map { [""] + $0.lines } ?? []
         residue += Self.resetPermissionLines(bundle.manifest)
+        residue += Self.deviceTurnLines(bundle.manifest)
         residue += Self.unsettledLines(bundle.manifest)
         residue += Self.chromeOnlyLines(bundle.manifest)
         residue += Self.unverifiedLines(bundle.manifest)
@@ -220,6 +221,13 @@ public struct CaptureBundleSummary {
         ]
     }
 
+    /// The states whose launch left the app landscape on a device held portrait, so the runner turned the device to match and handed it back after the walk (SimWalk#222).
+    private static func deviceTurnLines(_ manifest: CaptureManifest) -> [String] {
+        let turned = manifest.screens.flatMap { screen in (screen.deviceTurns ?? []).map { "\(screen.id) [\($0)]" } }
+        guard !turned.isEmpty else { return [] }
+        return ["", "⚠ " + DeviceAlignment.note(states: turned)]
+    }
+
     /// Captures that set a state axis their artefacts show nothing to verify by, each with the axes named — set, and not shown to have taken.
     private static func unverifiedLines(_ manifest: CaptureManifest) -> [String] {
         let unverified = manifest.screens.flatMap { screen in
@@ -259,7 +267,7 @@ public struct CaptureBundleSummary {
             let states = screen.captures.map { capture in
                 capture.identicalTo.map { "\(capture.state.slug) (= \($0))" } ?? capture.state.slug
             }.joined(separator: ", ")
-            return "  \(position) \(screen.id) — captured [\(states)] via \(screen.routeTaken.rendered)\(ownSettle(screen))"
+            return "  \(position) \(screen.id) — captured [\(states)] via \(screen.routeTaken.rendered)\(ownSettle(screen))\(fixedAppearanceClause(screen))"
         case let .unreachable(routeTried, reason, _, state):
             // Why the last step did not land, where the runner knows — what its label matched and what the tap
             // did — because "route tried" alone reads like a missing element when a navigation bar took the label.
@@ -282,7 +290,7 @@ public struct CaptureBundleSummary {
             // Both lists, because "refused dark, kept light" and "refused dark, reached nothing" are
             // different facts, and the kept states are the ones a reader can go and look at.
             let kept = screen.captures.isEmpty ? "nothing" : "[\(screen.captures.map(\.state.slug).joined(separator: ", "))]"
-            return "  \(position) \(screen.id) — REFUSED [\(refused.map(\.slug).joined(separator: ", "))], state not applied; kept \(kept), via \(screen.routeTaken.rendered): \(reason)"
+            return "  \(position) \(screen.id) — REFUSED [\(refused.map(\.slug).joined(separator: ", "))], state not applied; kept \(kept), via \(screen.routeTaken.rendered): \(reason)\(fixedAppearanceClause(screen))"
         case let .unexpectedScreen(expected, found, reason):
             // Captured, named, and printed — the wrong screen is evidence a reader needs to see, not a
             // shortfall to hide behind a count.
@@ -301,6 +309,13 @@ public struct CaptureBundleSummary {
             let reasonClause = reason.map { " — \($0)" } ?? ""
             return "  \(position) \(screen.id) — REFUSED, expected '\(expected)', found [\(foundText)] among the states it took (captured \(captured)\(refused)), via \(screen.routeTaken.rendered)\(reasonClause)"
         }
+    }
+
+    /// The trailing clause saying a screen's appearance comparison was not made, or nothing when the walkbook fixed none (SimWalk#19).
+    ///
+    /// Printed on the screen's own line so a skipped check is never read as a passed one.
+    private static func fixedAppearanceClause(_ screen: CaptureManifest.ScreenRecord) -> String {
+        screen.fixedAppearance.map { " · appearance fixed \($0.rawValue) by the walkbook, light and dark not compared" } ?? ""
     }
 
     /// The trailing clause naming a screen's own quiet period, or nothing when it ran at the walk's.

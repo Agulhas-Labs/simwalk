@@ -8,6 +8,9 @@
 # sidebar-adaptable TabView: Hub, Rows, Menus, Nested) instead of the stack above, one screen per walk-behaviour
 # bug it reproduces; `-RouteFixturePushForm` as well makes Hub push its form on first appearance.
 #
+# `replace-specimens.walkbook.json` walks the `type` step's `replace: true` refusals (SimWalk#214) against Hub's
+# `Open replace specimens` screen: a long left-to-right field, an uppercasing field, one that uppercases a beat later, a secure field, a disabled field.
+#
 # `RouteFixtureFailureSpecimen` is a UI-test target that FAILS ON PURPOSE, with a scheme of its own (it is not in the
 # `RouteFixture` scheme, so building or testing RouteFixture is unchanged). It exists to make the result bundle
 # `Tests/SimWalkCoreTests/Fixtures/runner-failure-activities.json` is exported from; its test file says how.
@@ -36,13 +39,17 @@ targets:
       path: RouteFixture/Info.plist
       properties:
         CFBundleDisplayName: RouteFixture
-        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         UILaunchScreen: {}
+        UIRequiresFullScreen: true
         NSLocationWhenInUseUsageDescription: RouteFixture shows the simulated location a walk sets.
         CFBundleURLTypes:
           - CFBundleURLName: dev.simwalk.route-fixture

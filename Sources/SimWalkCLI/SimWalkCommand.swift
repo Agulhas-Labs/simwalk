@@ -26,6 +26,7 @@ struct SimWalkCommand: AsyncParsableCommand {
             DoctorCommand.self,
             InstallHookCommand.self,
             UninstallHookCommand.self,
+            UninstallCommand.self,
             PruneCommand.self,
             LeaseCommand.self,
             SessionCommand.self,

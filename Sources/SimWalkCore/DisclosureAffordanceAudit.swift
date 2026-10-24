@@ -53,7 +53,7 @@ public struct DisclosureAffordanceAudit {
     ///
     /// A row qualifies when it carries a label of its own — so it is a row a user reads, not a layout box — and holds a descendant that is small, unlabelled, and pressed against the row's trailing edge. The thresholds are generous relative to the real glyph (7.7 × 13.7, its right edge 8pt inside its row's) because they are describing a class of symbol rather than one asset, and a check that only ever matches the exact chevron this app ships is a check that silently stops working when the design does.
     static func disclosureRows(in tree: AXNode, screenID: String, stateSlug: String) -> [DisclosureRow] {
-        tree.flattened.compactMap { node in
+        tree.flattenedLeavingOutKeyboard.compactMap { node in
             guard isDisclosureRow(node), let label = node.label else { return nil }
             return DisclosureRow(
                 screenID: screenID,
@@ -66,8 +66,10 @@ public struct DisclosureAffordanceAudit {
     }
 
     /// Whether `node` is a disclosure row: it carries a label of its own and a trailing glyph among its children — the one test `discover` taps a row by as well (`DiscoverClassifier`).
+    ///
+    /// A scroll indicator is never one, though its thumb is a thin element at its trailing edge (``AXSegmenter/hasScrollIndicatorShape(_:)``), and the glyph must sit at the row's vertical centre: a thumb rides wherever the scroll position puts it (SimWalk#228).
     static func isDisclosureRow(_ node: AXNode) -> Bool {
-        guard let label = node.label, !label.isEmpty else { return false }
+        guard let label = node.label, !label.isEmpty, !AXSegmenter.hasScrollIndicatorShape(node) else { return false }
         return node.children.contains { isTrailingGlyph($0, within: node) }
     }
 
@@ -79,12 +81,16 @@ public struct DisclosureAffordanceAudit {
         // Measured from the trailing edge inwards, so it holds at any screen width — an absolute x would
         // describe this device and no other.
         let inset = (row.frame.x + row.frame.width) - (child.frame.x + child.frame.width)
-        return inset >= 0 && inset <= maximumTrailingInset
+        guard inset >= 0, inset <= maximumTrailingInset else { return false }
+        let offset = abs((child.frame.y + child.frame.height / 2) - (row.frame.y + row.frame.height / 2))
+        return offset <= row.frame.height * maximumCentreOffsetFraction
     }
 
     private static let maximumGlyphWidth = 16.0
     private static let maximumGlyphHeight = 24.0
     private static let maximumTrailingInset = 24.0
+    /// How far from the row's vertical centre a glyph may sit, as a fraction of the row's height.
+    private static let maximumCentreOffsetFraction = 0.25
 }
 
 public extension DisclosureAffordanceAudit {

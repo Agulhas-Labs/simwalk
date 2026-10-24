@@ -306,6 +306,17 @@ struct MCPToolInvocationTests {
         #expect(invocation.argumentVector == ["screen", "x.simwalk", "--match=-2 kg", "--", "1"])
     }
 
+    /// A session read's screenshot options become the CLI's, a scale passed on for the command to refuse in its own words.
+    @Test
+    func aSessionReadPassesTheScreenshotOptionsOn() throws {
+        let invocation = try MCPToolInvocation(tool: "session", arguments: [
+            "action": "read", "id": "s1", "screenshot": true, "screenshotScale": 4, "screenshotOf": "-Done",
+        ])
+
+        #expect(invocation.argumentVector == ["read", "--screenshot", "--screenshot-scale=4", "--screenshot-of=-Done", "--", "s1"])
+        #expect(try MCPToolInvocation(tool: "session", arguments: ["action": "read", "id": "s1"]).argumentVector == ["read", "--", "s1"])
+    }
+
     /// `state` and `match` are optional even once `step` is given — omitting them omits the flags rather than passing an empty string.
     @Test
     func stateAndMatchAreOmittedWhenNotGiven() throws {

@@ -143,6 +143,137 @@ struct AXSegmenterTests {
         #expect(OverlapRule().flags(reference: capture, run: capture).isEmpty)
     }
 
+    /// Pins the parent/child shape, which already yields one run: a labelled `Other` over a `StaticText` carrying the same sentence at a wider frame is the child's run alone, and no overlap (the sibling shape of #171 is further down).
+    @Test
+    func aContainerLabelledLikeItsOnlyTextChildIsOneRun() {
+        let sentence = "Smart Invert reverses the colours of the display, except for images."
+        let footer = AXNode(type: "Other", frame: AXNode.Frame(x: 16, y: 728, width: 358, height: 62), label: sentence, children: [
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 0, y: 728, width: 390, height: 62), label: sentence),
+        ])
+        let capture = SegmentedCapture(tree: Self.screen([Self.footerList([footer])]), screenshotPath: "screens/root/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).filter { $0.text == sentence }.map(\.frame) == [AXNode.Frame(x: 0, y: 728, width: 390, height: 62)])
+        #expect(OverlapRule().flags(reference: capture, run: capture).isEmpty)
+    }
+
+    /// Pins the parent/child shape: a container whose label differs from its child's is not a run either: only the text below it is.
+    @Test
+    func aContainerLabelledUnlikeItsTextChildIsNotARun() {
+        let footer = AXNode(type: "Other", frame: AXNode.Frame(x: 16, y: 728, width: 358, height: 62), label: "Footer", children: [
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 0, y: 728, width: 390, height: 62), label: "Smart Invert reverses the colours."),
+        ])
+        let capture = SegmentedCapture(tree: Self.screen([Self.footerList([footer])]), screenshotPath: "screens/root/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).map(\.text).suffix(2) == ["Drag alarm, 30 m", "Smart Invert reverses the colours."])
+    }
+
+    /// Pins the parent/child shape: a container with the label and two text children is unchanged: both children are runs.
+    @Test
+    func aContainerWithTwoTextChildrenKeepsBoth() {
+        let footer = AXNode(type: "Other", frame: AXNode.Frame(x: 16, y: 728, width: 358, height: 62), label: "Same", children: [
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 0, y: 728, width: 390, height: 30), label: "Same"),
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 0, y: 760, width: 390, height: 30), label: "Other line"),
+        ])
+        let capture = SegmentedCapture(tree: Self.screen([Self.footerList([footer])]), screenshotPath: "screens/root/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).map(\.text).suffix(2) == ["Same", "Other line"])
+    }
+
+    /// The footer sentence the tests use.
+    private static var note: String {
+        "Colours are reversed on the display, except for images."
+    }
+
+    /// A section footer a tree exposes twice as siblings (#171): an `Other` at the row's full width holding a `StaticText`, and a childless `Other` at the inset, both labelled with the text.
+    ///
+    /// One run results, the `StaticText`'s.
+    @Test
+    func aFooterExposedTwiceAsSiblingsIsOneRun() {
+        let wide = AXNode.Frame(x: 0, y: 727.9999974568684, width: 390, height: 62)
+        let inset = AXNode.Frame(x: 16, y: 727.9999974568684, width: 358, height: 62)
+        let row = AXNode(type: "Other", frame: wide, identifier: Self.note, children: [AXNode(type: "StaticText", frame: wide, label: Self.note)])
+        let capture = SegmentedCapture(tree: Self.screen([Self.footerList([row, AXNode(type: "Other", frame: inset, label: Self.note)])]), screenshotPath: "screens/root/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).filter { $0.text == Self.note }.map(\.frame) == [wide])
+        #expect(OverlapRule().flags(reference: capture, run: capture).isEmpty)
+    }
+
+    /// The same pair with the inset `Other` first in the tree: the same single run, the `StaticText`'s.
+    @Test
+    func aFooterExposedTwiceInTheOppositeOrderIsTheSameRun() {
+        let wide = AXNode.Frame(x: 0, y: 727.9999974568684, width: 390, height: 62)
+        let inset = AXNode.Frame(x: 16, y: 727.9999974568684, width: 358, height: 62)
+        let row = AXNode(type: "Other", frame: wide, identifier: Self.note, children: [AXNode(type: "StaticText", frame: wide, label: Self.note)])
+        let capture = SegmentedCapture(tree: Self.screen([Self.footerList([AXNode(type: "Other", frame: inset, label: Self.note), row])]), screenshotPath: "screens/root/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).filter { $0.text == Self.note }.map(\.frame) == [wide])
+    }
+
+    /// A bar that exposes its text twice (#190): a `StaticText` at the strip's width and a childless labelled `Other` at the inset, the sibling shape of #171.
+    ///
+    /// The bar section has one run of the text, the `StaticText`'s.
+    @Test
+    func aBarExposingItsTextTwiceIsOneRun() {
+        let wide = AXNode.Frame(x: 0, y: 735, width: 402, height: 33)
+        let inset = AXNode.Frame(x: 16, y: 735, width: 370, height: 33)
+        let strip = AXNode(type: "Toolbar", frame: Self.frame(y: 727, height: 49), children: [
+            AXNode(type: "StaticText", frame: wide, label: Self.note),
+            AXNode(type: "Other", frame: inset, label: Self.note),
+        ])
+        let sections = AXSegmenter().sections(of: Self.screen([Self.stack, strip]))
+
+        #expect(sections.first { $0.role == .toolbar }?.textRuns.filter { $0.text == Self.note }.map(\.frame) == [wide])
+    }
+
+    /// Two childless labelled `Other`s with one text, the wide one first in the tree (#190): neither is a `StaticText`, so the first in tree order is kept.
+    @Test
+    func twoOthersWithOneTextKeepTheFirstWideOne() {
+        let wide = AXNode.Frame(x: 0, y: 728, width: 390, height: 62)
+        let inset = AXNode.Frame(x: 16, y: 728, width: 358, height: 62)
+        let capture = SegmentedCapture(tree: Self.screen([Self.footerList([AXNode(type: "Other", frame: wide, label: Self.note), AXNode(type: "Other", frame: inset, label: Self.note)])]), screenshotPath: "screens/root/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).filter { $0.text == Self.note }.map(\.frame) == [wide])
+    }
+
+    /// The same two `Other`s with the inset one first in the tree (#190): the first in tree order is kept, so the inset one.
+    @Test
+    func twoOthersWithOneTextKeepTheFirstInsetOne() {
+        let wide = AXNode.Frame(x: 0, y: 728, width: 390, height: 62)
+        let inset = AXNode.Frame(x: 16, y: 728, width: 358, height: 62)
+        let capture = SegmentedCapture(tree: Self.screen([Self.footerList([AXNode(type: "Other", frame: inset, label: Self.note), AXNode(type: "Other", frame: wide, label: Self.note)])]), screenshotPath: "screens/root/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).filter { $0.text == Self.note }.map(\.frame) == [inset])
+    }
+
+    /// Two `StaticText`s with one sentence at a wide and an inset frame (#190): a doubled rendering of the sentence, not one text exposed twice, so both are runs.
+    @Test
+    func twoStaticTextsWithOneSentenceStayTwoRuns() {
+        let wide = AXNode.Frame(x: 0, y: 728, width: 390, height: 62)
+        let inset = AXNode.Frame(x: 16, y: 728, width: 358, height: 62)
+        let capture = SegmentedCapture(tree: Self.screen([Self.footerList([AXNode(type: "StaticText", frame: wide, label: Self.note), AXNode(type: "StaticText", frame: inset, label: Self.note)])]), screenshotPath: "screens/root/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).filter { $0.text == Self.note }.map(\.frame) == [wide, inset])
+    }
+
+    /// Two runs with one label stay two unless they share y and height and one holds the other across: crossing without containment, a different y, a different height, or different labels at the same frames.
+    @Test
+    func runsThatAreNotOneTextTwiceStayTwo() {
+        func texts(_ first: AXNode.Frame, _ second: AXNode.Frame, labels: (String, String) = (Self.note, Self.note)) -> [String] {
+            let extra = [
+                AXNode(type: "StaticText", frame: first, label: labels.0),
+                AXNode(type: "StaticText", frame: second, label: labels.1),
+            ]
+            let capture = SegmentedCapture(tree: Self.screen([Self.footerList(extra)]), screenshotPath: "screens/root/light/screen.png", segmenter: AXSegmenter())
+            return capture.contentSections.flatMap(\.textRuns).map(\.text).filter { $0 == labels.0 || $0 == labels.1 }
+        }
+        let base = AXNode.Frame(x: 0, y: 728, width: 200, height: 62)
+
+        #expect(texts(base, AXNode.Frame(x: 100, y: 728, width: 200, height: 62)).count == 2)
+        #expect(texts(base, AXNode.Frame(x: 0, y: 760, width: 390, height: 62)).count == 2)
+        #expect(texts(base, AXNode.Frame(x: 0, y: 728, width: 390, height: 30)).count == 2)
+        #expect(texts(base, base, labels: ("Alpha", "Beta")) == ["Alpha", "Beta"])
+    }
+
     /// An indicator written in Arabic-Indic digits and the Arabic percent sign, `٥٠٪`, is an indicator too.
     @Test
     func anArabicIndicPercentageIndicatorIsNotText() {
@@ -150,7 +281,8 @@ struct AXSegmenterTests {
             type: "Other",
             frame: AXNode.Frame(x: 384, y: 101, width: 30, height: 695.67),
             label: "شريط تمرير رأسي, صفحتان",
-            value: "\u{200F}\u{0665}\u{0660}\u{066A}"
+            value: "\u{200F}\u{0665}\u{0660}\u{066A}",
+            children: [Self.thumb]
         )
         let content = AXNode(type: "ScrollView", frame: Self.frame(y: 100, height: 700), children: Self.stack.children + [indicator])
         let capture = SegmentedCapture(tree: Self.screen([content]), screenshotPath: "screens/account/light-loc_ar-rtl/screen.png", segmenter: AXSegmenter())
@@ -161,7 +293,7 @@ struct AXSegmenterTests {
     /// Every locale's percent format is an indicator's value: a space between figure and sign (French, German), the sign first (Turkish), Persian digits.
     @Test(arguments: ["0\u{00A0}%", "50\u{202F}%", "%0", "\u{06F0}\u{066A}"])
     func aLocalePercentageIndicatorIsNotText(value: String) {
-        let indicator = AXNode(type: "Other", frame: AXNode.Frame(x: 384, y: 101, width: 30, height: 695.67), label: "Vertical scroll bar, 2 pages", value: value)
+        let indicator = AXNode(type: "Other", frame: AXNode.Frame(x: 384, y: 101, width: 30, height: 695.67), label: "Vertical scroll bar, 2 pages", value: value, children: [Self.thumb])
         let content = AXNode(type: "ScrollView", frame: Self.frame(y: 100, height: 700), children: Self.stack.children + [indicator])
         let capture = SegmentedCapture(tree: Self.screen([content]), screenshotPath: "screens/account/light/screen.png", segmenter: AXSegmenter())
 
@@ -171,11 +303,55 @@ struct AXSegmenterTests {
     /// A value that only looks like a percentage — no figure, a sign at both ends, a decimal point — keeps the element content.
     @Test(arguments: ["%", "%5%", "5.5%", "5 % 5"])
     func aNonPercentageValueIsNotAnIndicator(value: String) {
-        let element = AXNode(type: "Other", frame: AXNode.Frame(x: 384, y: 101, width: 30, height: 695.67), label: "Scroll bar", value: value)
+        let element = AXNode(type: "Other", frame: AXNode.Frame(x: 384, y: 101, width: 30, height: 695.67), label: "Scroll bar", value: value, children: [Self.thumb])
         let content = AXNode(type: "ScrollView", frame: Self.frame(y: 100, height: 700), children: Self.stack.children + [element])
         let capture = SegmentedCapture(tree: Self.screen([content]), screenshotPath: "screens/account/light/screen.png", segmenter: AXSegmenter())
 
         #expect(capture.contentSections.flatMap(\.textRuns).map(\.shape).contains("Scroll bar"))
+    }
+
+    /// SimWalk#169: a percentage `Other` whose bare child is a 20×20 box (not a thin thumb) directly in a scroll view is content, labelled as it is.
+    @Test
+    func aPercentageElementWithAFatBareChildIsText() {
+        let element = AXNode(
+            type: "Other",
+            frame: AXNode.Frame(x: 16, y: 180, width: 358, height: 52),
+            label: "Battery",
+            value: "80%",
+            children: [AXNode(type: "Other", frame: AXNode.Frame(x: 20, y: 190, width: 20, height: 20))]
+        )
+        let content = AXNode(type: "ScrollView", frame: Self.frame(y: 100, height: 700), children: Self.stack.children + [element])
+        let capture = SegmentedCapture(tree: Self.screen([content]), screenshotPath: "screens/device/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).map(\.shape).contains("Battery"))
+    }
+
+    /// SimWalk#208: a combined element with a percentage for its value and no children, placed straight in a scroll view, is content, not an indicator without its thumb.
+    @Test
+    func aPercentageElementWithNoChildrenIsText() {
+        let element = AXNode(type: "Other", frame: AXNode.Frame(x: 16, y: 180, width: 358, height: 52), label: "Storage", value: "45%")
+        let content = AXNode(type: "ScrollView", frame: Self.frame(y: 100, height: 700), children: Self.stack.children + [element])
+        let capture = SegmentedCapture(tree: Self.screen([content]), screenshotPath: "screens/device/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(capture.contentSections.flatMap(\.textRuns).map(\.shape).contains("Storage"))
+    }
+
+    /// The measured thumb shapes (3 pt thin, vertical and horizontal) are indicators, and the line sits at 4 pt: a 4 pt-thin thumb is taken, one 4.5 pt in both dimensions is not, and a zero frame counts as thin.
+    @Test(arguments: [(3.0, 400.0, true), (272.0, 3.0, true), (4.0, 400.0, true), (400.0, 4.0, true), (4.5, 4.5, false), (4.5, 400.0, false), (0.0, 0.0, true)])
+    func aThumbIsTakenOnlyWhenThin(width: Double, height: Double, isIndicator: Bool) {
+        let indicator = AXNode(
+            type: "Other",
+            frame: AXNode.Frame(x: 369, y: 116, width: 30, height: 675),
+            label: "Vertical scroll bar, 2 pages",
+            value: "0%",
+            children: [AXNode(type: "Other", frame: AXNode.Frame(x: 396, y: 119, width: width, height: height))]
+        )
+        let content = AXNode(type: "ScrollView", frame: Self.frame(y: 100, height: 700), children: Self.stack.children + [indicator])
+        let capture = SegmentedCapture(tree: Self.screen([content]), screenshotPath: "screens/root/light/screen.png", segmenter: AXSegmenter())
+
+        let shapes = capture.contentSections.flatMap(\.textRuns).map(\.shape)
+
+        #expect(shapes.contains("Vertical scroll bar, {n} pages") == !isIndicator)
     }
 
     /// A combined row whose value is a percentage — SwiftUI's `Battery` with `80%`, one `Other` — is content in a list cell or a card: only an element directly under a scrolling container can be its indicator.
@@ -210,6 +386,9 @@ struct AXSegmenterTests {
         AXNode(type: "StaticText", frame: AXNode.Frame(x: 16, y: 140, width: 180, height: 24), label: "Drag alarm, 30 m"),
     ])
 
+    /// A vertical indicator's thumb as the captures carry it: bare, 3 pt wide.
+    private static let thumb = AXNode(type: "Other", frame: AXNode.Frame(x: 411, y: 104, width: 3, height: 500))
+
     /// A full-width frame on a 402×874 screen.
     private static func frame(y: Double, height: Double) -> AXNode.Frame {
         AXNode.Frame(x: 0, y: y, width: 402, height: height)
@@ -218,6 +397,11 @@ struct AXSegmenterTests {
     /// An element of `type` framed at the whole screen, named by its type as iOS 27's `Toolbar` is.
     private static func fullScreen(_ type: String, holding children: [AXNode]) -> AXNode {
         AXNode(type: type, frame: frame(y: 0, height: 874), label: type, identifier: type, children: children)
+    }
+
+    /// A collection view holding the stack's rows and then `extra`.
+    private static func footerList(_ extra: [AXNode]) -> AXNode {
+        AXNode(type: "CollectionView", frame: frame(y: 100, height: 740), children: stack.children + extra)
     }
 
     /// An application whose window holds `children`.

@@ -4,6 +4,7 @@
 
 import CoreLocation
 import SimWalkCore
+import UIKit
 import XCTest
 
 /// The runner's half of a live session: launches the app `launch.json` names, then answers requests from the session directory until `LiveSessionLoop` says to stop.
@@ -26,6 +27,11 @@ final class LiveSessionServer {
     /// The location the device was simulating before the launch state set its own; read only when it does.
     private var foundLocation: XCUILocation?
     private var setsLocation = false
+    /// The orientation the device was in before the launch state set its own; read only when it does (SimWalk#199).
+    private var foundOrientation: UIDeviceOrientation?
+    private var setsOrientation = false
+    /// Whether a launch turned the device to a landscape app, so the session hands the orientation back (SimWalk#222).
+    private var turnedToApp = false
     /// The session's steps: the guard, the sheet baseline kept across them, and the answer — the core's, under the walk's own quiet period.
     private var stepper = LiveSessionStepper(quiet: WalkRunner.settleQuiet)
     /// The progress file `session start` began, taken over for `running`, each step and the end; `nil` when nobody is watching.
@@ -92,14 +98,15 @@ final class LiveSessionServer {
         self.app = app
         bundleID = launch.appBundleID
         launched = launch
-        try self.launch(app, as: launch)
-        return LiveSessionReady(device: WalkRunner.device(), runnerCommit: runnerCommit, readyAt: Date())
+        let turned = try self.launch(app, as: launch)
+        return LiveSessionReady(device: WalkRunner.device(), runnerCommit: runnerCommit, readyAt: Date(), notes: turned ? [DeviceAlignment.note()] : nil)
     }
 
     /// Ends `app` and launches it under `launch`'s state — the start's launch, and every `relaunch`'s, so the two cannot differ.
     ///
     /// The location the device simulated before is taken once, at the first launch that sets one, so a relaunch cannot take the state's own location for it.
-    private func launch(_ app: XCUIApplication, as launch: LiveSessionLaunch) throws {
+    @discardableResult
+    private func launch(_ app: XCUIApplication, as launch: LiveSessionLaunch) throws -> Bool {
         app.terminate()
         if let state = launch.state {
             // The host refuses a location on a device, which cannot simulate one; if one arrives anyway, fail rather than set it.
@@ -115,11 +122,39 @@ final class LiveSessionServer {
                 setsLocation = true
                 XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: location.latitude, longitude: location.longitude))
             }
+            if foundOrientation == nil {
+                foundOrientation = XCUIDevice.shared.orientation
+            }
+            if turnedToApp, state.orientation == nil, let foundOrientation {
+                XCUIDevice.shared.orientation = WalkRunner.handedBack(foundOrientation)
+            }
+            if state.orientation != nil {
+                setsOrientation = true
+                XCUIDevice.shared.orientation = WalkRunner.orientation(of: state, found: foundOrientation ?? .portrait)
+            }
             WalkRunner.launch(app, under: state, over: baseEnvironment)
+            // A portrait-only app keeps its frame whatever the device is asked, so the start fails here rather than hand an agent a portrait app under a landscape state.
+            if let stated = state.orientation {
+                let frame = WalkRunner.settledFrame(of: app, stated: stated)
+                if let refusal = OrientationCheck.refusal(stated: stated, frame: frame) {
+                    throw WalkRunner.InspectRefusal(description: "the launch state's orientation was not applied: \(refusal)")
+                }
+            }
         } else {
             app.launchEnvironment = AnimationsOptIn.inserting(AnimationsOptIn.library(in: ProcessInfo.processInfo.environment), into: app.launchEnvironment)
             app.launch()
         }
+        return alignedToApp(app, stated: launch.state?.orientation)
+    }
+
+    /// Turns the device to a landscape app on a device held portrait, answering whether it did (SimWalk#222).
+    private func alignedToApp(_ app: XCUIApplication, stated: Walkbook.Orientation?) -> Bool {
+        if foundOrientation == nil {
+            foundOrientation = XCUIDevice.shared.orientation
+        }
+        guard let foundOrientation, WalkRunner.alignDevice(to: app, stated: stated, found: foundOrientation) else { return false }
+        turnedToApp = true
+        return true
     }
 
     /// One request's answer.
@@ -129,8 +164,12 @@ final class LiveSessionServer {
         }
         switch request.action {
         case .read:
-            let screen = try WalkRunner.liveScreen(of: app, bundleID: bundleID, runnerCommit: runnerCommit, nonce: sessionID)
-            return LiveSessionResponse(n: request.n, action: .read, screen: screen)
+            var picture: Data?
+            let screen = try WalkRunner.liveScreen(of: app, bundleID: bundleID, runnerCommit: runnerCommit, nonce: sessionID, kept: { picture = $0 })
+            stepper.remember(screen)
+            // Only an app that was read: a screenshot of one not running fails XCTest, where the host's refusal is clean. A textless screen's picture was taken for its signature and is reused.
+            let screenshot = request.screenshot && screen.tree != nil && screen.appState != .notRunning ? picture ?? WalkRunner.screenshot(of: app) : nil
+            return LiveSessionResponse(n: request.n, action: .read, screen: screen, screenshot: screenshot)
         case .step:
             return try step(request, in: app)
         case .relaunch:
@@ -141,6 +180,16 @@ final class LiveSessionServer {
                 request,
                 screen: WalkRunner.Device(app: app, springboard: XCUIApplication(bundleIdentifier: StepPerformer.springboardBundleID), started: Date()),
                 launch: { try launch(app, as: launched) },
+                read: { try WalkRunner.liveScreen(of: app, bundleID: bundleID, runnerCommit: runnerCommit, nonce: sessionID) }
+            )
+        case .scroll:
+            guard let scroll = request.scroll else {
+                throw WalkRunner.InspectRefusal(description: "scroll request \(request.n) names no scroll")
+            }
+            return try stepper.scroll(
+                request,
+                screen: WalkRunner.Device(app: app, springboard: XCUIApplication(bundleIdentifier: StepPerformer.springboardBundleID), started: Date()),
+                drag: { try StepPerformer.drag(scroll, in: app) },
                 read: { try WalkRunner.liveScreen(of: app, bundleID: bundleID, runnerCommit: runnerCommit, nonce: sessionID) }
             )
         case .end:
@@ -158,6 +207,7 @@ final class LiveSessionServer {
             request,
             screen: WalkRunner.Device(app: app, springboard: XCUIApplication(bundleIdentifier: StepPerformer.springboardBundleID), started: Date()),
             sheetReads: sheetReads,
+            pixels: { WalkRunner.pixelSignature(for: $0, of: app) },
             perform: { step, scope in
                 switch try StepPerformer(app: app, quiet: quiet, budget: budget, sheetScope: scope, sheetReads: sheetReads).perform(step) {
                 case .landed:
@@ -181,6 +231,9 @@ final class LiveSessionServer {
         }
         if setsLocation {
             XCUIDevice.shared.location = foundLocation
+        }
+        if setsOrientation || turnedToApp, let foundOrientation {
+            XCUIDevice.shared.orientation = WalkRunner.handedBack(foundOrientation)
         }
     }
 }

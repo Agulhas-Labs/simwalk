@@ -35,6 +35,7 @@ public struct CaptureBundleFixture {
                 state: capture.state,
                 axTreeSettled: capture.settled,
                 axTreeHasContent: capture.hasContent,
+                capturedAt: capture.capturedAt,
                 appleAudit: capture.appleAudit
             )
             try Self.writeAppleAudit(capture.appleAudit, for: record, in: url)
@@ -298,6 +299,8 @@ public extension CaptureBundleFixture {
         public let performance: CaptureManifest.Performance?
         /// Apple's audit record for the state, filed as `apple-audit.json`; `nil` as a walk that did not audit.
         public let appleAudit: AppleAuditRecord?
+        /// When the state was captured, for a test that pins a time-dependent answer (the oracle's "today"); `nil` lets the writer stamp the moment it writes.
+        public let capturedAt: Date?
 
         public init(
             screenID: String,
@@ -309,8 +312,10 @@ public extension CaptureBundleFixture {
             height: Int = 2622,
             motion: CaptureManifest.Motion? = nil,
             performance: CaptureManifest.Performance? = nil,
-            appleAudit: AppleAuditRecord? = nil
+            appleAudit: AppleAuditRecord? = nil,
+            capturedAt: Date? = nil
         ) {
+            self.capturedAt = capturedAt
             self.appleAudit = appleAudit
             self.motion = motion
             self.performance = performance

@@ -123,11 +123,11 @@ extension BundleOracleCommandTests {
         let command: BundleOracleCommand
     }
 
-    private static func log(in directory: TemporaryDirectory) -> UsageLog {
+    static func log(in directory: TemporaryDirectory) -> UsageLog {
         UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 1_786_867_200) })
     }
 
-    private static func expectExit(_ code: Int32, running command: BundleOracleCommand, in directory: TemporaryDirectory, sourceLocation: SourceLocation = #_sourceLocation) throws -> StreamRecorder {
+    static func expectExit(_ code: Int32, running command: BundleOracleCommand, in directory: TemporaryDirectory, sourceLocation: SourceLocation = #_sourceLocation) throws -> StreamRecorder {
         let recorder = StreamRecorder()
         let thrown = try #require(#expect(throws: ExitCode.self, sourceLocation: sourceLocation) {
             try command.run(log: log(in: directory), emit: recorder.emit, emitError: recorder.emitError)

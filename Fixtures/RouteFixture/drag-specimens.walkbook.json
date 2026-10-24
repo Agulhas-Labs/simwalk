@@ -1,0 +1,48 @@
+{
+  "name": "route-fixture-drag-specimens",
+  "appBundleID": "dev.simwalk.route-fixture",
+  "screens": [
+    {
+      "id": "specimens/volume",
+      "expect": "drag-specimens-high",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "scrollTo": {
+            "label": "Open drag specimens"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open drag specimens"
+          }
+        },
+        {
+          "drag": {
+            "label": "Volume",
+            "from": [
+              0.05,
+              0.5
+            ],
+            "to": [
+              0.95,
+              0.5
+            ]
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    }
+  ]
+}

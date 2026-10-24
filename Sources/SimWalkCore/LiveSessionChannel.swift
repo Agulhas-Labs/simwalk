@@ -23,11 +23,11 @@ public struct LiveSessionChannel: Sendable {
         }
     }
 
-    /// Sends `action` as the next request — with the route step a `step` takes and the hash it is guarded by — and returns its number.
-    public func send(_ action: LiveSessionRequest.Action, step: Walkbook.RouteStep? = nil, guardHash: String? = nil) throws -> Int {
+    /// Sends `action` as the next request — with the route step a `step` takes, the hash it is guarded by the drag a `scroll` makes and whether a `read` also takes a screenshot — and returns its number.
+    public func send(_ action: LiveSessionRequest.Action, step: Walkbook.RouteStep? = nil, guardHash: String? = nil, scroll: LiveSessionScroll? = nil, screenshot: Bool = false) throws -> Int {
         var number = (layout.requestNumbers().last ?? 0) + 1
         while true {
-            let request = LiveSessionRequest(n: number, action: action, step: step, guardHash: guardHash)
+            let request = LiveSessionRequest(n: number, action: action, step: step, guardHash: guardHash, scroll: scroll, screenshot: screenshot)
             let data = try Self.encode(request, path: layout.request(number).path)
             if try Self.write(data, to: layout.request(number), exclusively: true) {
                 return number

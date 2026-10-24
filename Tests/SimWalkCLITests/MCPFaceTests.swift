@@ -5,6 +5,7 @@
 import Foundation
 @testable import SimWalkCLI
 import SimWalkCore
+import SimWalkDriver
 import SimWalkMCP
 import SimWalkTestSupport
 import Testing
@@ -187,6 +188,33 @@ struct MCPFaceTests {
         }
     }
 
+    /// The MCP face's session start runs against the usage log its environment injects, never the machine's own: `answer` forwards the environment (SimWalk#196).
+    @Test
+    func theMCPSessionStartNamesTheInjectedUsageLog() throws {
+        let fixture = try SessionCommandTests.Fixture()
+        fixture.processes.onSpawn = { _ in try? fixture.channel("s1").markReady(SessionCommandTests.ready) }
+        let injectedDirectory = fixture.directory.url.appendingPathComponent("injected", isDirectory: true)
+        let injected = injectedDirectory.appendingPathComponent("usage.jsonl").path
+        let invocation = try MCPToolInvocation(tool: "session", arguments: ["action": "start", "device": "UDID-1", "app": "com.example.live"])
+
+        // The runner is refused, ending the start `failed` after its progress file began; what is checked is where that file went.
+        _ = try? MCPToolRunner.answer(
+            tool: .session,
+            arguments: invocation.argumentVector,
+            environment: [UsageLog.overrideVariable: injected],
+            walking: MCPToolRunner.WalkSeams(
+                shell: Shell(script: fixture.script.run),
+                runner: { throw SessionRunnerRefused() },
+                builds: RunnerBuilds(directory: fixture.directory.url.appendingPathComponent("runner-builds", isDirectory: true))
+            ),
+            animationsLibrary: { _ in { URL(fileURLWithPath: "/libs/animations-1.dylib") } }
+        )
+
+        let progress = try WalkProgress.decoder().decode(WalkProgress.self, from: Data(contentsOf: ProgressLocation.progressURL(session: nil, slot: 2, in: injectedDirectory)))
+
+        #expect(progress.logPath == injected)
+    }
+
     /// The `=` form is what carries a negative quiet period past the parser: `--settle -3` reads as an option with no value, so the caller would get ArgumentParser's sentence about its own syntax instead of the tool's about their argument.
     @Test
     func anegativeSettleReachesTheCommandsOwnRefusalEndToEnd() throws {
@@ -307,4 +335,9 @@ extension MCPFaceTests {
             "the MCP server wrote a line to stdout that is not JSON-RPC: \(line)"
         }
     }
+}
+
+extension MCPFaceTests {
+    /// A runner that refuses, so a session start ends `failed` after its progress file began.
+    private struct SessionRunnerRefused: Error {}
 }

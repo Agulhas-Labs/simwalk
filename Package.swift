@@ -34,7 +34,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
-        .package(url: "https://github.com/Agulhas-Labs/swift-fieldwork.git", from: "0.7.0"),
+        .package(url: "https://github.com/Agulhas-Labs/swift-fieldwork.git", from: "0.9.0"),
     ],
     targets: [
         .target(
@@ -151,6 +151,10 @@ let package = Package(
                 // "the two faces answer alike" is only checkable where both of them are in scope.
                 "SimWalkMCP",
                 "SimWalkTestSupport",
+            ],
+            // Two trees from a real walk of the demo app, answered by its committed oracle.
+            resources: [
+                .copy("Fixtures"),
             ],
             swiftSettings: strictSettings
         ),

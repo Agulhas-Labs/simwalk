@@ -78,6 +78,17 @@ struct MCPServerTests {
     }
 
     @Test
+    func theSessionSchemaListsTheThreeScreenshotProperties() async throws {
+        let responses = try await MCPExchange.send([["jsonrpc": "2.0", "id": 2, "method": "tools/list"]])
+
+        let tools = try #require((responses.first?["result"] as? [String: Any])?["tools"] as? [[String: Any]])
+        let session = try #require(tools.first { $0["name"] as? String == "session" })
+        let properties = try #require((session["inputSchema"] as? [String: Any])?["properties"] as? [String: [String: Any]])
+
+        #expect(["screenshot", "screenshotScale", "screenshotOf"].allSatisfy { properties[$0] != nil })
+    }
+
+    @Test
     func anAnsweredCallComesBackAsTheTextTheCLIWouldHavePrinted() async throws {
         let answer = Answer(header: "walk: 'x'", verdict: .qualified(["1 screen unreachable"], detail: "0 of 1 screens captured"))
 

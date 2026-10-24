@@ -59,7 +59,7 @@ public struct TruncatedTextAudit: LabelAuditRule {
     func evaluate(_ tree: AXNode, lines: [MirrorTextLine], screenID: String, stateSlug: String) -> LabelRuleResult {
         let screen = tree.screenBounds
         var result = LabelRuleResult()
-        for run in tree.flattened where Self.isTextRun(run, within: screen) {
+        for run in tree.flattenedLeavingOutKeyboard where Self.isTextRun(run, within: screen) {
             result.examined += 1
             let drawn = Self.text(drawnIn: run.frame, of: lines, screen: screen)
             guard Self.isTruncation(drawn, of: run.label ?? "") else { continue }
@@ -87,10 +87,16 @@ public struct TruncatedTextAudit: LabelAuditRule {
     /// Whether `drawn` is a strict prefix of `label` followed by an ellipsis.
     static func isTruncation(_ drawn: String, of label: String) -> Bool {
         guard let stem = withoutEllipsis(drawn) else { return false }
-        let head = collapsed(stem)
         // A label that ends in an ellipsis of its own (`Learn more…`) drawn whole reads the same, so the comparison is against the label without it.
-        let full = collapsed(withoutEllipsis(label) ?? label)
+        let full = collapsed(straightened(withoutEllipsis(label) ?? label))
+        let head = withoutLeadingBullet(collapsed(straightened(stem)), unless: full)
         return !head.isEmpty && full.count > head.count && full.hasPrefix(head)
+    }
+
+    /// `head` without a leading `•` the label does not start with: a row's unread dot drawn beside its title is read into the title's first line (SimWalk#232).
+    private static func withoutLeadingBullet(_ head: String, unless full: String) -> String {
+        guard head.hasPrefix("•"), !full.hasPrefix("•") else { return head }
+        return String(head.dropFirst()).trimmingCharacters(in: .whitespaces)
     }
 
     /// The text before a trailing `…` or `...`, or nothing when it does not end in one.
@@ -100,6 +106,17 @@ public struct TruncatedTextAudit: LabelAuditRule {
             return String(trimmed.dropLast())
         }
         return trimmed.hasSuffix("...") ? String(trimmed.dropLast(3)) : nil
+    }
+
+    /// `text` with typographic quotes and apostrophes folded to straight ones: the recogniser reads a curly `’` as `'` (SimWalk#232), and the comparison is of letters, not of which mark was drawn.
+    private static func straightened(_ text: String) -> String {
+        String(text.map { character in
+            switch character {
+            case "\u{2018}", "\u{2019}", "\u{201B}": "'"
+            case "\u{201C}", "\u{201D}": "\""
+            default: character
+            }
+        })
     }
 
     private static func collapsed(_ text: String) -> String {

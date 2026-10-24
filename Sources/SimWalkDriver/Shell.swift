@@ -16,8 +16,20 @@ public struct Shell {
     /// What stops this shell's children when set: each one is registered with it while it runs, and none is started once it has stopped.
     private var childStop: ChildStop?
 
+    /// Reads the command lines of a stalled call's tree: its pid and process group in, every command line under them out.
+    private let treeReader: @Sendable (pid_t, pid_t?) -> [[String]]
+
     public init() {
         script = nil
+        treeReader = ProcessTree.commandLines
+    }
+
+    /// A shell that reads a stalled call's tree through `treeReader` rather than the kernel's process table.
+    ///
+    /// How a test fixes the evidence a stall is classified on, so the classification does not depend on how soon a stub spawned its child under load (SimWalk#164).
+    init(treeReader: @escaping @Sendable (_ root: pid_t, _ group: pid_t?) -> [[String]]) {
+        script = nil
+        self.treeReader = treeReader
     }
 
     /// A shell whose children are answered by `script` rather than spawned.
@@ -25,6 +37,7 @@ public struct Shell {
     /// The seam that lets `walk`'s own orchestration be checked — that it reads the device before the runner and hands it back after — without a booted device, an installed app or a two-minute walk.
     package init(script: @escaping (_ executable: String, _ arguments: [String], _ environment: [String: String]) throws -> Result) {
         self.script = { executable, arguments, environment, _ in try script(executable, arguments, environment) }
+        treeReader = ProcessTree.commandLines
     }
 
     /// A shell whose children are answered by `script`, which is told each call's bound as well.
@@ -32,6 +45,7 @@ public struct Shell {
     /// How a test checks that a call made to a device that may be wedged is bounded at all (SimWalk#26).
     package init(timedScript script: @escaping (_ executable: String, _ arguments: [String], _ environment: [String: String], _ timeout: TimeInterval?) throws -> Result) {
         self.script = script
+        treeReader = ProcessTree.commandLines
     }
 
     /// A copy of this shell whose children `childStop` can stop: each is registered right after its launch and forgotten at its exit.
@@ -157,7 +171,7 @@ public struct Shell {
         if let timeout, exited.wait(timeout: .now() + timeout) == .timedOut {
             // Read before the stop, while the stalled tree is still there to say what it was waiting on — the only
             // evidence a refusal may name a cause on (SimWalk#136).
-            let waitingOnFirstLaunch = XcodeFirstLaunch.isWaiting(in: ProcessTree.commandLines(of: process.processIdentifier, group: group))
+            let waitingOnFirstLaunch = XcodeFirstLaunch.isWaiting(in: treeReader(process.processIdentifier, group))
             Self.stop(process, group: group, exited: exited)
             // A grandchild still holding a pipe would keep a drain open for as long as it lives; the answer
             // here is already known, so the drains get a moment and are then stopped — each closes its end of

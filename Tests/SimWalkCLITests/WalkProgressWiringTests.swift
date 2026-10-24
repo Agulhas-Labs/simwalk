@@ -113,6 +113,21 @@ struct WalkProgressWiringTests {
         }
     }
 
+    /// The MCP face's dry run names the usage log its environment injects, to the runner and in the progress file alike, never the machine's own (SimWalk#192).
+    @Test
+    func theMCPFacesDryRunNamesTheInjectedUsageLog() throws {
+        let walk = try Walk()
+        let book = try WalkbookLoader.load(from: Data(Walk.oneScreenJSON.utf8), source: "book.json")
+        let report = try RouteProbeFixture.report(of: book, outcomes: [], buildHash: AppBuildIdentity.hash(ofAppAt: walk.appPath))
+        let injected = walk.directory.url.appendingPathComponent("usage.jsonl").path
+
+        // The entry draws its own nonce, so the staged report may be refused once read; what is checked was handed over before it is read.
+        _ = try? walk.answerDryRun(leaving: report, of: book, usageLog: injected)
+
+        #expect(walk.runnerEnvironments.first?["TEST_RUNNER_SIMWALK_LOG"] == injected)
+        #expect(walk.progress()?.logPath == injected)
+    }
+
     /// A walk refused while preparing — the runner's build fails — still names the usage log in its `failed` file: the host knew it when the call started.
     @Test
     func aRefusalWhilePreparingStillNamesTheUsageLog() throws {
@@ -531,6 +546,16 @@ extension WalkProgressWiringTests {
             let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: 0, writes: (stagedReport, reportURL))
             let command = try WalkCommand.parse([walkbookPath, "--output", reportURL.path, "--device", "UDID-1", "--dry-run"])
             return try WalkDryRun.perform(command, shell: shell(script), pause: { _ in }, now: script.now, nonce: { RouteProbeFixture.nonce }, runner: { Self.runner }, builds: builds, leases: leases, telemetry: makeTelemetry(), animationsLibrary: animationsLibrary)
+        }
+
+        /// The dry run through the MCP face's `answer(environment:)`, its environment naming `usageLog` and the session `wiring`, so the progress file is ``progressURL``.
+        func answerDryRun(leaving report: RouteProbeReport, of book: Walkbook, usageLog: String) throws -> Answer {
+            let stagedReport = directory.url.appendingPathComponent("staged-report.json")
+            let reportURL = directory.url.appendingPathComponent("probe.json")
+            try report.write(to: stagedReport, of: book)
+            let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: 0, writes: (stagedReport, reportURL))
+            let command = try WalkCommand.parse([walkbookPath, "--output", reportURL.path, "--device", "UDID-1", "--dry-run"])
+            return try command.answer(environment: [UsageLog.overrideVariable: usageLog, WalkCommand.sessionVariable: "wiring"], shell: shell(script), runner: { Self.runner }, builds: builds, leases: leases)
         }
 
         private func makeTelemetry() -> WalkTelemetry {

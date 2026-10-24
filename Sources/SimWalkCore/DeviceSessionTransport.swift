@@ -145,11 +145,20 @@ public final class DeviceSessionTransport: LiveSessionTransport {
         _ = DeviceSessionSocket.send(connection, reply, timeout: Self.replyTimeout(bytes: reply.count, readTimeout: readTimeout))
     }
 
-    /// `response` as the frame a host reads; or, when that would run past ``DeviceSessionFrame/replyCap`` — which the host closes on, filing nothing — a failure under the same number and action that says so, which the host files as it would any failure.
+    /// `response` as the frame a host reads; or, when that would run past ``DeviceSessionFrame/replyCap`` — which the host closes on, filing nothing — the same response without its screenshot and with ``LiveSessionResponse/screenshotRefusal`` saying why, or failing that a failure under the same number and action that says so, which the host files as it would any failure.
     static func reply(_ response: LiveSessionResponse) throws -> Data {
         let frame = try DeviceSessionFrame.encode(DeviceSessionFrame.Outbound(response: response))
         let length = frame.count - 1
         guard length > DeviceSessionFrame.replyCap else { return frame }
+        if let screenshot = response.screenshot {
+            let mebibytes = (screenshot.count + (1 << 20) - 1) >> 20
+            let refusal = "the screenshot (\(mebibytes) MiB) would take the reply past the \(DeviceSessionFrame.replyCap >> 20) MiB a host reads"
+            let without = LiveSessionResponse(n: response.n, action: response.action, screen: response.screen, step: response.step, failure: response.failure, screenshotRefusal: refusal)
+            let trimmed = try DeviceSessionFrame.encode(DeviceSessionFrame.Outbound(response: without))
+            if trimmed.count - 1 <= DeviceSessionFrame.replyCap {
+                return trimmed
+            }
+        }
         let failure = "the runner served this request, but its reply ran to \(length) bytes, past the \(DeviceSessionFrame.replyCap >> 20) MiB a host reads, so this failure was sent in its place; what the request did to the app is not in it"
         return try DeviceSessionFrame.encode(DeviceSessionFrame.Outbound(response: LiveSessionResponse(n: response.n, action: response.action, failure: failure)))
     }

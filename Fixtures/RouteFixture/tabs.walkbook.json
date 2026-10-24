@@ -84,6 +84,85 @@
       ]
     },
     {
+      "id": "hub/form-nickname",
+      "expect": "form-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "scrollTo": {
+            "label": "Open form"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open form"
+          }
+        },
+        {
+          "type": {
+            "label": "Nickname",
+            "text": "Robin",
+            "replace": true
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hub/form-replace",
+      "expect": "form-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "scrollTo": {
+            "label": "Open form"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open form"
+          }
+        },
+        {
+          "type": {
+            "label": "Amount",
+            "text": "980",
+            "replace": true
+          }
+        },
+        {
+          "type": {
+            "label": "Notes",
+            "text": "Done",
+            "replace": true
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
       "id": "hub/pushed",
       "expect": "form-screen",
       "route": [
@@ -115,6 +194,65 @@
         {
           "scrollTo": {
             "label": "Partly covered row"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hub/menu-detail",
+      "expect": "menu-detail-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "longPress": {
+            "label": "Press row"
+          }
+        },
+        {
+          "tap": {
+            "label": "Open details"
+          }
+        }
+      ],
+      "states": [
+        {
+          "theme": "light",
+          "arguments": [
+            "-RouteFixtureTabs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hub/swipe-detail",
+      "expect": "swipe-detail-screen",
+      "route": [
+        {
+          "tab": {
+            "label": "Hub"
+          }
+        },
+        {
+          "swipe": {
+            "label": "Swipe row",
+            "direction": "left"
+          }
+        },
+        {
+          "tap": {
+            "label": "Archive"
           }
         }
       ],

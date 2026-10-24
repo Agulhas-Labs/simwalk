@@ -22,16 +22,18 @@ public struct StateApplicationCheck {
     ///
     /// Reported as one sentence naming everything found, because a screen walked under four states with two problems has made one mistake in one walkbook and reading it four refusals later helps nobody. Fewer than two states can collide with nothing and are answered without comparing anything.
     ///
+    /// `fixedAppearance` is the screen's `fixedAppearance` key (SimWalk#19): the walkbook says the app, not the device, picks this screen's appearance, so no appearance comparison is made and two states differing only in `theme` are not a collision.
+    ///
     /// `deviceAppearance` is the simulator's own appearance as the host read it before the walk — `nil` when it could not be read, which is the answer that refuses more rather than less. `deviceLocale` is the locale the device was already in, as the host read it — `nil` when it could not be read or named no single locale, which again refuses more.
-    public static func refusal(for evidence: [Evidence], deviceAppearance: Walkbook.Theme? = nil, deviceLocale: String? = nil) -> String? {
-        findings(for: evidence, deviceAppearance: deviceAppearance, deviceLocale: deviceLocale)?.reason
+    public static func refusal(for evidence: [Evidence], deviceAppearance: Walkbook.Theme? = nil, deviceLocale: String? = nil, fixedAppearance: Walkbook.Theme? = nil) -> String? {
+        findings(for: evidence, deviceAppearance: deviceAppearance, deviceLocale: deviceLocale, fixedAppearance: fixedAppearance)?.reason
     }
 
     /// The states whose evidence cannot be attributed to them, in capture order — empty when nothing is refused.
     ///
     /// Every other state on the screen may be filed: no finding implicates it.
-    public static func refusedStates(for evidence: [Evidence], deviceAppearance: Walkbook.Theme? = nil, deviceLocale: String? = nil) -> [Walkbook.CaptureState] {
-        findings(for: evidence, deviceAppearance: deviceAppearance, deviceLocale: deviceLocale)?.refused ?? []
+    public static func refusedStates(for evidence: [Evidence], deviceAppearance: Walkbook.Theme? = nil, deviceLocale: String? = nil, fixedAppearance: Walkbook.Theme? = nil) -> [Walkbook.CaptureState] {
+        findings(for: evidence, deviceAppearance: deviceAppearance, deviceLocale: deviceLocale, fixedAppearance: fixedAppearance)?.refused ?? []
     }
 
     /// The verdict a screen must be recorded under instead of `intended`, or `nil` when its evidence may be filed as planned.
@@ -45,9 +47,10 @@ public struct StateApplicationCheck {
         for evidence: [Evidence],
         instead intended: ScreenOutcome,
         deviceAppearance: Walkbook.Theme? = nil,
-        deviceLocale: String? = nil
+        deviceLocale: String? = nil,
+        fixedAppearance: Walkbook.Theme? = nil
     ) -> ScreenOutcome? {
-        refusal(for: evidence, deviceAppearance: deviceAppearance, deviceLocale: deviceLocale).map { outcome(refusing: $0, instead: intended) }
+        refusal(for: evidence, deviceAppearance: deviceAppearance, deviceLocale: deviceLocale, fixedAppearance: fixedAppearance).map { outcome(refusing: $0, instead: intended) }
     }
 
     /// `intended` with a state refusal given `reason` folded in — the one place the shapes above are decided.
@@ -72,12 +75,13 @@ public struct StateApplicationCheck {
         for evidence: [Evidence],
         instead intended: ScreenOutcome,
         deviceAppearance: Walkbook.Theme? = nil,
-        deviceLocale: String? = nil
+        deviceLocale: String? = nil,
+        fixedAppearance: Walkbook.Theme? = nil
     ) -> Filing {
-        let found = findings(for: evidence, deviceAppearance: deviceAppearance, deviceLocale: deviceLocale)
+        let found = findings(for: evidence, deviceAppearance: deviceAppearance, deviceLocale: deviceLocale, fixedAppearance: fixedAppearance)
         let refused = found?.refused ?? []
         let kept = evidence.map(\.state).filter { !refused.contains($0) }
-        let identical = identicalToBase(in: evidence, deviceLocale: deviceLocale).filter { kept.contains($0.state) && kept.contains($0.base) }
+        let identical = identicalToBase(in: evidence, deviceLocale: deviceLocale, fixedAppearance: fixedAppearance).filter { kept.contains($0.state) && kept.contains($0.base) }
         let unverified = unverified(in: evidence, kept: kept)
         guard let found else {
             return Filing(outcome: intended, kept: kept, refused: [], identicalToBase: identical, unverified: unverified)
@@ -96,19 +100,22 @@ public struct StateApplicationCheck {
     private static func findings(
         for evidence: [Evidence],
         deviceAppearance: Walkbook.Theme?,
-        deviceLocale: String?
+        deviceLocale: String?,
+        fixedAppearance: Walkbook.Theme?
     ) -> Joined? {
         let measured = evidence.compactMap { item in
             ScreenshotBrightness.mean(ofPNG: item.screenshot).map { Measured(item: item, brightness: $0) }
         }
-        let collision = identicalScreenshotFinding(for: evidence, deviceLocale: deviceLocale)
-        let comparison = unappliedAppearanceFinding(for: measured, deviceAppearance: deviceAppearance)
+        let collision = identicalScreenshotFinding(for: evidence, deviceLocale: deviceLocale, fixedAppearance: fixedAppearance)
+        // A screen whose appearance the walkbook fixes (SimWalk#19) has no appearance comparison to make: nothing is refused on it.
+        let comparison = fixedAppearance == nil ? unappliedAppearanceFinding(for: measured, deviceAppearance: deviceAppearance) : nil
         let found = [
             collision,
             comparison,
-            brightDarkFinding(for: measured, besides: comparison?.refused ?? []),
-            unmeasuredDarkFinding(for: evidence, measured: measured, besides: collision?.refused ?? []),
+            fixedAppearance == nil ? brightDarkFinding(for: measured, besides: comparison?.refused ?? []) : nil,
+            fixedAppearance == nil ? unmeasuredDarkFinding(for: evidence, measured: measured, besides: collision?.refused ?? []) : nil,
             layoutDirectionFinding(for: evidence),
+            orientationFinding(for: evidence),
         ].compactMap(\.self)
         guard !found.isEmpty else { return nil }
         let implicated = found.flatMap(\.refused)
@@ -129,10 +136,15 @@ public struct StateApplicationCheck {
     /// **And except where the states are not distinct at all once the device is taken into account (SimWalk#18).** A state that leaves its locale unset launches in the device's own, so on a device already in `en_GB` the plain `light` state and `light-loc_en_gb` ask for one set of conditions, and one picture is the *right* result — the identity rule used to read it as a discard and refuse both. Comparison is by the conditions each state launched under, so a group is a collision only when those differ. An unset layout direction is resolved the same way, to the direction of the locale the state launched in, so on an `en_US` device the plain `light` state and `light-ltr` ask for one set of conditions too.
     ///
     /// **And except where the group differs in layout direction alone.** A mirror-symmetric screen — centred content, nothing side by side — draws one picture both ways round, so identity cannot say whether the direction took; the frames can, and `layoutDirectionFinding` judges each state that stated a direction by them: refused when every run goes the wrong way, filed unverified when there is no run to judge. Refusing the pair wholesale here also refused the plain state beside it, which certainly applied.
-    private static func identicalScreenshotFinding(for evidence: [Evidence], deviceLocale: String?) -> Finding? {
+    ///
+    /// **And except where the group differs in orientation alone (SimWalk#199).** An unset orientation is resolved to the one the capture's root frame shows, so `[light, light-portrait]` on a portrait device asks for one set of conditions and is filed identical, not refused. What is left differing in orientation alone is a state whose frame contradicts it — `orientationFinding` refuses that one, and only that one, since the plain state beside it asked for nothing it did not get — or one whose frame is square or empty, which is filed unverified.
+    ///
+    /// **And a stated orientation its frame contradicts is compared as the frame's (SimWalk#217).** `[light, dark-landscape]` on a portrait-only app that also ignores `dark` differs in two axes by what was stated, so neither exception above would apply and `light`, which applied, would be refused with it. The contradicted orientation is already refused by `orientationFinding`, so for this comparison it is read as the one the app kept, the group then differs in appearance alone, and the appearance finding judges the pair.
+    private static func identicalScreenshotFinding(for evidence: [Evidence], deviceLocale: String?, fixedAppearance: Walkbook.Theme?) -> Finding? {
         let collisions = identicalGroups(in: evidence).filter { group in
-            let conditions = distinctConditions(of: group, deviceLocale: deviceLocale)
+            let conditions = distinctConditions(of: group, deviceLocale: deviceLocale, resolvingContradictedOrientation: true, fixedAppearance: fixedAppearance)
             return conditions.count > 1 && !isLeftToAppearance(conditions, group: group) && !isLeftToLayoutDirection(conditions)
+                && !isLeftToOrientation(conditions)
         }
         guard !collisions.isEmpty else { return nil }
         let described = collisions
@@ -151,6 +163,7 @@ public struct StateApplicationCheck {
             && Set(conditions.map(\.dynamicTypeSize)).count == 1
             && Set(conditions.map(\.locale)).count == 1
             && Set(conditions.map(\.layoutDirection)).count == 1
+            && Set(conditions.map(\.orientation)).count == 1
             && group.allSatisfy { ScreenshotBrightness.mean(ofPNG: $0.screenshot) != nil }
     }
 
@@ -160,13 +173,28 @@ public struct StateApplicationCheck {
             && Set(conditions.map(\.theme)).count == 1
             && Set(conditions.map(\.dynamicTypeSize)).count == 1
             && Set(conditions.map(\.locale)).count == 1
+            && Set(conditions.map(\.orientation)).count == 1
+    }
+
+    /// Whether a colliding group is one the orientation finding judges by its root frames rather than one refused wholesale: its distinct conditions differ in orientation alone.
+    private static func isLeftToOrientation(_ conditions: [Walkbook.CaptureState]) -> Bool {
+        Set(conditions.map(\.orientation)).count == conditions.count
+            && Set(conditions.map(\.theme)).count == 1
+            && Set(conditions.map(\.dynamicTypeSize)).count == 1
+            && Set(conditions.map(\.locale)).count == 1
+            && Set(conditions.map(\.layoutDirection)).count == 1
     }
 
     /// The distinct conditions a group's states launched under, in capture order — each state with its locale resolved to the device's when it names none.
-    private static func distinctConditions(of group: [Evidence], deviceLocale: String?) -> [Walkbook.CaptureState] {
+    private static func distinctConditions(
+        of group: [Evidence],
+        deviceLocale: String?,
+        resolvingContradictedOrientation: Bool,
+        fixedAppearance: Walkbook.Theme?
+    ) -> [Walkbook.CaptureState] {
         var distinct: [Walkbook.CaptureState] = []
         for item in group {
-            let launched = conditions(of: item.state, deviceLocale: deviceLocale)
+            let launched = conditions(of: item, deviceLocale: deviceLocale, resolvingContradictedOrientation: resolvingContradictedOrientation, fixedAppearance: fixedAppearance)
             if !distinct.contains(launched) {
                 distinct.append(launched)
             }
@@ -174,19 +202,30 @@ public struct StateApplicationCheck {
         return distinct
     }
 
-    /// The conditions a state's app actually launched under, as far as this rule judges them: its own axes, with an unset locale read as the device's and an unset layout direction as that locale's.
+    /// The conditions a state's app actually launched under, as far as this rule judges them: its own axes, with an unset locale read as the device's, an unset layout direction as that locale's, and an unset orientation as the one its capture's root frame shows.
     ///
     /// **A state's `arguments` and `environment` are left out, deliberately (SimWalk#44).** SimWalk cannot know whether an argument reaches the screen at all, and one picture under different arguments is a legitimate result: an app's own launch argument (a data-seeding flag) raises a sheet the route then answers, and the screen it lands on is the one the plain state lands on. So two states differing only there compare as one set of conditions, and a byte-identical pair is filed with `identicalTo` naming the base rather than refused. What the rule does hold them to is everything else — a state with an argument *and* a locale the device discarded still collides with the plain one on the locale.
     ///
-    /// The locale and the layout direction are resolved. An unset direction is left to the language, so it is read as the character direction of the locale the state launched in — right to left for `ar` or `he`, left to right otherwise, and left to right when no locale is known. Appearance is always stated, and an unset Dynamic Type size is the device's own too — but nothing reads the device's size, so two states that differ only there are still compared as different, which refuses more rather than less.
-    private static func conditions(of state: Walkbook.CaptureState, deviceLocale: String?) -> Walkbook.CaptureState {
-        Walkbook.CaptureState(
-            theme: state.theme,
+    /// The locale and the layout direction are resolved. An unset direction is left to the language, so it is read as the character direction of the locale the state launched in — right to left for `ar` or `he`, left to right otherwise, and left to right when no locale is known. An unset orientation leaves the device as found, which nothing reads before the launch, so it is read from the evidence itself (`OrientationCheck`) — and left unset when the frame is square or empty or there is no tree, so such a state compares as different from one that set an orientation. Appearance is always stated, and an unset Dynamic Type size is the device's own too — but nothing reads the device's size, so two states that differ only there are still compared as different, which refuses more rather than less.
+    ///
+    /// **A stated orientation is kept as stated, unless `resolvingContradictedOrientation` (SimWalk#217)** — which the collision comparison alone passes. Then a stated orientation whose frame `OrientationCheck` judges the other way is read as the frame's, and one whose frame judges nothing (square, empty, no tree) keeps the stated one. `identicalToBase` does not pass it: a state that asked for landscape and kept a portrait frame is not the same conditions as the plain one, and must not be named identical to it.
+    private static func conditions(
+        of item: Evidence,
+        deviceLocale: String?,
+        resolvingContradictedOrientation: Bool = false,
+        fixedAppearance: Walkbook.Theme? = nil
+    ) -> Walkbook.CaptureState {
+        let state = item.state
+        let judged = item.tree.flatMap { OrientationCheck.judged($0.frame) }
+        let orientation = resolvingContradictedOrientation ? judged ?? state.orientation : state.orientation ?? judged
+        return Walkbook.CaptureState(
+            theme: fixedAppearance ?? state.theme,
             dynamicTypeSize: state.dynamicTypeSize,
             locale: state.locale ?? deviceLocale,
             arguments: nil,
             environment: nil,
-            layoutDirection: state.layoutDirection ?? direction(of: state.locale ?? deviceLocale)
+            layoutDirection: state.layoutDirection ?? direction(of: state.locale ?? deviceLocale),
+            orientation: orientation
         )
     }
 
@@ -197,14 +236,14 @@ public struct StateApplicationCheck {
     }
 
     /// Byte-identical states whose launch conditions are one, each named against its base — the state that left the axis to the device and added no launch arguments or environment of its own, or else the one that left the axis to the device, or else the first captured.
-    private static func identicalToBase(in evidence: [Evidence], deviceLocale: String?) -> [Equivalence] {
+    private static func identicalToBase(in evidence: [Evidence], deviceLocale: String?, fixedAppearance: Walkbook.Theme?) -> [Equivalence] {
         identicalGroups(in: evidence).flatMap { group -> [Equivalence] in
             var equivalences: [Equivalence] = []
             var remaining = group
             while let first = remaining.first {
-                let launched = conditions(of: first.state, deviceLocale: deviceLocale)
-                let same = remaining.filter { conditions(of: $0.state, deviceLocale: deviceLocale) == launched }
-                remaining.removeAll { conditions(of: $0.state, deviceLocale: deviceLocale) == launched }
+                let launched = conditions(of: first, deviceLocale: deviceLocale, fixedAppearance: fixedAppearance)
+                let same = remaining.filter { conditions(of: $0, deviceLocale: deviceLocale, fixedAppearance: fixedAppearance) == launched }
+                remaining.removeAll { conditions(of: $0, deviceLocale: deviceLocale, fixedAppearance: fixedAppearance) == launched }
                 guard same.count > 1 else { continue }
                 let base = same.first { leavesToDevice($0.state) && $0.state.arguments == nil && $0.state.environment == nil }
                     ?? same.first { leavesToDevice($0.state) }
@@ -215,9 +254,9 @@ public struct StateApplicationCheck {
         }
     }
 
-    /// Whether a state leaves every axis the device resolves to the device: no locale and no layout direction of its own.
+    /// Whether a state leaves every axis the device resolves to the device: no locale, no layout direction and no orientation of its own.
     private static func leavesToDevice(_ state: Walkbook.CaptureState) -> Bool {
-        state.locale == nil && state.layoutDirection == nil
+        state.locale == nil && state.layoutDirection == nil && state.orientation == nil
     }
 
     /// States asked to lay out one way whose tree says they drew the other: every horizontal run judged goes against the stated direction (`LayoutDirectionCheck`).
@@ -240,6 +279,23 @@ public struct StateApplicationCheck {
         )
     }
 
+    /// States asked for an orientation whose tree's root frame shows the other one (`OrientationCheck`) — a portrait-only app asked for landscape keeps its portrait frame.
+    ///
+    /// A state whose root frame is square or empty, or that has no tree, is not refused and not passed — `Filing.unverified` names it.
+    private static func orientationFinding(for evidence: [Evidence]) -> Finding? {
+        let described = evidence.compactMap { item -> (state: Walkbook.CaptureState, clause: String)? in
+            guard let stated = item.state.orientation, let tree = item.tree,
+                  let refusal = OrientationCheck.refusal(stated: stated, frame: tree.frame) else { return nil }
+            return (item.state, "'\(item.stateSlug)' \(refusal)")
+        }
+        guard !described.isEmpty else { return nil }
+        return Finding(
+            reason: "state \(described.map(\.clause).joined(separator: "; ")) — an orientation the app never took, so a capture filed under it would be the other orientation's layout labelled as this one",
+            refused: described.map(\.state),
+            onAppearance: false
+        )
+    }
+
     /// The axes each kept state set whose artefacts show nothing to verify them by, in capture order — only states with at least one.
     private static func unverified(in evidence: [Evidence], kept: [Walkbook.CaptureState]) -> [Unverified] {
         evidence.filter { kept.contains($0.state) }.compactMap { item in
@@ -249,6 +305,9 @@ public struct StateApplicationCheck {
             }
             if let location = item.state.location, !(item.tree.map { LocationShownCheck.isShown(location, in: $0) } ?? false) {
                 axes.append("location")
+            }
+            if item.state.orientation != nil, item.tree.flatMap({ OrientationCheck.judged($0.frame) }) == nil {
+                axes.append("orientation")
             }
             return axes.isEmpty ? nil : Unverified(state: item.state, axes: axes)
         }
@@ -423,7 +482,7 @@ public extension StateApplicationCheck {
         public let state: Walkbook.CaptureState
         /// The bytes of the screenshot taken under it.
         public let screenshot: Data
-        /// The accessibility tree taken with it — what `layoutDirection` is judged by; `nil` checks no axis that needs one.
+        /// The accessibility tree taken with it — what `layoutDirection` is judged by, and `orientation` by its root frame; `nil` checks no axis that needs one.
         public let tree: AXNode?
 
         public init(state: Walkbook.CaptureState, screenshot: Data, tree: AXNode? = nil) {
@@ -474,6 +533,27 @@ public extension StateApplicationCheck {
             self.refusedOnAppearance = refusedOnAppearance
             self.identicalToBase = identicalToBase
             self.unverified = unverified
+        }
+
+        /// What this filing becomes when states were refused at their launch, before any route (SimWalk#222): each `(state, clause)` is a state whose app drew in the other orientation than it asked for, the clause being `OrientationCheck.refusal`'s.
+        ///
+        /// **The route is never followed for such a state**, so there is no capture to judge: a portrait-locked app asked for landscape on an iPad would otherwise run the route through a layout it was not written for and fail as `unreachable`. The states join `refused` in walk order and the outcome becomes `stateNotApplied`, folded like any other refusal and leading with what was already found.
+        public func refusingAtLaunch(_ launched: [(state: Walkbook.CaptureState, clause: String)]) -> Filing {
+            guard !launched.isEmpty else { return self }
+            let reason = "state " + launched.map { "'\($0.state.slug)' \($0.clause)" }.joined(separator: "; ") + " — an orientation the app never took, so the route was not followed and nothing was filed under it"
+            let combined: ScreenOutcome = if case let .stateNotApplied(existing) = outcome {
+                .stateNotApplied(reason: "\(existing). \(reason)")
+            } else {
+                StateApplicationCheck.outcome(refusing: reason, instead: outcome)
+            }
+            return Filing(
+                outcome: combined,
+                kept: kept,
+                refused: refused + launched.map(\.state),
+                refusedOnAppearance: refusedOnAppearance,
+                identicalToBase: identicalToBase,
+                unverified: unverified
+            )
         }
 
         /// What this filing becomes when writing what it kept fails: nothing filed, the outcome folded (`ScreenOutcome.foldingWriteFailure(_:)`), and the refused states still named only where the folded outcome is one that refuses states.

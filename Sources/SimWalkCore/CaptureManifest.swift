@@ -23,7 +23,13 @@ public struct CaptureManifest: Codable, Equatable, Sendable {
     /// **Format 7 is another such step**: `systemTap` (SimWalk#28), a route's answer to a system permission sheet, which a format-6 reader has no case for — so it refuses by name too.
     ///
     /// **Format 8 is a state's own launch `arguments` and `environment` (SimWalk#44).** Optional and written only when present, but that does not keep them inside format 7 the way `identicalTo` and `device.locale` stayed inside format 4: those sit in containers an older reader decodes leniently and loses nothing by ignoring, where a state decodes *strictly* (SimWalk#10), so a format-7 reader meets `arguments` as an unknown key and reports a good manifest as torn. That is the definition of the bump, so it refuses by name instead ("format 8, this build reads 7, …").
-    public static let currentFormatVersion = 8
+    ///
+    /// **Format 9 is three more route steps an older build has no case for** (SimWalk#198): `longPress`, `swipe`, and `type`'s `replace`, which a `routeTaken` or `routeTried` may now name; a format-8 reader would report a good manifest as torn, so it refuses by name instead.
+    ///
+    /// **Format 10 is a state axis an older build has no key for** (SimWalk#199): `orientation`, which a manifest's `state` carries whole. A state decodes strictly (SimWalk#10), so a format-9 reader meets `orientation` as an unknown key and would report a good manifest as torn; it refuses by name instead ("format 10, this build reads 9, …").
+    ///
+    /// **Format 11 is another route step an older build has no case for**: `drag` (SimWalk#148), a press-and-drag between two points, which a `routeTaken` or `routeTried` may now name. A format-10 reader would report a good manifest as torn, as format 6's `tapPoint` would have, so it refuses by name instead ("format 11, this build reads 10, …").
+    public static let currentFormatVersion = 11
     /// The format in which an accessibility tree became a typed `AXNode` rather than an untyped dump — named rather than assumed to be the current one, so a refusal blaming the old tree shape keeps naming the format that actually replaced it.
     public static let typedTreeFormatVersion = 2
     /// The format in which a `stateNotApplied` screen began naming the states it refused and keeping the rest — named, like `typedTreeFormatVersion`, rather than assumed to be the current one.
@@ -33,7 +39,7 @@ public struct CaptureManifest: Codable, Equatable, Sendable {
     /// The formats this build will open, newest first.
     ///
     /// Older formats are **read**, not refused, and the distinction is deliberate. What changed between 1 and 2 is the ax-tree artefact, not the manifest: a format-1 bundle's manifest, screenshots and outcomes are all exactly as true today as they were when it was written, and refusing to open one would take `bundle inspect` away from every bundle already on disk to protect a reader from a file it need not open. Formats 2 to 7 lose nothing at all here — each one's vocabulary is a subset of the next. What must never happen is a reader *pretending* to decode a format-1 tree, and that is refused where it happens — `CaptureBundle.axTree(for:)` names the artefact and the format rather than throwing Foundation's `keyNotFound 'type'` at a caller with no idea which file it meant.
-    public static let readableFormatVersions = [8, 7, 6, 5, 4, 3, 2, 1]
+    public static let readableFormatVersions = [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
 
     /// The format version of the enclosing bundle.
     public var formatVersion: Int
@@ -286,6 +292,14 @@ public extension CaptureManifest {
         ///
         /// `nil` in every serial walk, whose one device is ``CaptureManifest/device``, so a serial manifest's JSON is unchanged. Inside format 8 for the reason `launchResets` is: a record decodes leniently, so an older reader ignores the key.
         public var capturedOn: CapturingDevice?
+        /// The slugs of the states whose launch left the app landscape on a device held portrait, so the runner turned the device to match (SimWalk#222); `nil` when none did.
+        ///
+        /// **Absent rather than empty**, and inside format 11 for the reason `launchResets` is inside format 8: a record decodes leniently, so an older reader ignores the key and misses only the disclosure.
+        public var deviceTurns: [String]?
+        /// The appearance the walkbook fixed for this screen (SimWalk#19), so the walk's line can say light and dark were not compared; `nil` when it fixed none.
+        ///
+        /// **Absent rather than empty**, and inside format 11 for the reason `deviceTurns` is: a record decodes leniently, so an older reader ignores the key and misses only the disclosure.
+        public var fixedAppearance: Walkbook.Theme?
 
         public init(
             id: String,
@@ -296,7 +310,9 @@ public extension CaptureManifest {
             refusedStates: [Walkbook.CaptureState] = [],
             refusedOnAppearance: [Walkbook.CaptureState] = [],
             launchResets: [LaunchReset] = [],
-            boundElements: [BoundElement]? = nil
+            boundElements: [BoundElement]? = nil,
+            deviceTurns: [String] = [],
+            fixedAppearance: Walkbook.Theme? = nil
         ) {
             self.id = id
             self.outcome = outcome
@@ -307,9 +323,11 @@ public extension CaptureManifest {
             self.refusedOnAppearance = refusedOnAppearance.isEmpty ? nil : refusedOnAppearance
             self.launchResets = launchResets.isEmpty ? nil : launchResets
             self.boundElements = boundElements
+            self.deviceTurns = deviceTurns.isEmpty ? nil : deviceTurns
+            self.fixedAppearance = fixedAppearance
         }
 
-        /// A record as the runner files it: `launchResets` and `boundElements` have **no default**, so the runner cannot omit them (SimWalk#91 item 6, SimWalk#93).
+        /// A record as the runner files it: `launchResets`, `boundElements` and `deviceTurns` have **no default**, so the runner cannot omit them (SimWalk#91 item 6, SimWalk#93).
         ///
         /// The runner has no unit tests, and `init` defaults `launchResets` to empty for the many tests that have none to give, so deleting the runner's argument left `swift test` green while every screen's reset disclosure vanished from the bundle. Every record the runner builds goes through here, so deleting the argument stops the runner compiling.
         public static func filed(
@@ -320,8 +338,9 @@ public extension CaptureManifest {
             settleQuietMilliseconds: Int?,
             refusedStates: [Walkbook.CaptureState] = [],
             refusedOnAppearance: [Walkbook.CaptureState] = [],
-            launchResets: [LaunchReset],
-            boundElements: [BoundElement]
+            launches: Launches,
+            boundElements: [BoundElement],
+            fixedAppearance: Walkbook.Theme? = nil
         ) -> ScreenRecord {
             ScreenRecord(
                 id: id,
@@ -331,8 +350,10 @@ public extension CaptureManifest {
                 settleQuietMilliseconds: settleQuietMilliseconds,
                 refusedStates: refusedStates,
                 refusedOnAppearance: refusedOnAppearance,
-                launchResets: launchResets,
-                boundElements: boundElements
+                launchResets: launches.resets,
+                boundElements: boundElements,
+                deviceTurns: launches.deviceTurns,
+                fixedAppearance: fixedAppearance
             )
         }
     }
@@ -411,7 +432,7 @@ public extension CaptureManifest {
         ///
         /// **It times the start of an arrival, not its end**: that read is the first structural change (`ScreenIdentity` finding the screen left), so for a push it is when the new screen starts to arrive, not when its slide finishes.
         ///
-        /// **Absent for a screen with no route, and for a last step that does not wait for arrival** — a `type`, a `scrollTo`, a `tapPoint` (which waits a fixed quiet period), a `systemTap`, or a `tab` already selected — since none of them has an arrival to time. Measured in the step's own reads, `StepPerformer.settleInterval` apart, each read's cost included; the clock starts when XCUITest's action returns, so time the action spent waiting for the app to go idle is not in it.
+        /// **Absent for a screen with no route, and for a last step that does not wait for arrival** — a `type`, a `scrollTo`, a `tapPoint` or a `drag` (which wait a fixed quiet period), a `systemTap`, or a `tab` already selected — since none of them has an arrival to time. Measured in the step's own reads, `StepPerformer.settleInterval` apart, each read's cost included; the clock starts when XCUITest's action returns, so time the action spent waiting for the app to go idle is not in it.
         public var landingMilliseconds: Int?
         /// The layout shifts the watch saw, in the order seen (`LayoutShiftRule`): an empty list is a watch that saw none, and **absent is "not recorded"** — a record from before M2 — never "no shifts".
         public var shifts: [Shift]?
@@ -477,7 +498,7 @@ public extension CaptureManifest {
         ///
         /// Set where the device was already in the conditions this state asked for — `light-loc_en_gb` on a device in `en_GB` draws what `light` draws (SimWalk#18). Applied, and identical to its base: filed and said so, where the identity rule used to refuse both. **Absent rather than empty**, like every optional field here.
         public private(set) var identicalTo: String?
-        /// The state axes this capture set that its artefacts show nothing to verify by — `layoutDirection` on a screen with no horizontal run, `location` on one that never shows the coordinate — by their walkbook keys; absent when every axis it set was verified or none needed it.
+        /// The state axes this capture set that its artefacts show nothing to verify by — `layoutDirection` on a screen with no horizontal run, `location` on one that never shows the coordinate, `orientation` on one whose root frame is square or empty — by their walkbook keys; absent when every axis it set was verified or none needed it.
         ///
         /// A qualification, not a refusal: the axis was set, and nothing here can say it did not take — only that the capture cannot show it did.
         public private(set) var unverifiedAxes: [String]?
@@ -671,6 +692,19 @@ extension CaptureManifest {
             screen.stampingCaptureTimes { time(screen.id, $0) }
         }
         return stamped
+    }
+}
+
+public extension CaptureManifest.ScreenRecord {
+    /// What a screen's launches did to the device, both required of the runner's `filed` (one argument, so the factory stays within the parameter limit): the permission resets they applied and the states whose launch turned the device to the app (SimWalk#222).
+    struct Launches: Equatable, Sendable {
+        public let resets: [CaptureManifest.LaunchReset]
+        public let deviceTurns: [String]
+
+        public init(resets: [CaptureManifest.LaunchReset], deviceTurns: [String]) {
+            self.resets = resets
+            self.deviceTurns = deviceTurns
+        }
     }
 }
 

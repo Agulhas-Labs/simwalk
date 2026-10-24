@@ -193,6 +193,18 @@ final class WalkTelemetry {
         try telemetry.measured(segment, runnerOwnsFile: runnerOwnsFile, body)
     }
 
+    /// Milliseconds since ``begin(tool:logPath:)`` on the clock `totalMs` is read from, so a mark taken here is never past the total; `nil` before the begin.
+    ///
+    /// Read by every shard of a parallel walk at once: `startedAt` is only written by the begin, before they start, and the clock is a read of the system's.
+    func elapsedMilliseconds() -> Int? {
+        startedAt.map { Self.milliseconds(clock() - $0) }
+    }
+
+    /// Stamps a parallel walk's breakdown into the timings, for ``finish(walk:logPath:)`` to carry into the result.
+    func recordParallel(_ parallel: ParallelTimings) {
+        timings.parallel = parallel
+    }
+
     private func stampTotal() {
         timings.totalMs = startedAt.map { Self.milliseconds(clock() - $0) }
     }

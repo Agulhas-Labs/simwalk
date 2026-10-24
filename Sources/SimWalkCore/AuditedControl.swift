@@ -39,6 +39,8 @@ struct AuditedControl {
     private static let bars: Set<String> = ["TabBar", "NavigationBar"]
 
     private static func collect(_ node: AXNode, button: AXNode?, control: AXNode?, insideBar: Bool, into found: inout [AuditedControl]) {
+        // The keyboard is input laid over the screen, not the screen being judged (SimWalk#215): its keys and suggestion words are not the app's labels.
+        guard !ScreenIdentifier.isKeyboard(node) else { return }
         found.append(AuditedControl(node: node, enclosingButton: button, enclosingControl: control, insideBar: insideBar))
         let childButton = node.type == "Button" ? node : button
         let childControl = node.isEnabled && types.contains(node.type) ? node : control

@@ -35,12 +35,12 @@ struct HookLocations {
     /// The installed binary, whose runner the prune keeps whichever binary is installing (SimWalk#22).
     let installedBinary: URL
 
-    /// The machine's own locations, with the two a caller may override.
-    static func standard(settings: String?, rule: String?) -> HookLocations {
+    /// The machine's own locations under `environment`, which `CLAUDE_CONFIG_DIR` moves Claude Code's files within, with the two a caller may override.
+    static func standard(settings: String?, rule: String?, environment: [String: String]) -> HookLocations {
         HookLocations(
-            settings: settings.map { URL(fileURLWithPath: $0) } ?? SimWalkPaths.claudeSettings,
-            config: AgentPaths.claudeConfig(environment: ProcessInfo.processInfo.environment),
-            rule: rule.map { URL(fileURLWithPath: $0) } ?? SimWalkPaths.claudeRule,
+            settings: settings.map { URL(fileURLWithPath: $0) } ?? AgentPaths.claudeSettings(environment: environment),
+            config: AgentPaths.claudeConfig(environment: environment),
+            rule: rule.map { URL(fileURLWithPath: $0) } ?? AgentPaths.claudeRule(named: FieldworkTool.simwalk.installedRuleName, environment: environment),
             segments: StatuslineSegments.isAvailable ? .standard() : nil,
             visibility: .standard(),
             runner: .standard(),

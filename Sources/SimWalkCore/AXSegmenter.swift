@@ -99,18 +99,31 @@ extension AXSegmenter {
         return contentChildren(of: node).contains(where: isContent)
     }
 
-    /// `node`'s children less its scroll indicators.
+    /// `node`'s children less its scroll indicators and the keyboard.
+    ///
+    /// The keyboard is input laid over the screen, not the screen being judged (an input view the app draws itself included), and it overlaps the app by design (its keys over the tab bar), so no section is cut from it and none of its keys or suggestion words is a run: the words change from one walk to the next and would make two walks of one build differ (SimWalk#215). The capture keeps it, as a user sees it. Every way into a section's items and runs goes through here, so this is the one place it is left out.
     static func contentChildren(of node: AXNode) -> [AXNode] {
-        node.children.filter { !isScrollIndicator($0, in: node) }
+        node.children.filter { !isScrollIndicator($0, in: node) && !ScreenIdentifier.isKeyboard($0) }
     }
+
+    /// The thickest a scroll indicator's thumb is taken to be, in points.
+    ///
+    /// The captured thumbs are 3 pt, so 4 leaves a point of room. A thumb's frame is not optional, so a bare child with an empty (zero) frame counts as thin and the indicator stands, as it did before the shape was read.
+    static let maxThumbThickness = 4.0
 
     /// Whether `node` is a scroll view's indicator, which the tree carries as a labelled element whose value is a percentage.
     ///
-    /// It is one only when all of these hold, as every indicator in the measured captures does (2026-10-20): it is an `Other` directly under a scrolling container (``SystemSheetScope/scrollTypes``); nothing below it is more than a bare element, the indicator's thumb, with no text and no children; and its whole value is a whole number and a percent sign (``isPercentage(_:)``). A labelled element with a percentage for its value is otherwise content wherever it sits: a combined row, `Battery` with `80%`, in a card or a cell.
+    /// It is one only when all of these hold, as every indicator in the measured captures does (2026-10-20): it is an `Other` directly under a scrolling container (``SystemSheetScope/scrollTypes``); it has its thumb and nothing more than a bare element, with no text and no children, and a thin line (``maxThumbThickness`` or less in its thinner dimension: every one of 102 thumbs in 51 captured trees is 3 pt, vertical 3×287 to 3×636 and horizontal 272×3, SimWalk#169), so a bare decorative box, 20×20 say, in a percentage row placed straight in a `ScrollView` stays content; and its whole value is a whole number and a percent sign (``isPercentage(_:)``). A labelled element with a percentage for its value is otherwise content wherever it sits: a combined row, `Battery` with `80%`, in a card or a cell. **An element with no children is never an indicator**: every measured indicator has its thumb, and a combined element, `Storage` with `45%`, placed straight in a scroll container has none (SimWalk#208).
     static func isScrollIndicator(_ node: AXNode, in parent: AXNode) -> Bool {
-        guard SystemSheetScope.scrollTypes.contains(parent.type), node.type == "Other", let value = node.value else { return false }
+        SystemSheetScope.scrollTypes.contains(parent.type) && hasScrollIndicatorShape(node)
+    }
+
+    /// Whether `node` has an indicator's own shape, wherever it sits: the part of ``isScrollIndicator(_:in:)`` that reads the node and not its parent, for a rule that walks a flattened tree and has no parent to hand (SimWalk#228).
+    static func hasScrollIndicatorShape(_ node: AXNode) -> Bool {
+        guard node.type == "Other", let value = node.value, !node.children.isEmpty else { return false }
         let bare = node.children.allSatisfy { thumb in
             thumb.children.isEmpty && (thumb.label ?? "").isEmpty && (thumb.value ?? "").isEmpty
+                && min(thumb.frame.width, thumb.frame.height) <= maxThumbThickness
         }
         return bare && isPercentage(value)
     }
@@ -216,7 +229,7 @@ extension AXSegmenter {
             role: role,
             frame: bar.frame,
             placement: placement(of: bar.frame, in: viewport),
-            textRuns: textLeaves(of: bar).map { textRun($0) }
+            textRuns: withoutRepeats(textLeaves(of: bar).map { (leaf: $0, cell: nil) }).map { textRun($0.leaf, cell: $0.cell) }
         )
     }
 
@@ -230,7 +243,7 @@ extension AXSegmenter {
             role: .content,
             frame: frame,
             placement: placement(of: frame, in: viewport),
-            textRuns: members.flatMap { textLeaves(of: $0, in: nil) }.map { textRun($0.leaf, cell: $0.cell) },
+            textRuns: withoutRepeats(members.flatMap { textLeaves(of: $0, in: nil) }).map { textRun($0.leaf, cell: $0.cell) },
             containerFrame: containers.isEmpty ? nil : union(containers.map(\.frame))
         )
     }
@@ -284,6 +297,32 @@ extension AXSegmenter {
             }
             return keyed
         }
+    }
+
+    /// `leaves` with the same text exposed twice kept once, since an accessibility tree can expose a footer's text twice, once at the row's full width and once at its inset (SimWalk#171).
+    ///
+    /// Two leaves are one text when their labels are equal, their `y` and height are equal and one's horizontal extent holds the other's and the two are not both `StaticText`s, since a doubled rendering of one sentence 16 pt apart is two `StaticText`s and must still be reported; the `StaticText` is kept when exactly one is, else the first in tree order.
+    static func withoutRepeats(_ leaves: [(leaf: AXNode, cell: AXNode.Frame?)]) -> [(leaf: AXNode, cell: AXNode.Frame?)] {
+        var kept: [(leaf: AXNode, cell: AXNode.Frame?)] = []
+        for entry in leaves {
+            guard let index = kept.firstIndex(where: { isSameTextTwice($0.leaf, entry.leaf) }) else {
+                kept.append(entry)
+                continue
+            }
+            if entry.leaf.type == "StaticText", kept[index].leaf.type != "StaticText" {
+                kept[index] = entry
+            }
+        }
+        return kept
+    }
+
+    /// Whether two leaves carry one text: equal labels, equal `y` and height, one's horizontal extent holds the other's, and at most one is a `StaticText` (SimWalk#171).
+    static func isSameTextTwice(_ first: AXNode, _ second: AXNode) -> Bool {
+        let (a, b) = (first.frame, second.frame)
+        return first.label == second.label
+            && (first.type != "StaticText" || second.type != "StaticText")
+            && a.y == b.y && a.height == b.height
+            && ((a.minX <= b.minX && a.maxX >= b.maxX) || (b.minX <= a.minX && b.maxX >= a.maxX))
     }
 
     /// A text leaf as a run: its shape, its frame, the list cell it sits in, if any, and its text.

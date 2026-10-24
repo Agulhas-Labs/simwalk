@@ -121,6 +121,11 @@ extension ScreenIdentifier {
     static func canonicalType(_ type: String) -> String {
         typeAliases[type] ?? type
     }
+
+    /// Whether `node` is the system keyboard itself, not merely something that holds one.
+    static func isKeyboard(_ node: AXNode) -> Bool {
+        canonicalType(node.type) == "Keyboard"
+    }
 }
 
 private extension ScreenIdentifier {
@@ -226,7 +231,7 @@ private extension ScreenIdentifier {
 
     /// Whether `node` holds a keyboard, itself included — what makes a window the keyboard's.
     static func holdsKeyboard(_ node: AXNode) -> Bool {
-        canonicalType(node.type) == "Keyboard" || node.children.contains(where: holdsKeyboard)
+        isKeyboard(node) || node.children.contains(where: holdsKeyboard)
     }
 
     static func isSheetGrabber(_ node: AXNode) -> Bool {

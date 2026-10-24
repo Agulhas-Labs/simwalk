@@ -142,6 +142,7 @@ struct UsageFailureKindTests {
             "walk was given a 'screenIDs' of today — it takes an array of screen ids",
             "walk was given a 'screenIDs' entry of 4 — every entry is a screen id",
             "--settle takes a quiet period in milliseconds greater than zero; 0 would be discarded",
+            "com.example.app declares iPhone only (UIDeviceFamily [1]) and iPad Pro 11-inch (M5) (UDID-1) is an iPad, where it runs scaled",
         ]
 
         for text in samples {

@@ -164,7 +164,7 @@ struct RouteTargetRebindingTests {
 
     // MARK: - A bound element, read again while scrolling
 
-    /// A scroll moves an element up or down the screen and nothing else: the same label at the same width, height and horizontal position, anywhere vertically, is still the element chosen.
+    /// A scroll moves an element up or down the screen: the same label at the same width and height, anywhere vertically, is still the element chosen.
     @Test
     func anElementAScrollMovedUpTheScreenIsStillTheOneChosen() throws {
         let target = try #require(Self.candidate(labelled: "Trend", in: Self.screen([AXNode(type: "Button", frame: Self.frame(y: 1400), label: "Trend")])))
@@ -173,16 +173,42 @@ struct RouteTargetRebindingTests {
         #expect(target.isStill(label: "Trend", identifier: nil, frame: Self.frame(y: 1400)))
     }
 
-    /// A bound index that names a later row once a lazy list recycles the ones above is caught by the label, or by a frame changed in any way a scroll does not change it.
+    /// A bound index that names a later row once a lazy list recycles the ones above is caught by the label, or by a size a scroll does not change.
     @Test
     func anElementWhoseLabelOrSizeChangedIsNotTheOneChosen() throws {
         let target = try #require(Self.candidate(labelled: "Trend", in: Self.screen([AXNode(type: "Button", frame: Self.frame(y: 1400), label: "Trend")])))
 
         #expect(!target.isStill(label: "Trend, 12 August", identifier: nil, frame: Self.frame(y: 700)))
         #expect(!target.isStill(label: nil, identifier: "Trend", frame: Self.frame(y: 700)))
-        #expect(!target.isStill(label: "Trend", identifier: nil, frame: AXNode.Frame(x: 16, y: 700, width: 402, height: 60)))
         #expect(!target.isStill(label: "Trend", identifier: nil, frame: AXNode.Frame(x: 0, y: 700, width: 380, height: 60)))
         #expect(!target.isStill(label: "Trend", identifier: nil, frame: AXNode.Frame(x: 0, y: 700, width: 402, height: 44)))
+    }
+
+    /// SimWalk#241: a row read before it was laid out, at a placeholder origin, is still the one chosen once a swipe brings it on screen.
+    ///
+    /// A sheet's table builds its rows before they scroll into view and reports one not yet laid out at its scroll view's corner; on screen the same row sits inset, at the same size. That is still the row chosen, or a `scrollTo` loses it on its first swipe where a `tap` reaches it.
+    @Test
+    func aRowReadBeforeItWasLaidOutIsStillTheOneChosenOnceOnScreen() throws {
+        let placeholder = AXNode.Frame(x: 0, y: 117, width: 308, height: 52)
+        let sheet = Self.screen([
+            AXNode(type: "Other", frame: AXNode.Frame(x: 0, y: 47, width: 390, height: 797), children: [
+                AXNode(type: "NavigationBar", frame: AXNode.Frame(x: 0, y: 47, width: 390, height: 70), children: [
+                    AXNode(type: "Button", frame: AXNode.Frame(x: 334, y: 67, width: 36, height: 36), label: "Done"),
+                ]),
+                AXNode(type: "Table", frame: AXNode.Frame(x: 0, y: 117, width: 390, height: 727), children: [
+                    AXNode(type: "Cell", frame: AXNode.Frame(x: 16, y: 401, width: 358, height: 52), children: [
+                        AXNode(type: "StaticText", frame: AXNode.Frame(x: 32, y: 401, width: 308, height: 52), label: "Dinosaurs"),
+                    ]),
+                    AXNode(type: "Cell", frame: placeholder, children: [
+                        AXNode(type: "StaticText", frame: placeholder, label: "About NetNewsWire"),
+                    ]),
+                ]),
+            ]),
+        ])
+        let target = try #require(Self.candidate(labelled: "About NetNewsWire", in: sheet))
+
+        #expect(target.node.frame == placeholder)
+        #expect(target.isStill(label: "About NetNewsWire", identifier: nil, frame: AXNode.Frame(x: 32, y: 609, width: 308, height: 52)))
     }
 
     /// An element chosen by its identifier is held to that identifier, whatever its label reads.

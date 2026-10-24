@@ -165,4 +165,36 @@ struct UnlabelledControlAuditTests {
 
         #expect(result.findings.map(\.type) == ["Switch"])
     }
+
+    /// SimWalk#234, from a real add-feed sheet: an empty `TextField` with only a placeholder is named by it, as VoiceOver speaks it.
+    ///
+    /// Does not pin the other text-entry types, which the rule does not yet examine.
+    @Test
+    func anEmptyTextFieldWithAPlaceholderIsNamedByIt() {
+        let field = LabelTreeFixture.element("TextField", placeholder: "URL", y: 192)
+
+        let result = Self.evaluate([field])
+
+        #expect(result.findings.isEmpty)
+        #expect(result.examined == 1)
+    }
+
+    /// SimWalk#234, the control: a field holding a value shows and speaks the value, never the placeholder, so `Name` over `NetNewsWire Blog` is still unlabelled.
+    @Test
+    func aTextFieldHoldingAValueIsNotNamedByItsPlaceholder() {
+        let field = LabelTreeFixture.element("TextField", value: "NetNewsWire Blog", placeholder: "Name", y: 244)
+
+        let result = Self.evaluate([field])
+
+        #expect(result.findings.map(\.type) == ["TextField"])
+    }
+
+    @Test
+    func anEmptyTextFieldWithABlankPlaceholderIsAFinding() {
+        let field = LabelTreeFixture.element("TextField", placeholder: "  ", y: 192)
+
+        let result = Self.evaluate([field])
+
+        #expect(result.findings.map(\.type) == ["TextField"])
+    }
 }

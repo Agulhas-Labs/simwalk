@@ -22,8 +22,11 @@ public struct ScreenDelta: Codable, Equatable, Sendable {
     /// The first ``cap`` elements that disappeared, in the before-read's order.
     public let disappeared: [String]
 
+    /// The fraction of the screen's picture that changed, 0…1, when the tree has no text and the screenshots stood in for it (SimWalk#150); `nil` otherwise.
+    public let pixelsChanged: Double?
+
     /// The delta from `before` to `after`, each line matched once — so a line listed twice before and once after is one disappeared.
-    public init(from before: AXNode, to after: AXNode) {
+    public init(from before: AXNode, to after: AXNode, pixels: (before: PixelSignature, after: PixelSignature)? = nil) {
         let beforeLines = BundleScreenQuery.lines(of: before)
         let afterLines = BundleScreenQuery.lines(of: after)
         let appeared = Self.unmatched(afterLines, against: beforeLines)
@@ -32,6 +35,7 @@ public struct ScreenDelta: Codable, Equatable, Sendable {
         disappearedCount = disappeared.count
         self.appeared = Array(appeared.prefix(Self.cap))
         self.disappeared = Array(disappeared.prefix(Self.cap))
+        pixelsChanged = pixels.map { $0.before.changedFraction(to: $0.after) }
     }
 
     /// Whether the step changed nothing a reader lists.
@@ -41,11 +45,30 @@ public struct ScreenDelta: Codable, Equatable, Sendable {
 
     /// The delta as an answer's residue: a count line, then each appeared line marked `+` and each disappeared one `-`.
     public var residue: [String] {
-        guard !isEmpty else { return ["delta: nothing appeared or disappeared"] }
-        var lines = ["delta: \(appearedCount) appeared, \(disappearedCount) disappeared"]
+        var lines = [isEmpty ? "delta: nothing appeared or disappeared" : "delta: \(appearedCount) appeared, \(disappearedCount) disappeared"]
+        if let pixelsChanged {
+            lines.append(Self.pixelsLine(pixelsChanged))
+        }
+        guard !isEmpty else { return lines }
         lines += Self.section("+", appeared, of: appearedCount)
         lines += Self.section("-", disappeared, of: disappearedCount)
         return lines
+    }
+
+    private static func pixelsLine(_ fraction: Double) -> String {
+        let amount = fraction <= 0 ? "nothing changed" : "\(percentOfScreen(fraction)) of the screen changed"
+        return "pixels: \(amount) (\(pixelHashReason))"
+    }
+
+    /// A fraction of the screen as a percent, `less than 1%` where it rounds to none.
+    static func percentOfScreen(_ fraction: Double) -> String {
+        let percent = Int((fraction * 100).rounded())
+        return percent == 0 ? "less than 1%" : "\(percent)%"
+    }
+
+    /// Why a `pixels:` line is there at all, said the same way by a step's delta and a read (SimWalk#223).
+    static var pixelHashReason: String {
+        "the tree has no text, so the screen hash includes a pixel hash"
     }
 
     /// `lines` less one match in `other` each, in `lines`' own order.

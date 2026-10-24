@@ -26,6 +26,10 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
     case blankRouteStepLabel(screenID: String, index: Int, stepIndex: Int)
     /// A `type` step names no text, so it would tap a field, type nothing, and report having driven it.
     case blankTypedText(screenID: String, index: Int, stepIndex: Int)
+    /// A `longPress` step holds for a time outside 0.5 to 5 seconds — shorter is a tap, longer is a wait (SimWalk#198).
+    case longPressSecondsOutOfRange(screenID: String, index: Int, stepIndex: Int, seconds: Double)
+    /// A `swipe` step names a direction that is not up, down, left or right (SimWalk#198).
+    case unknownSwipeDirection(screenID: String, index: Int, stepIndex: Int, value: String)
     /// A `tapPoint` step's `at` is not two numbers — an x and a y — so there is no point to tap (SimWalk#29).
     case malformedTapPoint(screenID: String, index: Int, stepIndex: Int, count: Int)
     /// A `tapPoint` step names an element and a point outside its frame — a coordinate outside 0…1 — so the touch would land on whatever is drawn beside it.
@@ -34,6 +38,18 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
     case tapPointOffScreen(screenID: String, index: Int, stepIndex: Int, point: [Double])
     /// A `tapPoint` step names no label and a screen point with both coordinates at most 1 — every worked example of the fractional form reads that shape, so it is far more likely a `label` was dropped than that the point was ever meant to land a device point from the screen's own corner (SimWalk#29 review, item 2).
     case tapPointFractionalWithoutLabel(screenID: String, index: Int, stepIndex: Int, point: [Double])
+    /// A `drag` step's `from` or `to` (`field`) is not two numbers — an x and a y (SimWalk#148).
+    case malformedDragPoint(screenID: String, index: Int, stepIndex: Int, field: String, count: Int)
+    /// A `drag` step names an element and a `from` or `to` point with a coordinate outside 0…1 (SimWalk#148).
+    case dragPointOutsideElement(screenID: String, index: Int, stepIndex: Int, field: String, label: String, point: [Double])
+    /// A `drag` step names no label and a `from` or `to` screen point with a negative coordinate (SimWalk#148).
+    case dragPointOffScreen(screenID: String, index: Int, stepIndex: Int, field: String, point: [Double])
+    /// A `drag` step names no label and a `from` or `to` screen point with both coordinates at most 1, which reads as a dropped `label` (SimWalk#148).
+    case dragPointFractionalWithoutLabel(screenID: String, index: Int, stepIndex: Int, field: String, point: [Double])
+    /// A `drag` step's `hold` is negative, or NaN or beyond ten seconds (SimWalk#148).
+    case dragHoldOutOfRange(screenID: String, index: Int, stepIndex: Int, hold: Double)
+    /// A `drag` step's `seconds` is zero or negative, or NaN or beyond ten seconds (SimWalk#148).
+    case dragSecondsOutOfRange(screenID: String, index: Int, stepIndex: Int, seconds: Double)
     /// A screen requests no capture states, so what the runner would capture is the device's ambient appearance.
     case noCaptureStates(screenID: String, index: Int)
     /// A screen requests the same state twice, so the second capture would overwrite the first.
@@ -145,6 +161,10 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
             "\(Self.subject(screenID, index)) route step \(stepIndex) has a blank label — it matches no element, so UNREACHABLE could not even name what it tried"
         case let .blankTypedText(screenID, index, stepIndex):
             "\(Self.subject(screenID, index)) route step \(stepIndex) types an empty string — it would tap the field, type nothing, and report the step as having landed"
+        case let .longPressSecondsOutOfRange(screenID, index, stepIndex, seconds):
+            "\(Self.subject(screenID, index)) route step \(stepIndex) long-presses for \(Walkbook.RouteStep.rendered([seconds])) s — a hold shorter than 0.5 s is a tap and one longer than 5 s is a wait, so `seconds` is from 0.5 to 5"
+        case let .unknownSwipeDirection(screenID, index, stepIndex, value):
+            "\(Self.subject(screenID, index)) route step \(stepIndex) swipes '\(value)' — one of \(Walkbook.RouteStep.SwipeDirection.allCases.map(\.rawValue).joined(separator: ", "))"
         case let .malformedTapPoint(screenID, index, stepIndex, count):
             "\(Self.subject(screenID, index)) route step \(stepIndex) taps at \(count) number\(count == 1 ? "" : "s") — `at` is a point, written as two: [x, y]"
         case let .tapPointOutsideElement(screenID, index, stepIndex, label, point):
@@ -153,6 +173,18 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
             "\(Self.subject(screenID, index)) route step \(stepIndex) taps the screen at \(Walkbook.RouteStep.rendered(point)) — a screen point is in device points and never negative; whether it fits the device's screen is checked when the walk runs, since validate is not told the device"
         case let .tapPointFractionalWithoutLabel(screenID, index, stepIndex, point):
             "\(Self.subject(screenID, index)) route step \(stepIndex) taps the screen at \(Walkbook.RouteStep.rendered(point)), with no `label` — both coordinates are at most 1, which reads as a fraction of an element's frame rather than a point on any real device's screen; name the element the fraction is measured against, or give a screen point that is actually one"
+        case let .malformedDragPoint(screenID, index, stepIndex, field, count):
+            "\(Self.subject(screenID, index)) route step \(stepIndex) drags with \(count) number\(count == 1 ? "" : "s") in drag's \(field) — it is a point, written as two: [x, y]"
+        case let .dragPointOutsideElement(screenID, index, stepIndex, field, label, point):
+            "\(Self.subject(screenID, index)) route step \(stepIndex) drags '\(label)' with drag's \(field) at \(Walkbook.RouteStep.rendered(point)), outside its frame — a point within an element is two fractions of it from 0 to 1"
+        case let .dragPointOffScreen(screenID, index, stepIndex, field, point):
+            "\(Self.subject(screenID, index)) route step \(stepIndex) drags with drag's \(field) at \(Walkbook.RouteStep.rendered(point)) — a screen point is in device points and never negative; whether it fits the device's screen is checked when the walk runs"
+        case let .dragPointFractionalWithoutLabel(screenID, index, stepIndex, field, point):
+            "\(Self.subject(screenID, index)) route step \(stepIndex) drags with drag's \(field) at \(Walkbook.RouteStep.rendered(point)) and no `label` — both coordinates are at most 1, which reads as a fraction of an element's frame rather than a point on any real device's screen; name the element the fraction is measured against, or give a screen point that is actually one"
+        case let .dragHoldOutOfRange(screenID, index, stepIndex, hold):
+            "\(Self.subject(screenID, index)) route step \(stepIndex) drags with a `hold` of \(Walkbook.RouteStep.rendered([hold])) s — drag's hold is from 0 to \(Walkbook.RouteStep.rendered([Walkbook.RouteStep.maxDragSeconds])) s"
+        case let .dragSecondsOutOfRange(screenID, index, stepIndex, seconds):
+            "\(Self.subject(screenID, index)) route step \(stepIndex) drags for \(Walkbook.RouteStep.rendered([seconds])) s — drag's `seconds` is more than 0 and at most \(Walkbook.RouteStep.rendered([Walkbook.RouteStep.maxDragSeconds])) s"
         case let .noCaptureStates(screenID, index):
             "\(Self.subject(screenID, index)) requests no states — capturing the device's ambient appearance is not something a manifest can attest to; state at least one theme"
         case let .duplicateCaptureState(screenID, index, slug):
@@ -248,7 +280,7 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
         case .undecodable:
             nil
         case .blankWalkName, .blankAppBundleID, .noScreens, .blankScreenID, .duplicateScreenID, .collidingScreenIDs, .emptyRoute,
-             .blankRouteStepLabel, .blankTypedText, .malformedTapPoint, .tapPointOutsideElement, .tapPointOffScreen, .tapPointFractionalWithoutLabel, .noCaptureStates, .duplicateCaptureState, .unknownDynamicTypeSize, .unknownLocale,
+             .blankRouteStepLabel, .blankTypedText, .longPressSecondsOutOfRange, .unknownSwipeDirection, .malformedTapPoint, .tapPointOutsideElement, .tapPointOffScreen, .tapPointFractionalWithoutLabel, .malformedDragPoint, .dragPointOutsideElement, .dragPointOffScreen, .dragPointFractionalWithoutLabel, .dragHoldOutOfRange, .dragSecondsOutOfRange, .noCaptureStates, .duplicateCaptureState, .unknownDynamicTypeSize, .unknownLocale,
              .emptyLaunchCondition, .blankLaunchCondition, .animationsInStateEnvironment, .unknownPermission, .locationOutOfRange, .nonPositiveSettle, .emptyBudgets, .negativeBudget, .measureIterationsOutOfRange, .blankExpect, .paddedExpect, .emptyExpectMenu, .blankExpectMenuLabel, .paddedExpectMenuLabel, .unknownKey, .misplacedKey, .mangledExpect, .placeholderInTabStep,
              .placeholderInSystemTapStep, .ownerInSystemTapStep, .atLaunchAfterFirstStep, .unopenableURL, .emptyOracleCommand, .unknownPrivacyService, .privacyGrantedAndRevoked, .privacyGrantUndoneByReset, .figuresWithoutOracle, .emptyFigures,
              .blankFigureField, .emptyFigureWindows, .duplicateFigureID, .figureElementPlaceholders, .unsupportedOnDevice:

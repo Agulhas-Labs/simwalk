@@ -65,7 +65,7 @@ extension SessionStartCommand {
         try gate.requireNotCancelled()
         runner.coldBuildNote(commit: source.commit).map(note)
         // The team is non-empty: the prerequisites refused otherwise.
-        try runner.buildForDevice(udid: udid, team: team ?? "", runnerBundleID: runnerBundleId)
+        try runner.buildForDevice(udid: udid, team: team ?? "", runnerBundleID: runnerBundleId, note: note)
         // Before the renewal, which a cancel's release would otherwise answer as a lease that could not be renewed.
         try gate.requireNotCancelled()
         // A build can outlast a good part of the lease: renewed before the runner starts, and refused here if it cannot be.
@@ -122,7 +122,7 @@ extension SessionStartCommand {
                 "device: \(device.name) · \(device.marketingName) · iOS \(device.osVersion) · \(udid)",
                 "transport: \(device.transportType)",
                 leaseLine,
-            ]
+            ] + (started.ready.notes ?? []).map { "⚠ \($0)" }
         )
     }
 }

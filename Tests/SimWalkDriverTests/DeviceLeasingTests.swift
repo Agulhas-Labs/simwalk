@@ -224,6 +224,197 @@ struct DeviceLeasingTests {
         #expect(store.all().map(\.udid) == ["UDID-1"])
     }
 
+    /// SimWalk#166: a bare acquire prefers an iPhone even where an iPad is listed first.
+    @Test
+    func aBareAcquireTakesAnIPhoneBeforeAnIPad() throws {
+        let directory = try TemporaryDirectory()
+        let leasing = DeviceLeasing(store: LeaseStore(directory: directory.url, isAlive: { _ in true }), shell: Shell(script: Script(devices: Script.familyDevices).run))
+
+        let first = try leasing.acquire(device: nil, cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+        let second = try leasing.acquire(device: nil, cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+
+        #expect(first.simulator.udid == "PHONE-1")
+        #expect(second.simulator.udid == "PAD-1")
+    }
+
+    @Test
+    func aFamilyLeasesOnlyThatFamily() throws {
+        let directory = try TemporaryDirectory()
+        let leasing = DeviceLeasing(store: LeaseStore(directory: directory.url, isAlive: { _ in true }), shell: Shell(script: Script(devices: Script.familyDevices).run))
+
+        let pad = try leasing.acquire(device: nil, cloneFrom: nil, family: .ipad, ttl: 60, holderPID: 41, now: Self.start)
+
+        #expect(pad.simulator.udid == "PAD-1")
+        #expect(throws: LeaseError.noShutDownDevice(among: "iOS 27.0 iPad")) {
+            try leasing.acquire(device: nil, cloneFrom: nil, family: .ipad, ttl: 60, holderPID: 41, now: Self.start)
+        }
+    }
+
+    @Test
+    func anIPhoneFamilyWithOnlyAnIPadFreeIsRefusedNamingTheFamily() throws {
+        let directory = try TemporaryDirectory()
+        let leasing = DeviceLeasing(store: LeaseStore(directory: directory.url, isAlive: { _ in true }), shell: Shell(script: Script(devices: Script.onlyIPadDevices).run))
+
+        #expect(throws: LeaseError.noShutDownDevice(among: "iOS 27.0 iPhone")) {
+            try leasing.acquire(device: nil, cloneFrom: nil, family: .iphone, ttl: 60, holderPID: 41, now: Self.start)
+        }
+        #expect(LeaseError.noShutDownDevice(among: "iOS 27.0 iPhone").description.contains("no shut-down iOS 27.0 iPhone simulator is free"))
+    }
+
+    @Test
+    func aBareAcquireWithOnlyAnIPadFreeStillTakesIt() throws {
+        let directory = try TemporaryDirectory()
+        let leasing = DeviceLeasing(store: LeaseStore(directory: directory.url, isAlive: { _ in true }), shell: Shell(script: Script(devices: Script.onlyIPadDevices).run))
+
+        let grant = try leasing.acquire(device: nil, cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+
+        #expect(grant.simulator.udid == "PAD-1")
+    }
+
+    /// A lease taken on a shut-down device records it, and its release runs exactly `simctl shutdown <udid>`, so a device the lease's walk booted goes back as it was found and the next lease by name finds it free (SimWalk#246).
+    @Test
+    func aleaseThatFoundItsDeviceShutDownShutsItDownOnRelease() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let script = Script()
+        let leasing = DeviceLeasing(store: store, shell: Shell(script: script.run))
+
+        let grant = try leasing.acquire(device: "iPhone 17", cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+        try leasing.release(token: grant.lease.token)
+
+        #expect(grant.lease.foundShutDown == true)
+        #expect(script.vectors == [["simctl", "shutdown", "SHUT-1"]])
+        #expect(store.all().isEmpty)
+    }
+
+    /// A lease taken on a booted device, which only a UDID can name, records nothing, and its release runs nothing: the device may be somebody's who takes no leases.
+    @Test
+    func aleaseThatFoundItsDeviceBootedLeavesItAsItIs() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let script = Script()
+        let leasing = DeviceLeasing(store: store, shell: Shell(script: script.run))
+
+        let grant = try leasing.acquire(device: "BOOTED-1", cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+        try leasing.release(token: grant.lease.token)
+
+        #expect(grant.lease.foundShutDown == nil)
+        #expect(script.vectors.isEmpty)
+        #expect(store.all().isEmpty)
+    }
+
+    /// A device that would not shut down keeps its lease, so the release can be run again, and the refusal names the command.
+    @Test
+    func adeviceThatWouldNotShutDownKeepsItsLease() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let leasing = DeviceLeasing(store: store, shell: Shell(script: Script(failing: "shutdown").run))
+        let grant = try leasing.acquire(device: nil, cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+
+        #expect(throws: LeaseError.deviceNotShutDown(udid: "SHUT-1", reason: "An error was encountered processing the command (code=164)")) {
+            try leasing.release(token: grant.lease.token)
+        }
+        #expect(store.entry(token: grant.lease.token) != nil)
+    }
+
+    /// A prune that releases an expired lease which found its device shut down shuts that device down, and only that one.
+    @Test
+    func pruningAnExpiredLeaseThatFoundItsDeviceShutDownShutsItDown() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        _ = try store.acquire(udid: "FOUND-OFF", ttl: 60, holderPID: 41, now: Self.start, foundShutDown: true)
+        _ = try store.acquire(udid: "FOUND-ON", ttl: 60, holderPID: 41, now: Self.start)
+        let script = Script()
+
+        let released = DeviceLeasing(store: store, shell: Shell(script: script.run)).releaseExpired(now: Self.start.addingTimeInterval(120), dryRun: false)
+
+        #expect(released.map(\.failure) == [nil, nil])
+        #expect(script.vectors == [["simctl", "shutdown", "FOUND-OFF"]])
+        #expect(store.all().isEmpty)
+    }
+
+    /// A walk under the lease renews it before it boots the device, and the renewed lease still puts the device back: the case SimWalk#246 was found in.
+    @Test
+    func arenewedLeaseStillShutsItsDeviceDownOnRelease() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let script = Script()
+        let leasing = DeviceLeasing(store: store, shell: Shell(script: script.run))
+        let grant = try leasing.acquire(device: "iPhone 17", cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+
+        _ = try store.renew(token: grant.lease.token, ttl: 1800, now: Self.start.addingTimeInterval(5))
+        try leasing.release(token: grant.lease.token)
+
+        #expect(script.vectors == [["simctl", "shutdown", "SHUT-1"]])
+    }
+
+    /// A device somebody else is booting is not shut down: only a device `simctl` listed as `Shutdown` is recorded as found shut down.
+    @Test
+    func adeviceFoundBootingIsLeftAsItIs() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let booting = #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"udid":"BOOTING-1","name":"iPhone 17","state":"Booting"}]}}"#
+        let script = Script(devices: booting)
+        let leasing = DeviceLeasing(store: store, shell: Shell(script: script.run))
+
+        let grant = try leasing.acquire(device: "BOOTING-1", cloneFrom: nil, ttl: 60, holderPID: 41, now: Self.start)
+        try leasing.release(token: grant.lease.token)
+
+        #expect(grant.lease.foundShutDown == nil)
+        #expect(script.vectors.isEmpty)
+    }
+
+    /// A release a crash left part done, its found-shut-down lease already a tombstone, is finished by a prune: the device is shut down and the tombstone goes.
+    @Test
+    func aprunefinishesACrashedReleaseOfAFoundShutDownLease() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+        let lease = try store.acquire(udid: "FOUND-OFF", ttl: 3600, holderPID: 41, now: Self.start, foundShutDown: true)
+        let file = store.url(for: "FOUND-OFF")
+        try FileManager.default.moveItem(at: file, to: file.deletingLastPathComponent().appendingPathComponent("FOUND-OFF.releasing.\(lease.token)"))
+        let script = Script()
+
+        let released = DeviceLeasing(store: store, shell: Shell(script: script.run)).releaseExpired(now: Self.start, dryRun: false)
+
+        #expect(released.map(\.entry.udid) == ["FOUND-OFF"])
+        #expect(released.map(\.failure) == [nil])
+        #expect(script.vectors == [["simctl", "shutdown", "FOUND-OFF"]])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.url.path).filter { $0.contains(".releasing.") }.isEmpty)
+    }
+
+    /// A dead holder's lease that found its device shut down is released by a prune before its expiry, as a dead holder's clone is, so its device does not stay booted and refuse every by-name acquisition until then (SimWalk#249).
+    @Test
+    func aprunereleasesADeadHoldersFoundShutDownLeaseBeforeItExpires() throws {
+        let directory = try TemporaryDirectory()
+        let store = LeaseStore(directory: directory.url, isAlive: { _ in false })
+        _ = try store.acquire(udid: "FOUND-OFF", ttl: 3600, holderPID: 41, now: Self.start, foundShutDown: true)
+        _ = try store.acquire(udid: "FOUND-ON", ttl: 3600, holderPID: 41, now: Self.start)
+        let script = Script()
+
+        let released = DeviceLeasing(store: store, shell: Shell(script: script.run)).releaseExpired(now: Self.start.addingTimeInterval(5), dryRun: false)
+
+        #expect(released.map(\.entry.udid) == ["FOUND-OFF"])
+        #expect(released.map(\.device) == [.shutDown])
+        #expect(script.vectors == [["simctl", "shutdown", "FOUND-OFF"]])
+        #expect(store.all().map(\.udid) == ["FOUND-ON"])
+    }
+
+    /// A release says what `simctl` answered: a device that was already shut down is not reported as shut down by the release (SimWalk#249).
+    @Test
+    func areleaseSaysWhenItsDeviceWasAlreadyShutDownOrGone() throws {
+        for (answer, expected) in [("Unable to shutdown device in current state: Shutdown", DeviceLeasing.DeviceChange.alreadyShutDown), ("Invalid device: FOUND-OFF", .gone)] {
+            let directory = try TemporaryDirectory()
+            let store = LeaseStore(directory: directory.url, isAlive: { _ in true })
+            let lease = try store.acquire(udid: "FOUND-OFF", ttl: 60, holderPID: 41, now: Self.start, foundShutDown: true)
+            let shell = Shell { _, _, _ in Shell.Result(status: 1, standardOutput: "", standardError: "An error was encountered processing the command (code=405):\n\(answer)\n") }
+
+            let released = try DeviceLeasing(store: store, shell: shell).release(token: lease.token)
+
+            #expect(released.device == expected)
+            #expect(store.all().isEmpty)
+        }
+    }
+
     private static let start = Date(timeIntervalSince1970: 1_000_000)
 }
 
@@ -233,9 +424,11 @@ extension DeviceLeasingTests {
         private(set) var vectors: [[String]] = []
         private let failing: String?
         private let meanwhile: ([String]) -> Void
+        private let deviceList: String
 
-        init(failing: String? = nil, meanwhile: @escaping ([String]) -> Void = { _ in }) {
+        init(failing: String? = nil, devices: String = Script.devices, meanwhile: @escaping ([String]) -> Void = { _ in }) {
             self.failing = failing
+            deviceList = devices
             self.meanwhile = meanwhile
         }
 
@@ -249,7 +442,7 @@ extension DeviceLeasingTests {
                 switch arguments {
                 case _ where arguments.starts(with: ["simctl", "list"]):
                     vectors.removeLast()
-                    return Shell.Result(status: 0, standardOutput: Self.devices, standardError: "")
+                    return Shell.Result(status: 0, standardOutput: deviceList, standardError: "")
                 case _ where arguments.starts(with: ["simctl", "clone"]):
                     return Shell.Result(status: 0, standardOutput: "CLONE-NEW\n", standardError: "")
                 default:
@@ -260,6 +453,16 @@ extension DeviceLeasingTests {
 
         static var devices: String {
             #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"udid":"BOOTED-1","name":"iPhone 17 Pro","state":"Booted"},{"udid":"SHUT-1","name":"iPhone 17","state":"Shutdown"},{"udid":"SHUT-2","name":"iPhone 17","state":"Shutdown"}]}}"#
+        }
+
+        /// An iPad listed before an iPhone, both shut down, with their device types (SimWalk#166).
+        static var familyDevices: String {
+            #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-0":[{"udid":"PAD-1","name":"iPad Pro","state":"Shutdown","deviceTypeIdentifier":"com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M5"},{"udid":"PHONE-1","name":"iPhone 17","state":"Shutdown","deviceTypeIdentifier":"com.apple.CoreSimulator.SimDeviceType.iPhone-17"}]}}"#
+        }
+
+        /// Only an iPad is shut down.
+        static var onlyIPadDevices: String {
+            #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-0":[{"udid":"PAD-1","name":"iPad Pro","state":"Shutdown","deviceTypeIdentifier":"com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M5"},{"udid":"PHONE-1","name":"iPhone 17","state":"Booted","deviceTypeIdentifier":"com.apple.CoreSimulator.SimDeviceType.iPhone-17"}]}}"#
         }
     }
 }

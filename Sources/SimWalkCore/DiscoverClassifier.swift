@@ -39,14 +39,17 @@ public struct DiscoverClassifier {
 
     /// The disclosure rows a route can name, in visual order, and every other control on the screen with the reason it is not tapped.
     ///
-    /// Tab bar items are left out of both: they are tapped from the launch screen, as roots. So is the back button, which is how the crawl returns. **So is a control a row's own tap lands on**: a cell and the button inside it carrying its label are one target (`RouteTarget.choose`), so the one that is not the row is the row, not a second control left alone.
+    /// Tab bar items are left out of both: they are tapped from the launch screen, as roots. So is the back button, which is how the crawl returns. A scroll bar, which the tree carries as a labelled control, is neither a row nor a skip (``AXSegmenter/isScrollIndicator(_:in:)``). **So is a control a row's own tap lands on**: a cell and the button inside it carrying its label are one target (`RouteTarget.choose`), so the one that is not the row is the row, not a second control left alone.
     static func read(_ tree: AXNode, screenID: String) -> (rows: [Row], skipped: [DiscoverSkip]) {
         let back = DiscoverBackButton.of(tree)
         let viewport = visibleFrame(of: tree)
         var rows: [Row] = []
         var skipped: [(path: [Int], entry: DiscoverSkip)] = []
         var rowTargets: Set<[Int]> = []
-        func visit(_ node: AXNode, at path: [Int], insideTabBar: Bool, insideAlert: Bool) {
+        func visit(_ node: AXNode, in parent: AXNode, at path: [Int], insideTabBar: Bool, insideAlert: Bool) {
+            if AXSegmenter.isScrollIndicator(node, in: parent) {
+                return
+            }
             let isTabItem = (insideTabBar && node.type == "Button") || node.type == "Tab"
             if node.isEnabled, !isTabItem, node != back, let name = name(of: node) {
                 if insideAlert, controlTypes.contains(node.type) {
@@ -64,11 +67,11 @@ public struct DiscoverClassifier {
                 }
             }
             for (position, child) in node.children.enumerated() {
-                visit(child, at: path + [position], insideTabBar: insideTabBar || node.type == "TabBar", insideAlert: insideAlert || node.type == "Alert")
+                visit(child, in: node, at: path + [position], insideTabBar: insideTabBar || node.type == "TabBar", insideAlert: insideAlert || node.type == "Alert")
             }
         }
         for (position, child) in tree.children.enumerated() {
-            visit(child, at: [position], insideTabBar: tree.type == "TabBar", insideAlert: tree.type == "Alert")
+            visit(child, in: tree, at: [position], insideTabBar: tree.type == "TabBar", insideAlert: tree.type == "Alert")
         }
         return (visualOrder(rows, frame: \.node.frame), skipped.filter { !rowTargets.contains($0.path) }.map(\.entry))
     }
@@ -80,10 +83,15 @@ public struct DiscoverClassifier {
 
     /// Whether a list on the screen may run on below the rows the app loaded: a scrolling container whose lowest loaded row reaches the bottom of the visible frame.
     ///
-    /// **A lazy list builds no rows below the fold**, so a row there is in no tree the crawl reads — neither tapped nor skipped. No route step scrolls a list without a label to scroll to, so the crawl does not scroll to find out; it says the list may continue instead, which a list whose last row ends above the bottom cannot.
+    /// **A lazy list builds no rows below the fold**, so a row there is in no tree the crawl reads until the list is dragged. The crawl drags a list on a screen whose rows it will tap (``DiscoverCrawl``); elsewhere, and where paging stops short of the end, it says the list may continue instead, which a list whose last row ends above the bottom cannot.
     static func listMayContinue(_ tree: AXNode) -> Bool {
+        continuingList(tree) != nil
+    }
+
+    /// The list ``listMayContinue(_:)`` finds: the first container, in tree order, that scrolls and whose lowest loaded row reaches the bottom of the visible frame.
+    static func continuingList(_ tree: AXNode) -> AXNode? {
         let bottom = visibleFrame(of: tree).maxY
-        return tree.flattened.contains { container in
+        return tree.flattened.first { container in
             guard SystemSheetScope.scrollTypes.contains(container.type) else { return false }
             let lowest = rows(of: container).filter(\.frame.hasArea).map(\.frame.maxY).max()
             return lowest.map { $0 >= bottom } ?? false
@@ -91,7 +99,7 @@ public struct DiscoverClassifier {
     }
 
     /// A list's rows: its cells where it has any, because a table's or collection view's other children are backgrounds that span the whole list whatever it holds (a two-row list's run 912 and 3,772 points tall); otherwise every content child but those framed exactly as the container, which are a scroll view's backgrounds.
-    private static func rows(of container: AXNode) -> [AXNode] {
+    static func rows(of container: AXNode) -> [AXNode] {
         let children = AXSegmenter.contentChildren(of: container)
         let cells = children.filter { $0.type == "Cell" }
         return cells.isEmpty ? children.filter { $0.frame != container.frame } : cells

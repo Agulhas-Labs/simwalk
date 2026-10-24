@@ -26,13 +26,13 @@ struct InstallHookCommand: ParsableCommand {
         )
     }
 
-    @Option(name: .customLong("settings"), help: "Settings file to edit (defaults to ~/.claude/settings.json). Takes the PreToolUse hook always, and the status line only where sift is not installed to own that slot.")
+    @Option(name: .customLong("settings"), help: "Settings file to edit (defaults to ~/.claude/settings.json, or settings.json in CLAUDE_CONFIG_DIR when set). Takes the PreToolUse hook always, and the status line only where sift is not installed to own that slot.")
     var settings: String?
 
-    @Option(name: .customLong("guide"), help: "The agent guide to install (defaults to SimWalk.md beside this binary, then in the share/simwalk tree a packaged release ships beside it, then in the working directory).")
+    @Option(name: .customLong("guide"), help: "The agent guide to install (defaults to SimWalk.md in the checkout this binary was compiled from, then beside this binary, then in the share/simwalk tree a packaged release ships beside it, then in the working directory).")
     var guide: String?
 
-    @Option(name: .customLong("rule"), help: "Where to install it (defaults to ~/.claude/rules/simwalk.md).")
+    @Option(name: .customLong("rule"), help: "Where to install it (defaults to ~/.claude/rules/simwalk.md, or rules/simwalk.md in CLAUDE_CONFIG_DIR when set).")
     var rule: String?
 
     @Flag(name: .customLong("repoint-runner"), help: "Re-pair this binary with the runner in its checkout now, replacing the one it was installed with. Without it a binary keeps its first runner, so a moved checkout cannot pair it with another commit's.")
@@ -52,25 +52,25 @@ struct InstallHookCommand: ParsableCommand {
 
     /// What the install did, in the contract's shape: every step named, and every step it could not take carried on the verdict.
     func answer() throws -> Answer {
-        try installed(executable: ExecutablePath.current).answer
+        try installed(executable: ExecutablePath.current, environment: ProcessInfo.processInfo.environment).answer
     }
 
     /// The install, with what it changed beside the answer — against this machine, or against `surroundings` where a test stands in for it.
-    func installed(executable: String, in surroundings: Surroundings? = nil) throws -> Installed {
-        let surroundings = surroundings ?? standardSurroundings()
+    func installed(executable: String, environment: [String: String], in surroundings: Surroundings? = nil) throws -> Installed {
+        let surroundings = surroundings ?? standardSurroundings(environment: environment)
         return try Self.install(
             locations: surroundings.locations,
             executable: executable,
             claude: surroundings.claude,
-            guide: Self.locateGuide(explicit: guide, beside: executable),
+            guide: Self.locateGuide(explicit: guide, beside: executable, checkout: surroundings.runnerSource.checkout, workingDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)),
             runnerSource: surroundings.runnerSource
         )
     }
 
     /// This machine's locations, its `claude` (`nil` where none is on PATH) and the runner source.
-    func standardSurroundings() -> Surroundings {
+    func standardSurroundings(environment: [String: String]) -> Surroundings {
         Surroundings(
-            locations: HookLocations.standard(settings: settings, rule: rule),
+            locations: HookLocations.standard(settings: settings, rule: rule, environment: environment),
             claude: ClaudeCommandLine.runner(),
             runnerSource: RunnerSnapshotSource(
                 checkout: RunnerProject.compiledCheckout,
@@ -160,8 +160,15 @@ struct InstallHookCommand: ParsableCommand {
     ///
     /// **A named `--guide` is the only candidate.** Falling through to another file when the one the caller pointed at cannot be read would install a *different* guide from the one they asked for and report success over it — and on an upgrade that means silently reinstalling last release's copy sitting beside the binary.
     ///
-    /// Unnamed, the library looks beside the binary and in the share tree a package manager ships beside it, then the working directory, for a checkout.
-    static func locateGuide(explicit: String?, beside executable: String) -> GuideSource {
+    /// Unnamed, the guide of the `checkout` the binary was compiled from comes first, then the library looks beside the binary and in the share tree a package manager ships beside it, then `workingDirectory`.
+    ///
+    /// The checkout leads because a development build's guide is the one from the source it was compiled from, as its runner is; a stale `SimWalk.md` left in the share tree by an older tarball install must not win over it. A packaged build has no checkout (`nil`) and looks as it always did.
+    static func locateGuide(
+        explicit: String?,
+        beside executable: String,
+        checkout: URL?,
+        workingDirectory: URL
+    ) -> GuideSource {
         let manager = FileManager.default
         if let explicit {
             let named = URL(fileURLWithPath: explicit)
@@ -170,10 +177,16 @@ struct InstallHookCommand: ParsableCommand {
             }
             return .found(named)
         }
+        if let checkout {
+            let compiled = checkout.appendingPathComponent(SimWalkClaudeSetup.rule.shippedFileName)
+            if manager.isReadableFile(atPath: compiled.path) {
+                return .found(compiled)
+            }
+        }
         if let shipped = SimWalkClaudeSetup.rule.source(forBinary: executable) {
             return .found(shipped)
         }
-        let local = URL(fileURLWithPath: manager.currentDirectoryPath).appendingPathComponent(SimWalkClaudeSetup.rule.shippedFileName)
+        let local = workingDirectory.appendingPathComponent(SimWalkClaudeSetup.rule.shippedFileName)
         return manager.isReadableFile(atPath: local.path) ? .found(local) : .notShipped
     }
 
@@ -235,6 +248,8 @@ private extension InstallHookCommand {
                 return "runner: \(commit) already snapshotted at \(installed.binding.snapshot.tildedPath), paired with \(binary)"
             case .unchanged:
                 return "runner: unchanged — \(binary) goes with \(commit)"
+            case let .unchangedAtCommit(checkoutCommit):
+                return "runner: unchanged — \(binary) goes with \(commit); \(describe(checkoutCommit)) changes no runner file"
             case let .kept(checkoutCommit):
                 // Kept, and said on the verdict: the checkout has moved since this binary was built from it, and
                 // pairing the two would put a runner from one commit beside a CLI from another (SimWalk#16).

@@ -157,4 +157,75 @@ struct ReadingOrderAuditTests {
         #expect(result.findings.isEmpty)
         #expect(result.examined == 1)
     }
+
+    private static func frame(_ x: Double, _ y: Double, _ width: Double, _ height: Double) -> AXNode.Frame {
+        AXNode.Frame(x: x, y: y, width: width, height: height)
+    }
+
+    /// A labelled table cell is one stop (SimWalk#236): the settings-table shape, a count right of the title and an icon whose label is a symbol name the cell's label lacks. Does not pin the cell's own frame being on screen.
+    @Test
+    func aLabelledCellWithoutAControlIsOneStop() {
+        let icon = AXNode(type: "Other", frame: Self.frame(36, 319.33, 24, 24), children: [
+            AXNode(type: "Image", frame: Self.frame(36, 319.33, 24, 24), label: "brightness higher"),
+        ])
+        let cell = AXNode(type: "Cell", frame: Self.frame(20, 292.33, 380, 78), label: "Today 17 unread", children: [
+            AXNode(type: "Other", frame: Self.frame(20, 292.33, 380, 78), children: [AXNode(type: "Other", frame: Self.frame(20, 292.33, 380, 78))]),
+            Self.text("Today", 68, 307.33, width: 265.33, height: 48),
+            Self.text("17", 343.33, 304.33, width: 40.67, height: 55),
+            icon,
+        ])
+
+        let result = Self.evaluate([Self.text("Title", 20, 100), cell, Self.text("Body", 20, 600)])
+
+        #expect(result.findings.isEmpty)
+        #expect(result.examined == 3)
+    }
+
+    /// The control for #236: the same cell holding an enabled switch is descended into, so a backward step inside it is still found.
+    @Test
+    func aLabelledCellHoldingAControlIsDescendedInto() {
+        let cell = AXNode(type: "Cell", frame: Self.frame(20, 300, 380, 40), label: "Today 17 unread", children: [
+            AXNode(type: "Switch", frame: Self.frame(330, 300, 50, 30), label: "Today"),
+            Self.text("Today", 68, 300, width: 100, height: 30),
+        ])
+
+        let result = Self.evaluate([cell])
+
+        #expect(result.findings.count == 1)
+    }
+
+    /// A tall paragraph with a picture beside it is not a line read out of order (SimWalk#237): the picture's 50 pt overlaps 50 of the paragraph's 284 pt. Frames are the tree's own.
+    @Test
+    func aPictureBesideATallParagraphIsNotOnTheParagraphsRow() {
+        let paragraph = AXNode(type: "StaticText", frame: Self.frame(94, 166, 276, 284.33), label: "Hi there! My name is Thomas.")
+        let photo = AXNode(type: "Image", frame: Self.frame(32, 234, 50, 50), label: "icon0")
+        let cell = AXNode(type: "Cell", frame: Self.frame(16, 151, 370, 314.33), children: [paragraph, photo])
+
+        let result = Self.evaluate([cell])
+
+        #expect(result.findings.isEmpty)
+        #expect(result.examined == 2)
+    }
+
+    /// The control for #237: two one-line elements on one row, the one on the left read second, are still a finding.
+    @Test
+    func twoOneLineElementsOnOneRowInTheWrongOrderAreStillFound() {
+        let overflow = AXNode(type: "Button", frame: Self.frame(300, 100, 60, 20), label: "overflow")
+
+        let result = Self.evaluate([overflow, Self.text("Featured article", 20, 100, width: 200)])
+
+        #expect(result.findings.count == 1)
+    }
+
+    /// A section title beside a taller menu button is one row, though their overlap is less than half the button (SimWalk#237): it does not pin a paragraph's exact cutoff.
+    @Test
+    func aTitleBesideATallerButtonIsStillOneRow() {
+        let title = AXNode(type: "StaticText", frame: AXNode.Frame(x: 16, y: 215, width: 200, height: 18), label: "Featured article")
+        let menu = AXNode(type: "Button", frame: AXNode.Frame(x: 336, y: 199, width: 50, height: 50), label: "overflow")
+        let screen = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874), children: [menu, title])
+
+        let result = ReadingOrderAudit().evaluate(screen, screenID: "home", stateSlug: "light")
+
+        #expect(result.findings.count == 1)
+    }
 }

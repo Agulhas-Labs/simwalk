@@ -82,7 +82,7 @@ resident server, which `testSession` hands over to: the launch, the read and han
 around the core's `LiveSessionLoop`), `StepPerformer.swift` (the one executor of a route step, made per step by
 `WalkRunner.follow`, so anything else that takes a step takes it with the code a walk uses),
 `TargetResolution.swift` (a step's label resolved and bound to the live element, over the core's `ScrollSearch` seek),
-`BarClearance.swift` (nudging a reached element out from under the bars) and `TabLocator.swift` (finding a `tab` step's tab),
+`BarClearance.swift` (nudging a reached element out from under the bars) and `TabLocator.swift` (finding a `tab` step's tab) and `StepPerformer+Replace.swift` (a `type` step's `replace` form) and `StepPerformer+Points.swift` (the `tapPoint` and `drag` gestures),
 all split out of `StepPerformer`,
 `AXTreeCapture.swift` (a snapshot turned into an `AXNode` tree) and `HostReachabilityProbe.swift` (that
 the runner can write host paths). A new one is added to `SimWalkRunner.xcodeproj` by hand or by
@@ -122,6 +122,7 @@ for ready), `LiveSessionStop.swift` (end, signal only a group-leading `xcodebuil
 liveness, signals) and `LiveSessionHostError.swift`, plus `RunnerCommand.swift` (a command line and its
 environment, which `RunnerInvocation.session` builds); the verbs are `Sources/SimWalkCLI/SessionCommand.swift`
 with `Session{Start,Read,Step,Save,End,List}Command.swift`. Stepping and saving live in the core: `ScreenHash.swift`,
+`PixelSignature.swift` (the screenshot grid a textless screen is hashed and compared by),
 `ScreenDelta.swift`, `LiveSessionStepper.swift` (the guard and the step, decided where `swift test` sees them),
 `LiveSessionStepAnswer.swift`, `LiveSessionStepQuery.swift`, `LiveSessionSave.swift` and `LiveSessionSaveError.swift`,
 with `ExclusiveFileLock.swift` (the `flock` a save's load-modify-write and a start's claim both run under);

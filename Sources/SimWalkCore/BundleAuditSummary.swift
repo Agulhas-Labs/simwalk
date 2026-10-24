@@ -128,10 +128,15 @@ public struct BundleAuditSummary {
         labelSections.first { $0.name == name }
     }
 
+    /// Each screen's 1-based position in the manifest, the first where an id repeats (SimWalk#219).
+    private var screenPositions: [String: Int] {
+        Dictionary(bundle.manifest.screens.enumerated().map { ($0.element.id, $0.offset + 1) }, uniquingKeysWith: { first, _ in first })
+    }
+
     private var labelSections: [LabelAuditSection] {
         report.rules.compactMap { name in
             guard let rule = name.labelRule, let result = report.labelResults[name] else { return nil }
-            return LabelAuditSection(name: name, noun: type(of: rule).findingNoun, examinedNoun: type(of: rule).examinedNoun, clause: type(of: rule).findingClause, result: result, captureCount: report.captureCount, notApplicable: report.notApplicable[name])
+            return LabelAuditSection(name: name, noun: type(of: rule).findingNoun, examinedNoun: type(of: rule).examinedNoun, clause: type(of: rule).findingClause, result: result, captureCount: report.captureCount, notApplicable: report.notApplicable[name], bundlePath: bundle.url.path, screenPositions: screenPositions)
         }
     }
 

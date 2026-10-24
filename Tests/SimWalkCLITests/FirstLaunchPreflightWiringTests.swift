@@ -99,12 +99,11 @@ struct FirstLaunchPreflightWiringTests {
                 shell: machine.shell,
                 pause: { _ in },
                 runner: { Machine.runner },
-                logFileURL: machine.logFile,
                 builds: machine.builds,
                 leases: machine.leases,
                 store: LiveSessionStore(directory: machine.directory.url.appendingPathComponent("sessions", isDirectory: true)),
                 processes: FakeSessionProcesses(),
-                environment: [:],
+                environment: [UsageLog.overrideVariable: machine.logFile.path],
                 firstLaunch: machine.check
             )
         }

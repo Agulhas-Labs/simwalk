@@ -106,7 +106,7 @@ private extension MCPToolInvocation {
     /// The arguments each `session` action takes; anything else beside `action` is refused by name rather than dropped.
     static let sessionArguments: [String: Set<String>] = [
         "start": ["app", "device", "lease", "state", "team", "runnerBundleId", "animations"],
-        "read": ["id", "match"],
+        "read": ["id", "match", "screenshot", "screenshotScale", "screenshotOf"],
         "step": ["id", "step", "guard"],
         "save": ["id", "screen", "into", "expect", "since"],
         "end": ["id"],
@@ -145,6 +145,9 @@ private extension MCPToolInvocation {
         switch action {
         case "read":
             vector += try option("--match", "match", arguments["match"], of: tool)
+                + flag("--screenshot", "screenshot", arguments["screenshot"], of: tool)
+                + whole("--screenshot-scale", "screenshotScale", arguments["screenshotScale"], of: tool)
+                + option("--screenshot-of", "screenshotOf", arguments["screenshotOf"], of: tool)
         case "step":
             guard let step = arguments["step"] else {
                 throw MCPError(message: "session step needs 'step', which was not given", kind: .inputRefused)

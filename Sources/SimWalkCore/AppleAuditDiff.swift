@@ -47,7 +47,7 @@ struct AppleAuditDiff {
                 remaining[key] = left - 1
                 return nil
             }
-            return ScreenDiff.AppleFlag(slug: slug, issue: finding.issue)
+            return ScreenDiff.AppleFlag(slug: slug, issue: finding.issue, elementsRead: finding.elementsRead)
         }
         return AppleAuditDiff(flags: flags, compared: true)
     }

@@ -25,5 +25,9 @@ extension WalkCommand {
         let animationsOffLibrary: String?
         /// Whether this walk may reboot the device (``DeviceSettle/mayReboot(_:requested:leased:)``), which also decides whether a setup is made on it.
         let owned: Bool
+        /// Stopped by the walk's interruption alone (a SIGINT or SIGTERM), whose handler gives the device back next: what the walk starts on the device after its last runner runs on a shell it stops, and a shard's failure, which stops the runners, never stops it.
+        let interruptionStop: ChildStop
+        /// The run's ``HandbackGate``, which the walk enters before it touches the device and leaves once it has handed it back, so an interruption waits for that handback; `nil` for a device the walk deletes afterwards, whose handback is moot.
+        let handbackGate: HandbackGate?
     }
 }

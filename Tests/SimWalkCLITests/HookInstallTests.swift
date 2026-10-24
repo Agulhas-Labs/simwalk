@@ -44,6 +44,19 @@ struct HookInstallTests {
         #expect(entries.first?.kind == .setupFailed)
     }
 
+    /// With no `claude` on PATH the server stays registered, and `uninstall-hook` says so as a qualification (exit 2) with the removal command instead of "nothing registered" at exit 0 (SimWalk#167).
+    @Test
+    func uninstallHookWithNoClaudeOnPathQualifiesAStillRegisteredServer() throws {
+        let scratch = try Scratch()
+        _ = try InstallHookCommand.answer(locations: scratch.locations(), executable: Self.executable, claude: scratch.claude(), guide: .found(scratch.guideSource), runnerSource: scratch.runnerSource)
+
+        let answer = try UninstallHookCommand.answer(locations: scratch.locations(), executable: Self.executable, claude: AbsentClaude())
+
+        #expect(answer.verdict.exitCode == 2)
+        #expect(answer.text.contains("still registered"))
+        #expect(answer.text.contains("claude mcp remove"))
+    }
+
     /// The same default, for `uninstall-hook`.
     @Test
     func anuninstallFailureWithNoMappedKindDefaultsToSetupFailed() throws {
@@ -87,6 +100,41 @@ struct HookInstallTests {
         #expect(rule == source)
         #expect(rule.hasPrefix("---\npaths:"))
         #expect(answer.text.contains("mcp: registered simwalk"))
+    }
+
+    /// With `CLAUDE_CONFIG_DIR` set, the install writes the settings and the rule under it and the uninstall takes them back from there (SimWalk#157).
+    @Test
+    func claudeConfigDirMovesWhereTheInstallWritesAndTheUninstallRemoves() throws {
+        let scratch = try Scratch()
+        let moved = scratch.directory.url.appendingPathComponent("moved-config", isDirectory: true)
+        let standard = HookLocations.standard(settings: nil, rule: nil, environment: ["HOME": scratch.directory.url.path, "CLAUDE_CONFIG_DIR": moved.path])
+        let locations = scratch.locations(settings: standard.settings, config: standard.config, rule: standard.rule)
+        let claude = RecordingClaude(config: standard.config)
+        let fileManager = FileManager.default
+
+        try #require(standard.settings.path == moved.appendingPathComponent("settings.json").path)
+        try #require(standard.rule.path == moved.appendingPathComponent("rules/simwalk.md").path)
+
+        _ = try InstallHookCommand.answer(locations: locations, executable: Self.executable, claude: claude, guide: .found(scratch.guideSource), runnerSource: scratch.runnerSource)
+
+        #expect(fileManager.fileExists(atPath: moved.appendingPathComponent("settings.json").path))
+        #expect(fileManager.fileExists(atPath: moved.appendingPathComponent("rules/simwalk.md").path))
+
+        _ = try UninstallHookCommand.answer(locations: locations, executable: Self.executable, claude: claude)
+
+        #expect(!fileManager.fileExists(atPath: moved.appendingPathComponent("rules/simwalk.md").path))
+        let remaining = try String(contentsOf: moved.appendingPathComponent("settings.json"), encoding: .utf8)
+        #expect(!remaining.contains("PreToolUse"))
+    }
+
+    /// Without `CLAUDE_CONFIG_DIR`, the settings and the rule are under the `.claude` of the home the environment names, as before (SimWalk#157).
+    @Test
+    func withoutClaudeConfigDirThePathsAreUnderTheHomesDotClaude() {
+        let standard = HookLocations.standard(settings: nil, rule: nil, environment: ["HOME": "/scratch/home"])
+
+        #expect(standard.settings.path == "/scratch/home/.claude/settings.json")
+        #expect(standard.rule.path == "/scratch/home/.claude/rules/simwalk.md")
+        #expect(standard.config.path == "/scratch/home/.claude.json")
     }
 
     /// **The removal has to come first and `--scope` has to precede the `--`.** `claude mcp add` fails outright on a name already present, so without the removals an upgrade leaves the *old* binary registered while reporting success; and `--scope` after the `--` is passed through to the binary as an argument, registering at the default scope under a command line that reads as though it asked for user scope.
@@ -197,7 +245,7 @@ struct HookInstallTests {
             locations: scratch.locations(),
             executable: Self.executable,
             claude: scratch.claude(),
-            guide: InstallHookCommand.locateGuide(explicit: "/nowhere/SimWalk.md", beside: Self.executable),
+            guide: InstallHookCommand.locateGuide(explicit: "/nowhere/SimWalk.md", beside: Self.executable, checkout: nil, workingDirectory: scratch.directory.url),
             runnerSource: scratch.runnerSource
         )
 
@@ -542,6 +590,7 @@ struct HookInstallTests {
         let scratch = try Scratch()
         let moved = "d00d0123456789d00d0123456789d00d01234567"
         _ = try Self.install(scratch)
+        try Data("// the runner, edited\n".utf8).write(to: scratch.checkout.appendingPathComponent(Self.runnerFile))
 
         let kept = try Self.install(scratch, runnerSource: scratch.runnerSource(at: moved))
         let repointed = try Self.install(scratch, runnerSource: scratch.runnerSource(at: moved, repoint: true))
@@ -552,6 +601,80 @@ struct HookInstallTests {
         #expect(kept.text.contains("Rebuild and install"))
         #expect(repointed.text.contains("runner: repointed"))
         #expect(scratch.runner.binding(forBinary: Self.binaryHash)?.commit == moved)
+    }
+
+    /// A rebuild at a new commit that touched no runner file is unchanged, not kept: the verdict is clean and the line names both commits.
+    @Test
+    func areRunFromAMovedCheckoutWithTheSameRunnerFilesIsUnchanged() throws {
+        let scratch = try Scratch()
+        let moved = "d00d0123456789d00d0123456789d00d01234567"
+        _ = try Self.install(scratch)
+
+        let again = try Self.install(scratch, runnerSource: scratch.runnerSource(at: moved))
+
+        #expect(!again.verdict.isQualified)
+        #expect(again.text.contains("runner: unchanged — this binary (sha256 \(ShortHash.of(Self.binaryHash))) goes with \(ShortHash.of(Self.commit)); d00d0123 changes no runner file"))
+        #expect(!again.text.contains("runner: kept"))
+        #expect(scratch.runner.binding(forBinary: Self.binaryHash)?.commit == Self.commit)
+    }
+
+    /// Writes `text` to `file` in the scratch checkout, making its folder.
+    private static func write(_ text: String, to file: String, in scratch: Scratch) throws {
+        let url = scratch.checkout.appendingPathComponent(file)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: url)
+    }
+
+    /// A moved commit whose only change is a file outside the runner's build inputs is unchanged: a docs or test change cannot change the runner.
+    @Test
+    func aMovedCommitChangingOnlyAFileOutsideTheRunnerInputsIsUnchanged() throws {
+        let scratch = try Scratch()
+        let moved = "d00d0123456789d00d0123456789d00d01234567"
+        let outside = ["Docs/x.md", "Tests/y.swift"]
+        try Self.write("one\n", to: outside[0], in: scratch)
+        try Self.write("one\n", to: outside[1], in: scratch)
+        _ = try Self.install(scratch, runnerSource: scratch.runnerSource(at: Self.commit, alsoListing: outside))
+        try Self.write("two\n", to: outside[0], in: scratch)
+        try Self.write("two\n", to: outside[1], in: scratch)
+
+        let again = try Self.install(scratch, runnerSource: scratch.runnerSource(at: moved, alsoListing: outside))
+
+        #expect(!again.verdict.isQualified)
+        #expect(again.text.contains("runner: unchanged"))
+        #expect(!again.text.contains("runner: kept"))
+        #expect(scratch.runner.binding(forBinary: Self.binaryHash)?.commit == Self.commit)
+    }
+
+    /// A moved commit that changes a file under `Runner/` or `Sources/` is kept: both are inputs of the runner build.
+    @Test(arguments: ["Runner/SimWalkRunner/extra.swift", "Sources/SimWalkCore/extra.swift"])
+    func aMovedCommitChangingARunnerInputIsKept(file: String) throws {
+        let scratch = try Scratch()
+        let moved = "d00d0123456789d00d0123456789d00d01234567"
+        try Self.write("one\n", to: file, in: scratch)
+        _ = try Self.install(scratch, runnerSource: scratch.runnerSource(at: Self.commit, alsoListing: [file]))
+        try Self.write("two\n", to: file, in: scratch)
+
+        let again = try Self.install(scratch, runnerSource: scratch.runnerSource(at: moved, alsoListing: [file]))
+
+        #expect(again.verdict.isQualified)
+        #expect(again.text.contains("runner: kept"))
+        #expect(!again.text.contains("runner: unchanged"))
+    }
+
+    /// A paired snapshot whose runner input was altered on disk is kept even when the checkout still holds the original content: the snapshot is what a walk builds.
+    @Test
+    func aPairedSnapshotWithADamagedRunnerInputIsKeptNotUnchanged() throws {
+        let scratch = try Scratch()
+        let moved = "d00d0123456789d00d0123456789d00d01234567"
+        _ = try Self.install(scratch)
+        let binding = try #require(scratch.runner.binding(forBinary: Self.binaryHash))
+        try Data("// damaged on disk\n".utf8).write(to: URL(fileURLWithPath: binding.snapshot).appendingPathComponent(Self.runnerFile))
+
+        let again = try Self.install(scratch, runnerSource: scratch.runnerSource(at: moved))
+
+        #expect(again.verdict.isQualified)
+        #expect(again.text.contains("runner: kept"))
+        #expect(!again.text.contains("runner: unchanged"))
     }
 
     /// A runner that cannot be snapshotted leaves the rest of the install standing, and says on the verdict that walks from this binary will refuse.
@@ -587,6 +710,24 @@ struct HookInstallTests {
         #expect(scratch.runner.binding(forBinary: Self.binaryHash)?.commit == String(repeating: "c0", count: 20))
     }
 
+    /// A shipped tree restamped at a new commit with the same runner inputs is unchanged, not snapshotted again: the listed hashes decide, and the binding stays the first install's (SimWalk#143).
+    @Test
+    func aShippedTreeRestampedAtANewCommitWithTheSameRunnerInputsIsUnchangedAtThatCommit() throws {
+        let scratch = try Scratch()
+        let first = String(repeating: "c0", count: 20)
+        let second = String(repeating: "d1", count: 20)
+        let fixture = try ShippedTreeFixture(in: scratch.directory, commit: first, stampedFor: Self.binaryHash)
+        let installed = try scratch.runner.install(shipped: ShippedRunner.find(besideExecutable: fixture.binary, binaryHash: Self.binaryHash), binaryHash: Self.binaryHash)
+        try fixture.writeStamp("RUNNER_COMMIT", "\(second)\n")
+        let restamped = try ShippedRunner.find(besideExecutable: fixture.binary, binaryHash: Self.binaryHash)
+
+        let again = try scratch.runner.install(shipped: restamped, binaryHash: Self.binaryHash)
+
+        #expect(again.outcome == .unchangedAtCommit(checkoutCommit: second))
+        #expect(again.binding == installed.binding)
+        #expect(scratch.runner.binding(forBinary: Self.binaryHash)?.commit == first)
+    }
+
     /// A packaged binary whose shipped runner has moved on is kept on the runner it was installed with, and the advice is `--repoint-runner` — a package has nothing to rebuild.
     @Test
     func apackagedKeptRunnerNamesRepointRunnerNotARebuild() throws {
@@ -594,6 +735,8 @@ struct HookInstallTests {
         let first = try ShippedTreeFixture(in: scratch.directory, commit: String(repeating: "c0", count: 20), stampedFor: Self.binaryHash)
         let later = try TemporaryDirectory()
         let second = try ShippedTreeFixture(in: later, commit: String(repeating: "d1", count: 20), stampedFor: Self.binaryHash)
+        try Data("// the shipped runner, later\n".utf8).write(to: second.tree.appendingPathComponent(Self.runnerFile))
+        try second.writeManifest()
         _ = try Self.install(scratch, runnerSource: Self.packaged(executable: first.binary))
 
         let kept = try Self.install(scratch, runnerSource: Self.packaged(executable: second.binary))
@@ -632,13 +775,67 @@ struct HookInstallTests {
         #expect(answer.text.contains("runner: not installed — no \(ShippedRunner.directory(besideExecutable: binary).path) beside the binary; this build has no checkout (packaged)"))
     }
 
+    /// The guide of the checkout the binary was compiled from is found even where nothing is shipped beside the binary and the working directory is elsewhere.
+    @Test
+    func theGuideIsFoundInTheCheckoutTheBinaryWasCompiledFrom() throws {
+        let scratch = try Scratch()
+        let elsewhere = scratch.directory.url.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        let binary = scratch.directory.url.appendingPathComponent("bin/simwalk")
+        try FileManager.default.createDirectory(at: binary.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("# checkout guide\n".utf8).write(to: scratch.checkout.appendingPathComponent("SimWalk.md"))
+
+        let located = InstallHookCommand.locateGuide(explicit: nil, beside: binary.path, checkout: scratch.checkout, workingDirectory: elsewhere)
+
+        guard case let .found(url) = located else {
+            Issue.record("no guide found: \(located)")
+            return
+        }
+
+        #expect(url.standardizedFileURL.path == scratch.checkout.appendingPathComponent("SimWalk.md").standardizedFileURL.path)
+    }
+
+    /// The checkout's guide is the one installed when a shipped tree beside the binary holds an older copy.
+    @Test
+    func theCheckoutsGuideWinsOverTheShippedTree() throws {
+        let scratch = try Scratch()
+        let fixture = try ShippedTreeFixture(in: scratch.directory, commit: String(repeating: "c1", count: 20), stampedFor: Self.binaryHash)
+        try Data("# checkout guide\n".utf8).write(to: scratch.checkout.appendingPathComponent("SimWalk.md"))
+
+        let located = InstallHookCommand.locateGuide(explicit: nil, beside: fixture.binary.path, checkout: scratch.checkout, workingDirectory: scratch.directory.url)
+
+        guard case let .found(url) = located else {
+            Issue.record("no guide found: \(located)")
+            return
+        }
+
+        #expect(url.standardizedFileURL.path == scratch.checkout.appendingPathComponent("SimWalk.md").standardizedFileURL.path)
+    }
+
+    /// A packaged build, which has no checkout, takes the shipped tree's guide ahead of one in the working directory.
+    @Test
+    func aPackagedBuildWithNoCheckoutTakesTheShippedGuide() throws {
+        let scratch = try Scratch()
+        let fixture = try ShippedTreeFixture(in: scratch.directory, commit: String(repeating: "c2", count: 20), stampedFor: Self.binaryHash)
+        try Data("# checkout guide\n".utf8).write(to: scratch.checkout.appendingPathComponent("SimWalk.md"))
+
+        let located = InstallHookCommand.locateGuide(explicit: nil, beside: fixture.binary.path, checkout: nil, workingDirectory: scratch.checkout)
+
+        guard case let .found(url) = located else {
+            Issue.record("no guide found: \(located)")
+            return
+        }
+
+        #expect(url.standardizedFileURL.path == fixture.tree.appendingPathComponent("SimWalk.md").standardizedFileURL.path)
+    }
+
     /// The guide is found in the tree a release ships beside the binary, after the directory of the binary itself.
     @Test
     func theGuideIsFoundInTheShippedTree() throws {
         let scratch = try Scratch()
         let fixture = try ShippedTreeFixture(in: scratch.directory, commit: String(repeating: "c0", count: 20), stampedFor: Self.binaryHash)
 
-        let located = InstallHookCommand.locateGuide(explicit: nil, beside: fixture.binary.path)
+        let located = InstallHookCommand.locateGuide(explicit: nil, beside: fixture.binary.path, checkout: nil, workingDirectory: scratch.directory.url)
 
         guard case let .found(url) = located else {
             Issue.record("no guide found: \(located)")
@@ -742,7 +939,7 @@ struct HookInstallTests {
         let fixture = try ShippedTreeFixture(in: scratch, commit: String(repeating: "c0", count: 20), stampedFor: Self.binaryHash)
         let link = try fixture.link(in: scratch)
 
-        let located = InstallHookCommand.locateGuide(explicit: nil, beside: link.path)
+        let located = InstallHookCommand.locateGuide(explicit: nil, beside: link.path, checkout: nil, workingDirectory: scratch.url)
 
         guard case let .found(url) = located else {
             Issue.record("no guide found: \(located)")
@@ -855,12 +1052,13 @@ extension HookInstallTests {
         }
 
         /// The same checkout standing at `commit`, as a re-run from a checkout that has moved would find it.
-        func runnerSource(at commit: String, repoint: Bool = false) -> RunnerSnapshotSource {
-            RunnerSnapshotSource(checkout: checkout, binaryHash: HookInstallTests.binaryHash, run: { _, arguments in
+        func runnerSource(at commit: String, repoint: Bool = false, alsoListing extra: [String] = []) -> RunnerSnapshotSource {
+            let listed = [HookInstallTests.runnerFile] + extra
+            return RunnerSnapshotSource(checkout: checkout, binaryHash: HookInstallTests.binaryHash, run: { _, arguments in
                 let output = switch Array(arguments.dropFirst(2)) {
                 case ["rev-parse", "HEAD"]: "\(commit)\n"
-                case ["ls-files", "-v"]: "H \(HookInstallTests.runnerFile)\n"
-                case _ where arguments.contains("ls-files"): "\(HookInstallTests.runnerFile)\0"
+                case ["ls-files", "-v"]: listed.map { "H \($0)\n" }.joined()
+                case _ where arguments.contains("ls-files"): listed.map { "\($0)\0" }.joined()
                 default: ""
                 }
                 return Shell.Result(status: 0, standardOutput: output, standardError: "")
@@ -915,11 +1113,11 @@ extension HookInstallTests {
         }
 
         /// `sift: false` is the machine with no sift on it, where the status line takes Claude Code's own slot.
-        func locations(sift: Bool = true) -> HookLocations {
+        func locations(sift: Bool = true, settings: URL? = nil, config: URL? = nil, rule: URL? = nil) -> HookLocations {
             HookLocations(
-                settings: settings,
-                config: config,
-                rule: guide,
+                settings: settings ?? self.settings,
+                config: config ?? self.config,
+                rule: rule ?? guide,
                 segments: sift ? segments : nil,
                 visibility: StatuslineVisibility(cacheDirectory: directory.url.appendingPathComponent("simwalk/statusline")),
                 runner: runner,

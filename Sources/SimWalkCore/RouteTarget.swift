@@ -19,11 +19,11 @@ import RegexBuilder
 ///
 /// **A lead-in to a label's data is the last resort (SimWalk#9).** `'Sail, 12 August'` against `'Sail, 12 August 14:50 · 3.43 km, 12 min'` has no comma between the date and the time it runs into. So when nothing on screen matches in any of the ways above — not a control, not content, not even chrome — a label that *starts* with the step's text is considered, and only if what follows is data: a run of separators (whitespace or a `·`) and then a decimal digit. `'Heart Rate'` never reaches `'Heart Rate Variability'`, which is a different named thing, and `'Distance 3'` never reaches `'Distance 3.43 km'`, whose number it cuts in half. A lead-in never takes a step away from an element it used to reach: it is consulted only where a screen's answer used to be *nothing*, and acted on only at a moment the step used to report nothing — once the lookup has run out with nothing literal found (`RouteTargetTracker`). It is also held to more than the other matches, because it is looser than they are: a tie refuses and names what it found rather than guessing which of two dates was meant — an element and anything drawn inside it with the same label (a wrapper and its text, a cell and the button inset in it) counting once.
 public struct RouteTarget {
-    /// Every element under `tree` that `label` matches in any tier — literally (its whole label, its identifier, a leading component), with its no-break spaces read as spaces, by a `{n}` pattern, or as a lead-in to its data — each in the first way that applies, the root itself excluded, as a live query of its descendants excludes it, in tree order.
+    /// Every element under `tree` that `label` matches in any tier — literally (its whole label, its identifier, a leading component), with its no-break spaces read as spaces, by a `{n}` pattern, or as a lead-in to its data, or, for a `type` step only, as a text field's placeholder — each in the first way that applies, the root itself excluded, as a live query of its descendants excludes it, in tree order.
     public static func candidates(labelled label: String, in tree: AXNode, reaching reach: Reach = .control) -> [Candidate] {
         let pattern = pattern(for: label)
         return collect(in: tree, reaching: reach) { node in
-            match(of: label, on: node, pattern: pattern)
+            match(of: label, on: node, pattern: pattern, reaching: reach)
         }
     }
 
@@ -40,7 +40,7 @@ public struct RouteTarget {
             return .ambiguous(tier)
         }
         let top = tier.filter { $0.rank == best }
-        guard best.match == .prefix else {
+        guard best.match == .prefix || best.match == .placeholder else {
             return top.first.map { .chosen($0, among: tier) } ?? .none
         }
         let spots = distinctSpots(top)
@@ -73,7 +73,7 @@ public struct RouteTarget {
 
     /// Whether a step labelled `label` would match `node` in any tier — what `ControlCoverage` counts as a route covering a control, so coverage and the runner agree on what a label reaches.
     static func matches(_ label: String, _ node: AXNode) -> Bool {
-        match(of: label, on: node, pattern: pattern(for: label)) != nil
+        match(of: label, on: node, pattern: pattern(for: label), reaching: .control) != nil
     }
 
     /// Whether `text` is `label` as a whole, with no-break spaces read as spaces on both sides or, where `label` holds `{n}`, a number in its place.
@@ -87,7 +87,7 @@ public struct RouteTarget {
         return (try? pattern.wholeMatch(in: text)) != nil
     }
 
-    private static func match(of label: String, on node: AXNode, pattern: Regex<Substring>?) -> Match? {
+    private static func match(of label: String, on node: AXNode, pattern: Regex<Substring>?, reaching reach: Reach) -> Match? {
         if node.label == label {
             return .label
         }
@@ -107,7 +107,10 @@ public struct RouteTarget {
         if let pattern, let nodeLabel = node.label, (try? pattern.wholeMatch(in: nodeLabel)) != nil {
             return .pattern
         }
-        return isLeadIn(label, to: node) ? .prefix : nil
+        if isLeadIn(label, to: node) {
+            return .prefix
+        }
+        return reach == .textEntry && !label.isEmpty && node.placeholder == label ? .placeholder : nil
     }
 
     /// `text` with each no-break (U+00A0) and narrow no-break (U+202F) space read as an ordinary space — what a `.spacing` match compares on both sides (SimWalk#99).
@@ -178,7 +181,7 @@ public struct RouteTarget {
     /// One candidate per element on screen, the first in tree order (the outermost) standing for the rest.
     ///
     /// An element and whatever is drawn inside it carrying the same label — a wrapper and its text, a table cell and the button inset in it — are one thing to tap, and so are two elements with one label at one frame. Only candidates that already rank equally are folded, so a control inside a wrapper of lesser rank is never folded away into it.
-    private static func distinctSpots(_ candidates: [Candidate]) -> [Candidate] {
+    static func distinctSpots(_ candidates: [Candidate]) -> [Candidate] {
         candidates.reduce(into: []) { spots, candidate in
             let isSameElement = spots.contains { spot in
                 spot.node.label == candidate.node.label
@@ -199,7 +202,7 @@ public struct RouteTarget {
     static let controlTypes: Set<String> = ["Button", "Cell", "Link", "Switch"]
 
     /// Element types that take typed text — the only ones a `type` step considers, so it never lands on the container a search field is drawn inside.
-    static let textEntryTypes: Set<String> = ["SearchField", "TextField", "SecureTextField", "TextView"]
+    public static let textEntryTypes: Set<String> = ["SearchField", "TextField", "SecureTextField", "TextView"]
 
     /// Element types that frame a screen rather than sit in it; a tap on one navigates nowhere.
     static let chromeTypes: Set<String> = ["NavigationBar", "TabBar", "Toolbar", "Window", "Application"]
@@ -266,6 +269,7 @@ public extension RouteTarget {
             let named = switch match {
             case .identifier: "identified '\(node.identifier ?? "")'"
             case .spacing: "labelled '\(RouteTarget.readingSpacesAsSpaces(node.label ?? ""))' (its label differs from the step only in a no-break space)"
+            case .placeholder: "with the placeholder '\(node.placeholder ?? "")'"
             default: "labelled '\(node.label ?? "")'"
             }
             let qualifier = if let insideBar {
@@ -278,13 +282,14 @@ public extension RouteTarget {
             return "a \(node.type) \(named)\(qualifier)"
         }
 
-        /// Whether a live element read while scrolling towards this one is still this one: the label the snapshot recorded — or its identifier, for a match on that — at the same width, height and horizontal position.
+        /// Whether a live element read while scrolling towards this one is still this one: the label the snapshot recorded — or its identifier, for a match on that — at the same width and height, wherever it now sits.
         ///
-        /// **A bound element is not a fixed element.** The runner binds by an index among a query's matches, and every read resolves that index again; once a lazy list recycles the rows above, the same index can name a later row. A swipe moves an element up or down the screen and nothing else, so a scroll that finds its element's label changed, or its frame changed in any other way, has lost it — and says so rather than landing on whatever the index names now.
+        /// **A bound element is not a fixed element.** The runner binds by an index among a query's matches, and every read resolves that index again; once a lazy list recycles the rows above, the same index can name a later row. So a scroll that finds its element's label or size changed has lost it — and says so rather than landing on whatever the index names now.
+        ///
+        /// **The origin is not compared, horizontal or vertical** (SimWalk#241). A swipe moves an element up or down, and a table that builds its rows before they scroll into view reports one not yet laid out at a placeholder origin: a settings sheet's off-screen row read at `0,117`, its scroll view's corner, and at `32,…` once on screen, the same `308×52` both times. Holding the horizontal position lost every such row on the first swipe, where a `tap` — bound once and never read again — reached it.
         public func isStill(label: String?, identifier: String?, frame: AXNode.Frame) -> Bool {
             let named = match == .identifier ? identifier == node.identifier : label == node.label
             return named
-                && abs(frame.x - node.frame.x) < 0.5
                 && abs(frame.width - node.frame.width) < 0.5
                 && abs(frame.height - node.frame.height) < 0.5
         }
@@ -360,8 +365,10 @@ public extension RouteTarget {
         case pattern
         /// The start of the label, running into its data — the last resort, when nothing matches in any other way (SimWalk#9): `'Sail, 12 August'` against `'Sail, 12 August 14:50 · 3.43 km, 12 min'`.
         case prefix
+        /// The text field's placeholder, whole — the last resort of a `type` step, and only a `type` step's (SimWalk#212): a filled SwiftUI `TextField("Nickname", text: $nickname)` exposes its title as nothing but the placeholder, so no label or identifier names it.
+        case placeholder
 
-        /// Which tier the match is in: what the step says literally, then the same with its no-break spaces read as spaces, then a `{n}` pattern, then a lead-in to the label's data — ranked above an element's kind, so a looser match on a control never beats a stricter one on content.
+        /// Which tier the match is in: what the step says literally, then the same with its no-break spaces read as spaces, then a `{n}` pattern, then a lead-in to the label's data, then a text field's placeholder (a `type` step's only) — ranked above an element's kind, so a looser match on a control never beats a stricter one on content.
         ///
         /// A later tier is consulted only when nothing on screen matched in an earlier one (SimWalk#9, SimWalk#13, SimWalk#99): the spacing match, the lead-in and the pattern each exist to reach a label nothing else can, and neither may take a step away from an element it reached before them. A label that literally reads `'Week {n}'` is the placeholder's case of that.
         fileprivate var tier: Int {
@@ -370,6 +377,7 @@ public extension RouteTarget {
             case .spacing: 1
             case .pattern: 2
             case .prefix: 3
+            case .placeholder: 4
             }
         }
 
@@ -378,7 +386,7 @@ public extension RouteTarget {
         /// A pattern and a lead-in are each the only match in their tier, and a spacing match — a whole label or a leading component — shares its tier only with its own kind, so each is only ever ranked against its own kind.
         fileprivate var precedence: Int {
             switch self {
-            case .label, .identifier, .spacing, .pattern, .prefix: 0
+            case .label, .identifier, .spacing, .pattern, .prefix, .placeholder: 0
             case .leadingComponent: 1
             }
         }
@@ -389,7 +397,7 @@ public extension RouteTarget {
         fileprivate var isLivePredicate: Bool {
             switch self {
             case .label, .identifier, .leadingComponent: true
-            case .spacing, .pattern, .prefix: false
+            case .spacing, .pattern, .prefix, .placeholder: false
             }
         }
     }
@@ -450,10 +458,16 @@ public extension RouteTarget {
         ///
         /// A control inside a bar — `Edit`, `Done` — ranks below the screen's own controls so a row still loading can beat it; a row still loading also changes the tree, so once the tree has been still for as long as the screen needs to settle, nothing is left to arrive. A `scrollTo` extends the same to a bar's control or chrome, the literal matches it does not settle on.
         ///
-        /// **Literal matches only.** A spacing match, a `{n}` pattern or a lead-in is what a step found where the lookup it replaced found nothing, and that lookup went on reading for the whole of it; taking one early — on stillness, or on the budget — would act where a literal match arriving later used to be found. So none qualifies, and none does nothing.
+        /// **Literal matches only.** A spacing match, a `{n}` pattern or a lead-in is what a step found where the lookup it replaced found nothing, and that lookup went on reading for the whole of it; taking one early — on stillness, or on the budget — would act where a literal match arriving later used to be found. So none of those qualifies, and none does nothing.
+        ///
+        /// **A text field's placeholder does** (SimWalk#212), and differs from a pattern or a lead-in in three ways. A placeholder is the name the app gave the field, not a guess at one. Once the screen has held still for the quiet period nothing is left to arrive. And before this tier a step reaching such a field was UNREACHABLE, so the only step it can change is one whose labelled field arrives after the screen has already held still. It still does not start the budget (`matchedLiterally`) and never settles on the first read (`isSettled`).
         public var acceptsOnceStill: Bool {
-            guard case let .chosen(candidate, _) = self, candidate.match.tier == 0 else { return false }
-            return candidate.isBarControl || candidate.reach == .anything
+            guard case let .chosen(candidate, _) = self else { return false }
+            return switch candidate.match {
+            case .placeholder: true
+            case .label, .identifier, .leadingComponent: candidate.isBarControl || candidate.reach == .anything
+            case .spacing, .pattern, .prefix: false
+            }
         }
 
         /// What a bind that missed this choice's element may do with `tree`, one fresh read of the screen: bind the same element again, look again for a different one, or report the miss.

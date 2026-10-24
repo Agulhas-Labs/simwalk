@@ -20,16 +20,44 @@ public struct AppleAuditRecord: Codable, Equatable, Sendable {
     public var error: String?
     /// Every issue Apple reported, in the order it reported them.
     public var issues: [Issue]
+    /// `true` when the runner read each issue's element after the audit and recorded a failure as ``Issue/elementUnreadable``; `nil` in a record written before it did, where an issue with neither field may have lost its element.
+    public var elementsRead: Bool?
 
-    public init(milliseconds: Int, error: String? = nil, issues: [Issue] = []) {
+    public init(milliseconds: Int, error: String? = nil, issues: [Issue] = [], elementsRead: Bool? = nil) {
         self.milliseconds = milliseconds
         self.error = error
         self.issues = issues
+        self.elementsRead = elementsRead
     }
 
     /// Whether the call threw rather than returned.
     public var failed: Bool {
         error != nil
+    }
+
+    /// The domain XCTest's accessibility audit throws its errors in.
+    public static var auditErrorDomain: String {
+        "com.apple.xcode.xctest.accessibilityAudit"
+    }
+
+    /// The code of the audit's own timeout ("Audit failed to complete in time").
+    public static let timedOutCode = -56
+
+    /// Whether the call threw XCTest's audit timeout, read from the error's domain and code, never its message.
+    ///
+    /// **A timed-out audit is not stopped by the throw**: the simulator's `testmanagerd` goes on computing it, about a core each, until it stops (SimWalk#173).
+    public var timedOut: Bool {
+        guard let error, let thrown = Self.domainAndCode(of: error) else { return false }
+        return thrown.domain == Self.auditErrorDomain && thrown.code == Self.timedOutCode
+    }
+
+    /// The domain and code an `NSError` description names (`Error Domain=<domain> Code=<code> …`), or `nil` for text that names neither.
+    static func domainAndCode(of description: String) -> (domain: String, code: Int)? {
+        guard let opening = description.range(of: "Error Domain="),
+              let codeKey = description.range(of: " Code=", range: opening.upperBound ..< description.endIndex) else { return nil }
+        let digits = description[codeKey.upperBound...].prefix { $0 == "-" || ($0.isASCII && $0.isNumber) }
+        guard let code = Int(digits) else { return nil }
+        return (String(description[opening.upperBound ..< codeKey.lowerBound]), code)
     }
 
     /// The encoding the runner files: sorted keys, slashes unescaped.
@@ -54,12 +82,17 @@ public extension AppleAuditRecord {
         public var detailedDescription: String
         /// The element Apple names, where it names one.
         public var element: Element?
+        /// Why the element Apple named could not be read after the audit, as one line; `nil` when it was read or when Apple named none.
+        ///
+        /// An issue without ``element`` and without this is one Apple named no element for when the record's ``AppleAuditRecord/elementsRead`` is set, and of unknown cause when it is not.
+        public var elementUnreadable: String?
 
-        public init(type: String, compactDescription: String, detailedDescription: String, element: Element? = nil) {
+        public init(type: String, compactDescription: String, detailedDescription: String, element: Element? = nil, elementUnreadable: String? = nil) {
             self.type = type
             self.compactDescription = compactDescription
             self.detailedDescription = detailedDescription
             self.element = element
+            self.elementUnreadable = elementUnreadable
         }
     }
 

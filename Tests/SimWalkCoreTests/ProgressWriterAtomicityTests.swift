@@ -21,7 +21,11 @@ struct ProgressWriterAtomicityTests {
         DispatchQueue.global().async(group: reading) {
             Self.readUntilStopped(url, into: tally)
         }
-        for index in 1 ... 400 {
+        // At least 400 writes, and on until the reader has decoded one (for up to thirty seconds), so a reader thread a loaded machine starves still puts the claim to the test (SimWalk#183).
+        let deadline = Date().addingTimeInterval(30)
+        var index = 0
+        while index < 400 || (tally.decoded == 0 && Date() < deadline) {
+            index += 1
             writer.commit { $0.lastScreenshotPath = String(repeating: "\(index % 10)", count: 200_000 + index) }
         }
         tally.stop()

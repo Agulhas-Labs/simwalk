@@ -21,6 +21,62 @@ public struct TypedTextLanding {
         return after?.contains(text) == true
     }
 
+    /// How many delete keystrokes clear a field reading `value`: one per character it reads, whether or not the value is also its placeholder (SimWalk#198).
+    ///
+    /// **A real value can equal the placeholder** (a number field holding `0` over the placeholder `0`), so the placeholder is not a reason to send none; the extra keystrokes an empty field reading its placeholder receives delete nothing.
+    public static func deleteKeystrokes(value: String?) -> Int {
+        value?.count ?? 0
+    }
+
+    /// What a field still holds that a delete should have removed: nothing when it reads empty or as its placeholder (SimWalk#198).
+    ///
+    /// **An empty field reports its placeholder as its value**, so a read equal to the placeholder is taken as empty here, where deleting has already been tried in full and a retry could not tell the two apart.
+    public static func remainingText(value: String?, placeholder: String?) -> String {
+        guard let value, !value.isEmpty, value != placeholder else { return "" }
+        return value
+    }
+
+    /// How many times a `replace` taps the trailing edge and deletes before it gives up on text that keeps coming off (SimWalk#214).
+    ///
+    /// A field whose text runs past its width puts the cursor at the visible end, so each pass removes about a field's width; six passes clear roughly six widths, and a bound keeps a field that regrows its text from looping.
+    public static let trailingEdgePassLimit = 6
+
+    /// Whether another trailing-edge delete pass is worth making after pass number `pass` (1-based), given what the field held either side of it (SimWalk#214).
+    ///
+    /// **Progress is the licence**: a pass that changed the field's text moved the cursor's reach on, so another may reach more (a masked field swaps characters for placeholders and keeps its length, SimWalk#219); a pass that changed nothing will change nothing again, and what is left sits on the other side of the cursor (the leading-edge pass). Nothing remaining means nothing to retry, and the bound keeps a field that regrows its text from looping.
+    public static func shouldRetryTrailingEdge(before: String, after: String, pass: Int) -> Bool {
+        !after.isEmpty && after != before && pass < trailingEdgePassLimit
+    }
+
+    /// Why a `replace` that deleted its field's text found some left, or `nil` when none was (SimWalk#198).
+    ///
+    /// Named for what remained, so the agent sees whether the cursor or the field is the problem.
+    public static func stillHeldRefusal(label: String, remaining: String) -> String? {
+        remaining.isEmpty ? nil : "'\(label)' still held '\(remaining)' after its text was deleted"
+    }
+
+    /// Why a `replace` did not leave the field holding `text`, or `nil` when it did (SimWalk#198).
+    ///
+    /// **Verified, not trusted**: the read-back is compared with the text, and the reason names the value found so the agent sees what the field holds. An empty `text` is satisfied by an empty field, which reads back empty, absent or as its placeholder; a non-empty `text` that equals the placeholder lands when the field reads it. A field whose keystrokes did not land would read the placeholder too, so that one case trusts the typing: the alternative refuses every replacement that happens to equal the placeholder.
+    public static func replaceRefusal(label: String, text: String, after: String?, placeholder: String?) -> String? {
+        if text.isEmpty {
+            guard let after, !after.isEmpty, after != placeholder else { return nil }
+        } else if after == text {
+            return nil
+        }
+        return "'\(label)' holds '\(remainingText(value: after, placeholder: placeholder))' after replacing its text"
+    }
+
+    /// The reason a `replace` stops when a tap left its field without keyboard focus, before any keystroke.
+    public static func unfocusedReplaceRefusal(label: String) -> String {
+        "'\(label)' did not take keyboard focus when tapped, so its text was not replaced"
+    }
+
+    /// Why a `replace` into a secure field is refused: its value reads back as bullets, so the replacement cannot be verified (SimWalk#198).
+    public static func secureReplaceRefusal(label: String) -> String {
+        "'\(label)' is a secure field, whose value cannot be read back, so replace is refused"
+    }
+
     /// Whether a tap on a keyboard key reached the field, judged from the focused field's own value either side of the tap (SimWalk#94).
     ///
     /// **A keystroke changes a value, and a screen's identity is deliberately blind to values** (`ScreenIdentity`), so a digit typed on a number pad leaves the screen "unchanged" however faithfully it landed. The evidence for a key is the field that has keyboard focus: a value that is not what it was. A delete key shrinking it counts, and so does a secure field's bullets changing; nothing is compared against the key's label, because a key's label is not what the field carries (a shift key types nothing, and a delete key types `Delete`).
@@ -52,6 +108,6 @@ public struct TypedTextLanding {
             return true
         }
         guard node.type == "Button" else { return false }
-        return tree.flattened.contains { $0.type == "Keyboard" && $0.flattened.contains(node) }
+        return tree.flattened.contains { ScreenIdentifier.isKeyboard($0) && $0.flattened.contains(node) }
     }
 }

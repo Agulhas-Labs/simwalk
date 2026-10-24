@@ -36,8 +36,8 @@ struct AppleAuditRuleTests {
         Fixture.ScreenSpec(id: id, captures: captures)
     }
 
-    private static func record(_ issues: [AppleAuditRecord.Issue] = [], error: String? = nil) -> AppleAuditRecord {
-        AppleAuditRecord(milliseconds: 1500, error: error, issues: issues)
+    private static func record(_ issues: [AppleAuditRecord.Issue] = [], error: String? = nil, elementsRead: Bool? = nil) -> AppleAuditRecord {
+        AppleAuditRecord(milliseconds: 1500, error: error, issues: issues, elementsRead: elementsRead)
     }
 
     private static func text(_ captures: [Fixture.Capture], only rules: [AuditRuleName] = Self.appleRules, in directory: TemporaryDirectory) throws -> Run {
@@ -177,11 +177,104 @@ struct AppleAuditRuleTests {
         let twin = Self.issue("contrast", label: "")
         let named = Self.issue("contrast", label: "", identifier: "save-button", elementType: "Button")
         let bare = Self.issue("contrast", elementType: nil, description: "Contrast failed for SwiftUI.AccessibilityNode")
-        let run = try Self.text([Self.capture(Self.light, record: Self.record([twin, twin, named, bare]))], only: [.appleContrast], in: directory)
+        let run = try Self.text([Self.capture(Self.light, record: Self.record([twin, twin, named, bare], elementsRead: true))], only: [.appleContrast], in: directory)
 
         #expect(run.text.contains("[appleContrast] 4 found"))
         #expect(run.text.contains("    Button #save-button — Contrast nearly passed [light]"))
-        #expect(run.text.contains("    (no element) — Contrast failed for SwiftUI.AccessibilityNode [light]"))
+        #expect(run.text.contains("    Apple named no element — Contrast failed for SwiftUI.AccessibilityNode [light]"))
+    }
+
+    @Test
+    func anIssueWhoseElementCouldNotBeReadSaysSoWithTheErrorTruncated() throws {
+        let directory = try TemporaryDirectory()
+        let error = String(repeating: "x", count: 120)
+        let lost = AppleAuditRecord.Issue(type: "contrast", compactDescription: "Contrast nearly passed", detailedDescription: "details", elementUnreadable: error)
+        let run = try Self.text([Self.capture(Self.light, record: Self.record([lost], elementsRead: true))], only: [.appleContrast], in: directory)
+
+        let reason = String(repeating: "x", count: 79) + "…"
+
+        #expect(run.text.contains("    the element could not be read after the audit (\(reason)) — Contrast nearly passed [light]"))
+        #expect(!run.text.contains("Apple named no element"))
+    }
+
+    /// The same issue with no element named in one state and a lost element in the other is two rows, each true of its own state.
+    @Test
+    func statesThatDisagreeOnWhyThereIsNoElementAreRowsOfTheirOwn() throws {
+        let directory = try TemporaryDirectory()
+        let none = AppleAuditRecord.Issue(type: "contrast", compactDescription: "Contrast nearly passed", detailedDescription: "details")
+        var lost = none
+        lost.elementUnreadable = "snapshot failed"
+        let run = try Self.text([
+            Self.capture(Self.light, record: Self.record([none], elementsRead: true)),
+            Self.capture(Self.dark, record: Self.record([lost], elementsRead: true)),
+        ], only: [.appleContrast], in: directory)
+
+        #expect(run.text.contains("[appleContrast] 2 found"))
+        #expect(run.text.contains("    Apple named no element — Contrast nearly passed [light]"))
+        #expect(run.text.contains("    the element could not be read after the audit (snapshot failed) — Contrast nearly passed [dark]"))
+    }
+
+    @Test
+    func anElementlessFindingIsNeverPairedAcrossStatesSoEachStateIsARowOfItsOwn() throws {
+        let directory = try TemporaryDirectory()
+        let none = AppleAuditRecord.Issue(type: "contrast", compactDescription: "Contrast nearly passed", detailedDescription: "details")
+        let run = try Self.text([
+            Self.capture(Self.light, record: Self.record([none], elementsRead: true)),
+            Self.capture(Self.dark, record: Self.record([none], elementsRead: true)),
+        ], only: [.appleContrast], in: directory)
+
+        #expect(run.text.contains("[appleContrast] 2 found"))
+        #expect(run.text.contains("    Apple named no element — Contrast nearly passed [light]"))
+        #expect(run.text.contains("    Apple named no element — Contrast nearly passed [dark]"))
+    }
+
+    /// Five findings in light and three in dark, none naming an element, are one counted row per state, and the heading counts all eight (SimWalk#233).
+    ///
+    /// It pins the text and the row count, not the order of the rows.
+    @Test
+    func elementlessFindingsAreCountedPerStateAndNeverListedUnderBothStates() throws {
+        let directory = try TemporaryDirectory()
+        let none = AppleAuditRecord.Issue(type: "contrast", compactDescription: "Contrast nearly passed", detailedDescription: "details")
+        let run = try Self.text([
+            Self.capture(Self.light, record: Self.record(Array(repeating: none, count: 5), elementsRead: true)),
+            Self.capture(Self.dark, record: Self.record(Array(repeating: none, count: 3), elementsRead: true)),
+        ], only: [.appleContrast], in: directory)
+
+        #expect(run.text.contains("[appleContrast] 8 found"))
+        #expect(run.text.contains("    Apple named no element — Contrast nearly passed ×5 [light]"))
+        #expect(run.text.contains("    Apple named no element — Contrast nearly passed ×3 [dark]"))
+        #expect(!run.text.contains("light, dark"))
+    }
+
+    /// One element whose contrast is "nearly passed" in light and "failed" at AX3 is a row for each, each naming only its own state.
+    ///
+    /// It does not pin the order of the rows.
+    @Test
+    func aNamedElementWhoseDescriptionDiffersBetweenStatesIsARowPerDescription() throws {
+        let directory = try TemporaryDirectory()
+        let accessibilityXL = Walkbook.CaptureState(theme: .light, dynamicTypeSize: "UICTContentSizeCategoryAccessibilityXL")
+        let run = try Self.text([
+            Self.capture(Self.light, record: Self.record([Self.issue("contrast", label: "App Version: 2.1.6", description: "Contrast nearly passed", y: 468)], elementsRead: true)),
+            Self.capture(accessibilityXL, record: Self.record([Self.issue("contrast", label: "App Version: 2.1.6", description: "Contrast failed", y: 796)], elementsRead: true)),
+        ], only: [.appleContrast], in: directory)
+
+        #expect(run.text.contains("[appleContrast] 2 found"))
+        #expect(run.text.contains("    StaticText 'App Version: 2.1.6' — Contrast nearly passed [light]"))
+        #expect(run.text.contains("    StaticText 'App Version: 2.1.6' — Contrast failed [\(accessibilityXL.slug)]"))
+    }
+
+    /// A record from before the runner marked its records cannot say whether the element was named, so the old wording stands.
+    @Test
+    func anOldRecordWithNoElementReadsAsItDidBeforeAndANewOneSaysApplePassedNone() throws {
+        let directory = try TemporaryDirectory()
+        let none = AppleAuditRecord.Issue(type: "contrast", compactDescription: "Contrast nearly passed", detailedDescription: "details")
+        let old = try Self.text([Self.capture(Self.light, record: Self.record([none]))], only: [.appleContrast], in: directory)
+        let other = try TemporaryDirectory()
+        let current = try Self.text([Self.capture(Self.light, record: Self.record([none], elementsRead: true))], only: [.appleContrast], in: other)
+
+        #expect(old.text.contains("    (no element) — Contrast nearly passed [light]"))
+        #expect(!old.text.contains("Apple named no element"))
+        #expect(current.text.contains("    Apple named no element — Contrast nearly passed [light]"))
     }
 
     @Test

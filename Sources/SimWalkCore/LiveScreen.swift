@@ -36,6 +36,8 @@ public struct LiveScreen: Codable, Equatable, Sendable {
     public let screenPixels: Pixels?
     /// The system alert SpringBoard draws over the app, which the app's own tree never shows; absent when none covers it, and absent from every read made before the field existed.
     public let systemAlert: SystemAlert?
+    /// The screenshot reduced to a grid, taken only when the tree lists no text, so the screen hash can tell such screens apart (SimWalk#150); absent otherwise, and absent from every read made before the field existed.
+    public let pixels: PixelSignature?
 
     public init(
         formatVersion: Int = LiveScreen.currentFormatVersion,
@@ -48,7 +50,8 @@ public struct LiveScreen: Codable, Equatable, Sendable {
         tree: AXNode?,
         settled: Bool?,
         screenPixels: Pixels?,
-        systemAlert: SystemAlert? = nil
+        systemAlert: SystemAlert? = nil,
+        pixels: PixelSignature? = nil
     ) {
         self.formatVersion = formatVersion
         self.appBundleID = appBundleID
@@ -62,6 +65,7 @@ public struct LiveScreen: Codable, Equatable, Sendable {
         self.settled = settled
         self.screenPixels = screenPixels
         self.systemAlert = systemAlert
+        self.pixels = pixels
     }
 }
 

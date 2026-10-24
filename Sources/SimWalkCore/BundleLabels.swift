@@ -95,7 +95,7 @@ public extension BundleLabels {
             }
             var folded = self
             folded.fails = order.map { counts[$0] == 1 ? $0 : "\($0) ×\(counts[$0] ?? 1)" }
-            folded.foldedFindings = fails.count - order.count
+            folded.foldedFindings += fails.count - order.count
             return folded
         }
     }
@@ -228,6 +228,7 @@ private extension BundleLabels {
             for var row in AppleAuditSection(name: .appleDynamicType, scan: scan, listsUnreadable: false).distinct {
                 row.states = row.states.filter(LargeTypeOverflowAudit.isAccessibilitySize)
                 if !row.states.isEmpty {
+                    report.foldedFindings += row.count - 1
                     report.fails.append("\(row.screenID): \(AuditRuleName.appleDynamicType.rawValue) — \(row.text) [\(row.states.joined(separator: ", "))]")
                 }
             }
@@ -235,11 +236,12 @@ private extension BundleLabels {
                 row.states.contains(where: LargeTypeOverflowAudit.isAccessibilitySize)
             }
             if !clipped.isEmpty {
+                let clippedCount = clipped.reduce(0) { $0 + $1.count }
                 var screenIDs: [String] = []
                 for row in clipped where !screenIDs.contains(row.screenID) {
                     screenIDs.append(row.screenID)
                 }
-                report.manual.append("Apple's audit reports \(clipped.count) textClipped finding\(clipped.count == 1 ? "" : "s") at accessibility sizes on \(screenIDs.joined(separator: ", ")); its textClipped check proved unreliable, so check them by hand")
+                report.manual.append("Apple's audit reports \(clippedCount) textClipped finding\(clippedCount == 1 ? "" : "s") at accessibility sizes on \(screenIDs.joined(separator: ", ")); its textClipped check proved unreliable, so check them by hand")
             }
         }
         report.manual.append("overlap between text elements that the accessibility tree does not show")
@@ -310,7 +312,9 @@ private extension BundleLabels {
                 }
             }
         }
-        report.fails += AppleAuditSection(name: .appleContrast, scan: scan, listsUnreadable: false).distinct.map { "\($0.screenID): appleContrast — \($0.text) [\($0.states.joined(separator: ", "))]" }
+        let contrastRows = AppleAuditSection(name: .appleContrast, scan: scan, listsUnreadable: false).distinct
+        report.fails += contrastRows.map { "\($0.screenID): appleContrast — \($0.text) [\($0.states.joined(separator: ", "))]" }
+        report.foldedFindings += contrastRows.reduce(0) { $0 + $1.count - 1 }
         if let made = bundle.manifest.deviceSetup?.made.first(where: { $0.hasPrefix(CaptureManifest.SetupRecord.increaseContrastPrefix) }) {
             report.evidence.append("every audit in this bundle was taken with Increase Contrast on: \(made)")
             report.missing.append("the default appearance was not audited: walk again without \"increaseContrast\" and run labels on that bundle too")

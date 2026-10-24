@@ -64,6 +64,15 @@ struct WalkbookValidationTests {
         #expect(WalkbookLoader.problems(in: book) == [.blankTypedText(screenID: "today", index: 0, stepIndex: 1)])
     }
 
+    /// With `replace` an empty text clears the field, and the read-back verifies it (SimWalk#198), so it is the one `type` that may be empty.
+    @Test
+    func anEmptyReplacingTypeStepIsAccepted() {
+        var book = Self.valid()
+        book.screens[0].route = [.tab(label: "Today"), .type(label: "Search", text: "", replace: true)]
+
+        #expect(WalkbookLoader.problems(in: book).isEmpty)
+    }
+
     /// A space is text — it goes into the field and it is what a search sees — so only genuine emptiness is refused.
     @Test
     func atypeStepCarryingRealTextIsAccepted() {
@@ -547,5 +556,108 @@ struct WalkbookValidationTests {
 
         book.screens[0].budgets = Walkbook.Budgets(settleMs: 0, layoutShifts: 0)
         #expect(WalkbookLoader.problems(in: book).isEmpty)
+    }
+
+    /// A hold outside 0.5 to 5 seconds is refused with the value named; the ends are accepted (SimWalk#198).
+    @Test(arguments: [0.4, 0, -1, 5.1, 60])
+    func aLongPressOutsideItsRangeIsRefusedNamingTheValue(_ seconds: Double) {
+        var book = Self.valid()
+        book.screens[0].route = [.tab(label: "Today"), .longPress(label: "Row", seconds: seconds)]
+        let problems = WalkbookLoader.problems(in: book)
+
+        #expect(problems == [.longPressSecondsOutOfRange(screenID: "today", index: 0, stepIndex: 1, seconds: seconds)])
+        #expect(problems.first?.description.contains("screen 'today' route step 1") == true)
+        #expect(problems.first?.description.contains(Walkbook.RouteStep.rendered([seconds])) == true)
+    }
+
+    @Test(arguments: [0.5, 1, 5])
+    func aLongPressWithinItsRangeIsAccepted(_ seconds: Double) {
+        var book = Self.valid()
+        book.screens[0].route = [.tab(label: "Today"), .longPress(label: "Row", seconds: seconds)]
+
+        #expect(WalkbookLoader.problems(in: book).isEmpty)
+    }
+
+    /// A direction outside the four is a problem naming the value, from a file as well as a built walkbook: it decodes, then `validate` refuses it.
+    @Test
+    func aSwipeInAnUnknownDirectionIsRefusedNamingTheValue() throws {
+        let json = #"{"name":"w","appBundleID":"com.apple.Health","screens":[{"id":"s","route":[{"swipe":{"label":"Row","direction":"sideways"}}],"states":[{"theme":"light"}]}]}"#
+        let book = try JSONDecoder().decode(Walkbook.self, from: Data(json.utf8))
+        let problems = WalkbookLoader.problems(in: book)
+
+        #expect(problems == [.unknownSwipeDirection(screenID: "s", index: 0, stepIndex: 0, value: "sideways")])
+        #expect(problems.first?.description.contains("'sideways'") == true)
+    }
+
+    @Test(arguments: ["up", "down", "left", "right"])
+    func aSwipeInEachDirectionIsAcceptedWithOrWithoutALabel(_ direction: String) {
+        var book = Self.valid()
+        book.screens[0].route = [.tab(label: "Today"), .swipe(label: "Row", direction: direction), .swipe(label: nil, direction: direction)]
+
+        #expect(WalkbookLoader.problems(in: book).isEmpty)
+    }
+
+    /// A blank label is refused for the new steps as for `tap`; a swipe without a label names no element and is not blank.
+    @Test
+    func aBlankLabelOnALongPressOrSwipeIsRefusedAndNoLabelIsNot() {
+        var book = Self.valid()
+        book.screens[0].route = [.tab(label: "Today"), .longPress(label: " "), .swipe(label: " ", direction: "up"), .swipe(label: nil, direction: "up")]
+
+        #expect(WalkbookLoader.problems(in: book) == [
+            .blankRouteStepLabel(screenID: "today", index: 0, stepIndex: 1),
+            .blankRouteStepLabel(screenID: "today", index: 0, stepIndex: 2),
+        ])
+    }
+
+    private func problems(forDrag step: Walkbook.RouteStep) -> [WalkbookProblem] {
+        var book = Self.valid()
+        book.screens[0].route = [.tab(label: "Today"), step]
+        return WalkbookLoader.problems(in: book)
+    }
+
+    /// A labelled and an unlabelled drag, as the docs show them, pass (SimWalk#148).
+    @Test(arguments: [
+        Walkbook.RouteStep.drag(label: "Volume", from: [0.1, 0.5], to: [0.9, 0.5], hold: 0.3, seconds: 0.5),
+        Walkbook.RouteStep.drag(label: nil, from: [40, 600], to: [300, 600]),
+        Walkbook.RouteStep.drag(label: "Volume", from: [0, 0], to: [1, 1], hold: 0, seconds: 10),
+    ])
+    func aValidDragIsAccepted(_ step: Walkbook.RouteStep) {
+        #expect(problems(forDrag: step).isEmpty)
+    }
+
+    /// Each end is held to a point's rules and the problem names the field (SimWalk#148).
+    @Test
+    func aDragEndThatIsNotAPointIsRefusedNamingTheField() {
+        #expect(problems(forDrag: .drag(label: "Volume", from: [0.1], to: [0.9, 0.5])) == [
+            .malformedDragPoint(screenID: "today", index: 0, stepIndex: 1, field: "from", count: 1),
+        ])
+        #expect(problems(forDrag: .drag(label: "Volume", from: [0.1, 0.5], to: [0.9, 1.5])) == [
+            .dragPointOutsideElement(screenID: "today", index: 0, stepIndex: 1, field: "to", label: "Volume", point: [0.9, 1.5]),
+        ])
+        #expect(problems(forDrag: .drag(label: nil, from: [-1, 600], to: [300, 600])) == [
+            .dragPointOffScreen(screenID: "today", index: 0, stepIndex: 1, field: "from", point: [-1, 600]),
+        ])
+        #expect(problems(forDrag: .drag(label: nil, from: [40, 600], to: [0.5, 0.5])) == [
+            .dragPointFractionalWithoutLabel(screenID: "today", index: 0, stepIndex: 1, field: "to", point: [0.5, 0.5]),
+        ])
+    }
+
+    /// The problem message names the step and the field (SimWalk#148).
+    @Test
+    func aDragPointProblemNamesTheStepAndTheField() {
+        let message = WalkbookProblem.malformedDragPoint(screenID: "today", index: 0, stepIndex: 1, field: "to", count: 3).description
+
+        #expect(message.contains("drag's to"))
+    }
+
+    /// `hold` below zero or above ten seconds, and `seconds` at or below zero or above ten, are refused (SimWalk#148).
+    @Test
+    func aDragWithAnOutOfRangeHoldOrSecondsIsRefused() {
+        let from = [0.1, 0.5], to = [0.9, 0.5]
+
+        #expect(problems(forDrag: .drag(label: "V", from: from, to: to, hold: -0.1, seconds: 0.5)) == [.dragHoldOutOfRange(screenID: "today", index: 0, stepIndex: 1, hold: -0.1)])
+        #expect(problems(forDrag: .drag(label: "V", from: from, to: to, hold: 10.5, seconds: 0.5)) == [.dragHoldOutOfRange(screenID: "today", index: 0, stepIndex: 1, hold: 10.5)])
+        #expect(problems(forDrag: .drag(label: "V", from: from, to: to, hold: 0.1, seconds: 0)) == [.dragSecondsOutOfRange(screenID: "today", index: 0, stepIndex: 1, seconds: 0)])
+        #expect(problems(forDrag: .drag(label: "V", from: from, to: to, hold: 0.1, seconds: 11)) == [.dragSecondsOutOfRange(screenID: "today", index: 0, stepIndex: 1, seconds: 11)])
     }
 }

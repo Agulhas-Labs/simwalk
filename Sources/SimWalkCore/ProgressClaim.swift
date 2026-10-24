@@ -13,6 +13,8 @@ import Foundation
 /// **A live session starts at slot 2** (``take(session:in:firstSlot:sharedWithChild:)``'s `firstSlot`), so the session's own name stays a walk's: a session holds its slot for its whole life, up to its idle timeout after its last request, and a walk in that time would otherwise land in `<session>.2.json` while `<session>.json` showed an idle session (SimWalk#83).
 ///
 /// The system drops a claim when its holder dies, so a run killed outright never wedges its slot. A lock that cannot be taken at all — a directory that cannot be written, a filesystem without `flock` — leaves the run on the slot it was trying, unclaimed, as every run was before: progress never fails a walk.
+///
+/// **A shared claim is free only once its last copy is closed.** Once handed over it is never unlocked here, since that would end the child's hold, so it outlasts the child while any other copy of the descriptor is open: a spawn in this process that copied it before the hand-over's close keeps it until that spawn's exec, milliseconds on an idle machine and longer under load, and a descendant of the child that inherited it keeps it while it lives (SimWalk#204). No caller waits for the slot: a session started in that window takes the next one, as a run beside a live one does. A walk's claim, unlocked before its close, has no such window, and neither has ``ExclusiveFileLock`` (SimWalk#209).
 public final class ProgressClaim: @unchecked Sendable {
     /// The run's progress file.
     public let progressURL: URL

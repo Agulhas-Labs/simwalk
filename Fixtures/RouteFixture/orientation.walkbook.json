@@ -1,0 +1,32 @@
+{
+  "name": "route-fixture-orientation",
+  "appBundleID": "dev.simwalk.route-fixture",
+  "screens": [
+    {
+      "id": "home",
+      "expect": "route-home",
+      "route": [{ "scrollTo": { "label": "Third" } }],
+      "states": [
+        { "theme": "light" },
+        { "theme": "light", "orientation": "portrait" },
+        { "theme": "light", "orientation": "landscape" }
+      ]
+    },
+    {
+      "id": "home-portrait-only",
+      "expect": "route-home",
+      "route": [{ "scrollTo": { "label": "Third" } }],
+      "states": [
+        { "theme": "light", "orientation": "landscape", "arguments": ["-RouteFixturePortraitOnly"] }
+      ]
+    },
+    {
+      "id": "home-landscape-only",
+      "expect": "route-home-landscape-tapped",
+      "route": [{ "tapPoint": { "at": [120, 160] } }],
+      "states": [
+        { "theme": "light", "arguments": ["-RouteFixtureLandscapeOnly"] }
+      ]
+    }
+  ]
+}

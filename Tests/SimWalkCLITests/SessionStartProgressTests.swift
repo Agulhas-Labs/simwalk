@@ -31,6 +31,22 @@ struct SessionStartProgressTests {
         #expect(command.inheritedDescriptor != nil)
     }
 
+    /// A start whose environment alone injects `SIMWALK_USAGE_LOG` puts the progress file beside that log and hands the runner that same file, never the machine's own (SimWalk#196).
+    @Test
+    func startNamesTheUsageLogItsEnvironmentInjects() throws {
+        let fixture = try SessionCommandTests.Fixture()
+        fixture.processes.onSpawn = { _ in try? fixture.channel("s1").markReady(SessionCommandTests.ready) }
+        let injectedDirectory = fixture.directory.url.appendingPathComponent("injected", isDirectory: true)
+        let injected = injectedDirectory.appendingPathComponent("usage.jsonl").path
+
+        _ = try fixture.start(["--device", "UDID-1", "--app", "com.example.live"], environment: [UsageLog.overrideVariable: injected])
+        let progress = try WalkProgress.decoder().decode(WalkProgress.self, from: Data(contentsOf: ProgressLocation.progressURL(session: nil, slot: 2, in: injectedDirectory)))
+        let command = try #require(fixture.processes.spawned.first)
+
+        #expect(progress.logPath == injected)
+        #expect(command.environment["TEST_RUNNER_SIMWALK_LOG"] == injected)
+    }
+
     /// A runner that never becomes ready ends the start `failed`, saying why.
     @Test
     func aStartThatFailsEndsTheFileFailed() throws {
@@ -61,12 +77,11 @@ struct SessionStartProgressTests {
             now: fixture.now,
             id: { "s1" },
             runner: { RunnerSource(projectPath: "/runner/SimWalkRunner.xcodeproj", commit: "c0ffee", origin: .installed) },
-            logFileURL: fixture.directory.url.appendingPathComponent("usage.jsonl"),
             builds: RunnerBuilds(directory: fixture.directory.url.appendingPathComponent("runner-builds", isDirectory: true)),
             leases: fixture.leases,
             store: fixture.store,
             processes: fixture.processes,
-            environment: [:],
+            environment: [UsageLog.overrideVariable: fixture.directory.url.appendingPathComponent("usage.jsonl").path],
             cancellation: cancellation
         )
         let written = try Self.read(fixture)

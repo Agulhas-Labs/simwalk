@@ -22,14 +22,17 @@ public struct Simulator: Equatable, Sendable {
     public let runtimeIdentifier: String?
     /// The device type `simctl` lists the device as, such as `com.apple.CoreSimulator.SimDeviceType.iPhone-17`; nil where the device was not read from a device list or the list did not say.
     public let deviceTypeIdentifier: String?
+    /// Whether `simctl` listed it as `Shutdown`: not booted, and not on its way up or down either (`Booting`, `Shutting Down`); false where the device was not read from a device list.
+    public let isShutDown: Bool
 
-    public init(udid: String, name: String, osVersion: String, isBooted: Bool, runtimeIdentifier: String? = nil, deviceTypeIdentifier: String? = nil) {
+    public init(udid: String, name: String, osVersion: String, isBooted: Bool, runtimeIdentifier: String? = nil, deviceTypeIdentifier: String? = nil, isShutDown: Bool = false) {
         self.udid = udid
         self.name = name
         self.osVersion = osVersion
         self.isBooted = isBooted
         self.runtimeIdentifier = runtimeIdentifier
         self.deviceTypeIdentifier = deviceTypeIdentifier
+        self.isShutDown = isShutDown
     }
 }
 
@@ -197,7 +200,8 @@ public extension Simulator {
                     osVersion: Self.version(fromRuntime: runtime),
                     isBooted: (device["state"] as? String) == "Booted",
                     runtimeIdentifier: runtime,
-                    deviceTypeIdentifier: device["deviceTypeIdentifier"] as? String
+                    deviceTypeIdentifier: device["deviceTypeIdentifier"] as? String,
+                    isShutDown: (device["state"] as? String) == "Shutdown"
                 )
             }
         }

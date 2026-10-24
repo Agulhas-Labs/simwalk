@@ -3,8 +3,10 @@
 //
 
 import ArgumentParser
+import CoreGraphics
 import Fieldwork
 import Foundation
+import ImageIO
 @testable import SimWalkCLI
 import SimWalkCore
 import SimWalkDriver
@@ -89,6 +91,14 @@ struct SessionCommandTests {
         #expect(throws: (any Error).self) { try SessionStartCommand.parse(["--app", "a"]) }
     }
 
+    /// A `--state` missing its theme is refused naming the key, in the words a walkbook's refusal uses rather than Foundation's dump of its decoding context (SimWalk#223).
+    @Test
+    func aStateWithoutAThemeIsRefusedNamingTheMissingKey() {
+        #expect(throws: LiveSessionHostError.unreadableState(reason: "missing key 'theme'")) {
+            try SessionStartCommand.captureState(#"{"orientation":"landscape"}"#)
+        }
+    }
+
     /// A warm read renders exactly what `inspect` renders for the same screen, `--match` included.
     @Test
     func readRendersWhatInspectRendersForTheSameScreen() throws {
@@ -109,6 +119,75 @@ struct SessionCommandTests {
 
         #expect(answer == inspected)
         #expect(answer.text.contains("Welcome to Health"))
+    }
+
+    /// A read with `--screenshot` sends the flag, fits the response's PNG into the session's `screenshots/read-<n>.png` and prints the line right after the screen's hash.
+    @Test
+    func readWithAScreenshotWritesItIntoTheSessionAndPrintsTheLine() throws {
+        let fixture = try Fixture()
+        try fixture.session("s1", pid: 77)
+        fixture.processes.runner(77)
+        var sent: LiveSessionRequest?
+        let png = try Self.png(width: 804, height: 1748)
+        fixture.onPause = {
+            let channel = fixture.channel("s1")
+            if let request = try? channel.request(1), (try? channel.response(to: 1)) == nil {
+                sent = request
+                try? channel.respond(LiveSessionResponse(n: request.n, action: .read, screen: Self.screen, screenshot: png))
+            }
+        }
+        let command = try SessionReadCommand.parse(["s1", "--screenshot-scale", "2"])
+
+        let answer = try command.perform(store: fixture.store, processes: fixture.processes, pause: fixture.pause, now: fixture.now)
+
+        let file = fixture.store.layout(id: "s1").screenshot(read: 1)
+
+        #expect(sent?.screenshot == true)
+        #expect(FileManager.default.fileExists(atPath: file.path))
+        #expect(answer.residue[1] == "screenshot: \(file.path) (804×1748 px, 2× point scale, about 1,874 tokens to view)")
+    }
+
+    /// An image that did not arrive is the line saying why, the runner's reason first; the read itself still answers.
+    @Test
+    func readWithAScreenshotThatDidNotArriveSaysWhy() throws {
+        for (refusal, expected) in [("past the reply cap", "past the reply cap"), (nil, "the runner sent no image")] {
+            let fixture = try Fixture()
+            try fixture.session("s1", pid: 77)
+            fixture.processes.runner(77)
+            fixture.onPause = {
+                let channel = fixture.channel("s1")
+                if let request = try? channel.request(1), (try? channel.response(to: 1)) == nil {
+                    try? channel.respond(LiveSessionResponse(n: request.n, action: .read, screen: Self.screen, screenshotRefusal: refusal))
+                }
+            }
+            let command = try SessionReadCommand.parse(["s1", "--screenshot"])
+
+            let answer = try command.perform(store: fixture.store, processes: fixture.processes, pause: fixture.pause, now: fixture.now)
+
+            #expect(answer.residue[1] == "screenshot: not written — \(expected)")
+            #expect(!FileManager.default.fileExists(atPath: fixture.store.layout(id: "s1").screenshots.path))
+        }
+    }
+
+    @Test
+    func aScreenshotScaleOutsideOneToThreeIsAUsageErrorNamingIt() {
+        #expect(throws: (any Error).self) { try SessionReadCommand.parse(["s1", "--screenshot-scale", "4"]) }
+        #expect(throws: (any Error).self) { try InspectCommand.parse(["--app", "x", "--screenshot-scale", "4"]) }
+        #expect(throws: Never.self) { try InspectCommand.parse(["--app", "x", "--screenshot-of", "-Done"]) }
+    }
+
+    /// A 2× PNG of the fixture screen, matching its 402×874 frame in shape.
+    static func png(width: Int, height: Int, sourceLocation: SourceLocation = #_sourceLocation) throws -> Data {
+        let space = try #require(CGColorSpace(name: CGColorSpace.sRGB), sourceLocation: sourceLocation)
+        let context = try #require(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue), sourceLocation: sourceLocation)
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = try #require(context.makeImage(), sourceLocation: sourceLocation)
+        let data = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil), sourceLocation: sourceLocation)
+        CGImageDestinationAddImage(destination, image, nil)
+        #expect(CGImageDestinationFinalize(destination), sourceLocation: sourceLocation)
+        return data as Data
     }
 
     /// `step` sends the walkbook step and its guard as the next request and prints the runner's answer: the landed step, the screen's hash and the delta.
@@ -153,6 +232,49 @@ struct SessionCommandTests {
         }
     }
 
+    /// SimWalk#240: `read` and `step` on a runner killed mid-session say how it ended, not only that it stopped.
+    ///
+    /// It leaves no exit record, so they say it from what it left in the session's directory: the result bundle's failure, and the last of `xcodebuild`'s output without its `[MT]` diagnostics.
+    @Test(arguments: ["read", "step"])
+    func readAndStepOnAKilledRunnerSayHowItEnded(_ verb: String) throws {
+        let fixture = try Fixture()
+        try fixture.session("s1", pid: 77)
+        let layout = fixture.store.layout(id: "s1")
+        try FileManager.default.createDirectory(at: layout.resultBundle, withIntermediateDirectories: true)
+        try """
+        Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+        2026-10-23 23:20:49.729 xcodebuild[34662:121953085] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>
+        Failing tests:
+        \tWalkRunner.testSession()
+
+        ** TEST EXECUTE FAILED **
+
+        """.write(to: layout.runnerLog, atomically: true, encoding: .utf8)
+        let summary = #"{"testFailures":[{"failureText":"Test crashed with signal kill.","testName":"testSession()"}]}"#
+        let shell = Shell(script: { _, arguments, _ in
+            Shell.Result(status: 0, standardOutput: arguments.contains("summary") ? summary : "", standardError: "")
+        })
+
+        let refusal = try #require(throws: LiveSessionError.self) {
+            if verb == "read" {
+                _ = try SessionReadCommand.parse(["s1"]).perform(store: fixture.store, processes: fixture.processes, shell: shell, pause: fixture.pause, now: fixture.now)
+            } else {
+                _ = try SessionStepCommand.parse(["s1", #"{"tap":{"label":"Steps"}}"#]).perform(store: fixture.store, processes: fixture.processes, shell: shell, pause: fixture.pause, now: fixture.now)
+            }
+        }
+
+        #expect(refusal.description.components(separatedBy: "\n") == [
+            "the session's runner stopped before answering request 1, leaving no exit record",
+            "result bundle: \(layout.resultBundle.path)",
+            "failure: Test crashed with signal kill. (testSession())",
+            "the last of xcodebuild's output (\(layout.runnerLog.path)):",
+            "  Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.",
+            "  Failing tests:",
+            "  WalkRunner.testSession()",
+            "  ** TEST EXECUTE FAILED **",
+        ])
+    }
+
     /// A step that is not a walkbook route step is refused before anything is sent.
     @Test
     func stepRefusesJSONThatIsNotARouteStep() throws {
@@ -163,6 +285,42 @@ struct SessionCommandTests {
             try SessionStepCommand.parse(["s1", #"{"poke":{}}"#]).perform(store: fixture.store, processes: fixture.processes, pause: fixture.pause, now: fixture.now)
         }
         #expect(fixture.store.layout(id: "s1").requestNumbers().isEmpty)
+    }
+
+    /// A step `validate` would refuse is refused by name before anything is sent, so a session cannot save a walkbook `validate` rejects (SimWalk#198).
+    @Test(arguments: [
+        (#"{"longPress":{"label":"Row","seconds":600}}"#, "long-presses for 600 s"),
+        (#"{"swipe":{"direction":"sideways"}}"#, "swipes 'sideways'"),
+    ])
+    func stepRefusesAStepValidateWouldRefuse(json: String, named: String) throws {
+        let fixture = try Fixture()
+        try fixture.session("s1", pid: 77)
+        fixture.processes.runner(77)
+
+        #expect {
+            try SessionStepCommand.parse(["s1", json]).perform(store: fixture.store, processes: fixture.processes, pause: fixture.pause, now: fixture.now)
+        } throws: { error in
+            "\(error)".contains(named)
+        }
+        #expect(fixture.store.layout(id: "s1").requestNumbers().isEmpty)
+    }
+
+    /// A session has no screen and no step index, so its refusal names neither (SimWalk#214).
+    @Test
+    func aRefusedStepIsWordedAsASessionsNotAScreens() throws {
+        let fixture = try Fixture()
+        try fixture.session("s1", pid: 77)
+        fixture.processes.runner(77)
+
+        let thrown = #expect(throws: (any Error).self) {
+            try SessionStepCommand.parse(["s1", #"{"swipe":{"direction":"sideways"}}"#]).perform(store: fixture.store, processes: fixture.processes, pause: fixture.pause, now: fixture.now)
+        }
+
+        let message = try "\(#require(thrown))"
+
+        #expect(message.contains("the step swipes 'sideways'"))
+        #expect(!message.contains("screen 'session step'"))
+        #expect(!message.contains("route step 0"))
     }
 
     /// An unknown id is refused by name.
@@ -241,6 +399,27 @@ struct SessionCommandTests {
         #expect(first.residue.last == "idle · accessibility: the runner stopped without `end`, its teardown switched \(AccessibilityPreference.domain) \(AccessibilityPreference.key) off, and `session list` switched it back on for UDID-1 and saw it hold")
         #expect(first.residue.count == 2)
         #expect(second.residue == first.residue)
+    }
+
+    /// SimWalk#219: `session start` has no `--app-path` and boots nothing, so its check reads the installed bundle; deleting the call lets an iPhone-only app start a session on an iPad.
+    @Test
+    func startRefusesAnInstalledIPhoneOnlyAppOnAnIPad() throws {
+        let directory = try TemporaryDirectory()
+        let app = directory.url.appendingPathComponent("PhoneOnly.app")
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        try PropertyListSerialization.data(fromPropertyList: ["UIDeviceFamily": [1]], format: .xml, options: 0).write(to: app.appendingPathComponent("Info.plist"))
+        let fixture = try Fixture(appPath: app.path, deviceType: "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M5")
+
+        let thrown = try #require(#expect(throws: SimulatorError.self) {
+            _ = try fixture.start(["--device", "UDID-1", "--app", "com.example.live"])
+        })
+
+        guard case .iPhoneOnlyAppOnIPad = thrown else {
+            Issue.record("expected the iPhone-only refusal, got \(String(describing: thrown))")
+            return
+        }
+        #expect(!fixture.script.calls.contains { $0.arguments.contains("build-for-testing") })
+        #expect(fixture.processes.spawned.isEmpty)
     }
 
     /// A state whose theme the device is not in reboots the device into it before the runner is spawned — the cure for an appearance a simulator reports and does not draw — and the runner is still told what the device was found in, which is what it puts back.
@@ -606,10 +785,10 @@ extension SessionCommandTests {
         private var elapsed: TimeInterval = 0
 
         /// `appearance` is the device's as `start` finds it; `failing` names `simctl` subcommands the device refuses.
-        init(appearance: String = "light", failing: [String] = []) throws {
+        init(appearance: String = "light", failing: [String] = [], appPath: String? = nil, deviceType: String? = nil) throws {
             directory = try TemporaryDirectory()
             store = LiveSessionStore(directory: directory.url.appendingPathComponent("sessions", isDirectory: true))
-            script = WalkCommandTests.WalkScript(appPath: directory.url.path, runnerStatus: 0, appearance: appearance, failing: failing)
+            script = WalkCommandTests.WalkScript(appPath: appPath ?? directory.url.path, runnerStatus: 0, appearance: appearance, failing: failing, deviceType: deviceType)
         }
 
         var pause: (TimeInterval) -> Void {
@@ -637,8 +816,8 @@ extension SessionCommandTests {
             try store.write(LiveSessionRecord(id: id, pid: pid, udid: "UDID-1", app: "com.example.live", startedAt: Date(timeIntervalSince1970: 0), foundAppearance: .light))
         }
 
-        /// `refusing` is a `simctl` command the device refuses once the settle has rebooted it, as a device that will not take the put-back does.
-        func start(_ arguments: [String], refusing: [String]? = nil, animationsLibrary: WalkCommand.AnimationsLibrary? = nil, note: (String) -> Void = { _ in }) throws -> Answer {
+        /// `refusing` is a `simctl` command the device refuses once the settle has rebooted it, as a device that will not take the put-back does; `environment` replaces the fixture's own, which names a usage log of its own.
+        func start(_ arguments: [String], refusing: [String]? = nil, environment: [String: String]? = nil, animationsLibrary: WalkCommand.AnimationsLibrary? = nil, note: (String) -> Void = { _ in }) throws -> Answer {
             try SessionStartCommand.parse(arguments).perform(
                 shell: Shell(script: { [script] executable, arguments, environment in
                     if let refusing, arguments == refusing, script.calls.contains(where: { $0.arguments.starts(with: ["simctl", "shutdown"]) }) {
@@ -650,12 +829,11 @@ extension SessionCommandTests {
                 now: now,
                 id: { "s1" },
                 runner: { RunnerSource(projectPath: "/runner/SimWalkRunner.xcodeproj", commit: "c0ffee", origin: .installed) },
-                logFileURL: directory.url.appendingPathComponent("usage.jsonl"),
                 builds: RunnerBuilds(directory: directory.url.appendingPathComponent("runner-builds", isDirectory: true)),
                 leases: leases,
                 store: store,
                 processes: processes,
-                environment: [:],
+                environment: environment ?? [UsageLog.overrideVariable: directory.url.appendingPathComponent("usage.jsonl").path],
                 animationsLibrary: animationsLibrary,
                 note: note
             )

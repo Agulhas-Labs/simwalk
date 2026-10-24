@@ -173,17 +173,19 @@ struct ShellTests {
         }
         let started = Date()
 
+        // A 4 s bound, not 0.5 s: under a machine load of 270 the child was stopped before it had forked, so no pid was written and the case never arose. The grandchild's 16 s keeps its write well after the call's bound plus the drain limit.
         #expect(throws: ShellError.self) {
-            try Shell().run("/bin/sh", ["-c", "set -m; ( trap '' PIPE TERM; sleep 8; echo late || echo closed > '\(marker.path)' ) & echo $! > '\(pidFile.path)'; exec sleep 30"], timeout: 0.5)
+            try Shell().run("/bin/sh", ["-c", "set -m; ( trap '' PIPE TERM; sleep 16; echo late || echo closed > '\(marker.path)' ) & echo $! > '\(pidFile.path)'; exec sleep 30"], timeout: 4)
         }
         let returned = Date().timeIntervalSince(started)
         grandchild = try pid_t(String(contentsOf: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines))
-        let deadline = Date().addingTimeInterval(20)
+        let deadline = Date().addingTimeInterval(28)
         while !FileManager.default.fileExists(atPath: marker.path), Date() < deadline {
             Thread.sleep(forTimeInterval: 0.1)
         }
         finished = FileManager.default.fileExists(atPath: marker.path)
-        #expect(returned < 6)
+        // The grandchild lives 16 seconds; unbounded, the call waited all of them.
+        #expect(returned < 11)
         #expect(FileManager.default.fileExists(atPath: marker.path))
     }
 

@@ -260,6 +260,29 @@ struct RouteTargetTrackerTests {
         #expect(decisions.last == .act(.none))
     }
 
+    /// SimWalk#212: a field reached only by its placeholder is taken once the screen has held still for the quiet period, not after the whole lookup.
+    @Test
+    func aPlaceholderIsTakenOnceTheScreenHasHeldStill() {
+        let decisions = Self.replay(Array(repeating: Self.placeholderOnly(), count: 40), label: "Nickname", reach: .textEntry, quiet: 1.0)
+
+        #expect(decisions.dropLast().allSatisfy { $0 == .watch })
+        #expect(decisions.count == 5)
+        guard case let .act(choice) = decisions.last, case let .chosen(candidate, _) = choice else {
+            Issue.record("expected the placeholder field to be acted on, got \(decisions)")
+            return
+        }
+        #expect(candidate.match == .placeholder)
+    }
+
+    @Test
+    func aPlaceholderIsWaitedForUntilTheLookupWhileTheScreenKeepsChanging() {
+        let reads = (0 ..< 40).map { Self.placeholderOnly(loading: "Loading \($0)") }
+        let decisions = Self.replay(reads, label: "Nickname", reach: .textEntry, quiet: 1.0, lookup: 3.0)
+
+        #expect(decisions.dropLast().allSatisfy { $0 == .watch })
+        #expect(decisions.count == 13)
+    }
+
     /// Replays scripted reads as the runner makes them: a read, and one interval before the next, until the tracker acts.
     private static func replay(
         _ reads: [AXNode],
@@ -319,6 +342,14 @@ struct RouteTargetTrackerTests {
     private static func acted(_ decisions: [RouteTargetTracker.Decision]) -> RouteTarget.Candidate? {
         guard case let .act(choice) = decisions.last, case let .chosen(candidate, _) = choice else { return nil }
         return candidate
+    }
+
+    /// A screen whose only `Nickname` is a text field's placeholder, with a line of text that may still be changing.
+    private static func placeholderOnly(loading: String = "Loading") -> AXNode {
+        screen([
+            AXNode(type: "StaticText", frame: frame(y: 300, height: 20), label: loading),
+            AXNode(type: "TextField", frame: AXNode.Frame(x: 0, y: 200, width: 402, height: 44), value: "Draft", placeholder: "Nickname"),
+        ])
     }
 
     /// A screen whose only `Edit` is the toolbar's, with a line of text that may still be changing.

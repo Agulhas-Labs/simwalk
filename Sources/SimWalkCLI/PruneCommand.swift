@@ -148,13 +148,17 @@ struct PruneCommand: ParsableCommand {
     /// What the lease store's part of a prune did, as a clause for the detail; `nil` when it did nothing.
     static func leaseWork(released: [DeviceLeasing.Release], temporaries: Int, dryRun: Bool) -> String? {
         let done = released.filter { $0.failure == nil }
-        let clones = done.filter(\.entry.lease.createdDevice).count
+        let clones = done.filter { $0.device == .deleted }.count
+        let shutDown = done.filter { $0.device == .shutDown }.count
         var parts: [String] = []
         if !done.isEmpty {
             parts.append("\(dryRun ? "would release" : "released") \(done.count) lapsed lease\(done.count == 1 ? "" : "s")")
         }
         if clones > 0 {
             parts.append("\(dryRun ? "would delete" : "deleted") \(clones) clone\(clones == 1 ? "" : "s")")
+        }
+        if shutDown > 0 {
+            parts.append("\(dryRun ? "would shut down" : "shut down") \(shutDown) device\(shutDown == 1 ? "" : "s") found shut down")
         }
         if temporaries > 0 {
             parts.append("\(dryRun ? "would remove" : "removed") \(temporaries) temporary file\(temporaries == 1 ? "" : "s")")
@@ -168,14 +172,29 @@ struct PruneCommand: ParsableCommand {
         return runner == "nothing to prune" ? work : "\(runner); \(work)"
     }
 
-    /// One lapsed lease — expired, or a clone's whose holder is gone — a prune released, would release, or could not.
+    /// One lapsed lease — expired, or a clone's or a found-shut-down device's whose holder is gone — a prune released, would release, or could not, with what it did or would do to the device.
     static func leaseLine(dryRun: Bool) -> (DeviceLeasing.Release) -> String {
         { release in
-            let device = release.entry.lease.createdDevice ? " and deleted its clone" : ""
+            let udid = release.entry.udid
             if let failure = release.failure {
-                return "lease on \(release.entry.udid) lapsed and not released — \(failure)"
+                return "lease on \(udid) lapsed and not released — \(failure)"
             }
-            return dryRun ? "would release the lapsed lease on \(release.entry.udid)\(device.isEmpty ? "" : ", deleting its clone")" : "released the lapsed lease on \(release.entry.udid)\(device)"
+            if dryRun {
+                let device = switch release.device {
+                case .deleted: ", deleting its clone"
+                case .shutDown: ", shutting its device down, as the lease found it"
+                default: ""
+                }
+                return "would release the lapsed lease on \(udid)\(device)"
+            }
+            let device = switch release.device {
+            case .deleted: " and deleted its clone"
+            case .shutDown: " and shut its device down, as the lease found it"
+            case .alreadyShutDown: "; its device was already shut down"
+            case .gone: "; its device no longer exists"
+            case .leftAsItIs, nil: ""
+            }
+            return "released the lapsed lease on \(udid)\(device)"
         }
     }
 

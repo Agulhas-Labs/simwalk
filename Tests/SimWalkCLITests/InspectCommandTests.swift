@@ -36,6 +36,46 @@ struct InspectCommandTests {
         #expect(!FileManager.default.fileExists(atPath: output.path))
     }
 
+    /// The runner's image is filed as `inspect-<nonce>.png` under the state's screenshots directory and the directory pruned to the newest 20.
+    @Test
+    func theRunnersImageIsFiledByNonceAndTheDirectoryPruned() throws {
+        let directory = try TemporaryDirectory()
+        let screenshots = directory.url.appendingPathComponent("screenshots", isDirectory: true)
+        try FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
+        for index in 0 ..< ScreenshotOption.keptCount {
+            let old = screenshots.appendingPathComponent("inspect-old\(index).png")
+            try Data().write(to: old)
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(index))], ofItemAtPath: old.path)
+        }
+        let runnerPNG = directory.url.appendingPathComponent("runner.png")
+        try SessionCommandTests.png(width: 402, height: 874).write(to: runnerPNG)
+        let tree = try #require(SessionCommandTests.screen.tree)
+        let request = try #require(ScreenshotFit.Request())
+
+        let line = ScreenshotFit.line(InspectCommand.screenshotOutcome(runnerPNG: runnerPNG, nonce: "N1", tree: tree, request: request, in: screenshots))
+
+        let filed = screenshots.appendingPathComponent("inspect-N1.png")
+
+        #expect(line.hasPrefix("screenshot: \(filed.path) (402×874 px, point scale"))
+        #expect(FileManager.default.fileExists(atPath: filed.path))
+        #expect(!FileManager.default.fileExists(atPath: screenshots.appendingPathComponent("inspect-old0.png").path))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: screenshots.path).count == ScreenshotOption.keptCount)
+    }
+
+    /// A runner that left no image is the line saying so, and nothing is filed.
+    @Test
+    func aRunnerThatLeftNoImageIsTheLineSayingSo() throws {
+        let directory = try TemporaryDirectory()
+        let screenshots = directory.url.appendingPathComponent("screenshots", isDirectory: true)
+        let tree = try #require(SessionCommandTests.screen.tree)
+        let request = try #require(ScreenshotFit.Request())
+
+        let line = ScreenshotFit.line(InspectCommand.screenshotOutcome(runnerPNG: directory.url.appendingPathComponent("none.png"), nonce: "N2", tree: tree, request: request, in: screenshots))
+
+        #expect(line == "screenshot: not written — the runner wrote no image")
+        #expect(!FileManager.default.fileExists(atPath: screenshots.appendingPathComponent("inspect-N2.png").path))
+    }
+
     /// An app found not running is refused with the launch command that would fix it, exit 1, logged as a refusal of what was asked rather than a runner failure — and the handback note still reaches the reader.
     @Test
     func anAppNotRunningIsRefusedNamingTheLaunchCommand() throws {
@@ -216,6 +256,69 @@ struct InspectCommandTests {
 
         #expect(answer.text.contains("UDID-1 was light before this inspect started and could not be put back"))
         #expect(!answer.text.contains("before this walk"))
+    }
+
+    /// SimWalk#214: a refused inspect's handback names the inspect too, not a walk.
+    @Test
+    func theAccessibilityLineOnARefusedInspectNamesTheInspect() throws {
+        let handback = DeviceHandback(
+            accessibility: AccessibilityPreference.Restoration(udid: "UDID-1", state: .restored),
+            appearance: .restored(.light)
+        )
+
+        let thrown = #expect(throws: WalkCommand.Refusal.self) {
+            try InspectCommand.outcome(runnerFailure: nil, handback: handback, readingScreen: { throw LiveScreenError.missing(path: "/nowhere", reason: "boom") }, match: nil)
+        }
+
+        let text = try "\(#require(thrown))"
+
+        #expect(text.contains("this inspect switched it back on"))
+        #expect(!text.contains("this walk"))
+    }
+
+    /// SimWalk#218: an inspect of an app that was not running is refused with a handback that names the inspect too, not a walk.
+    @Test
+    func theAccessibilityLineOnAnInspectOfAClosedAppNamesTheInspect() throws {
+        let handback = DeviceHandback(
+            accessibility: AccessibilityPreference.Restoration(udid: "UDID-1", state: .restored),
+            appearance: .restored(.light)
+        )
+
+        let thrown = #expect(throws: WalkCommand.Refusal.self) {
+            try InspectCommand.outcome(runnerFailure: nil, handback: handback, readingScreen: { Self.screen(state: .notRunning) }, match: nil)
+        }
+
+        let text = try "\(#require(thrown))"
+
+        #expect(text.contains("this inspect switched it back on"))
+        #expect(!text.contains("this walk"))
+    }
+
+    /// SimWalk#243: an app that is not running because it crashed is refused naming the crash and its report, still as the device the caller left; with no report it is plain not running.
+    @Test
+    func anAppThatCrashedIsRefusedNamingTheCrashReport() throws {
+        let directory = try TemporaryDirectory()
+        let report = directory.url.appendingPathComponent("Live-2026-10-23-233232.ips")
+        let header = #"{"app_name":"Live","timestamp":"2026-10-23 23:32:32.00 +0100","bundleID":"com.example.live","bug_type":"309"}"#
+        let body = #"{"procPath":"/Users/USER/Library/Developer/CoreSimulator/Devices/UDID-1/data/Containers/Bundle/Application/X/Live.app/Live"}"#
+        try Data((header + "\n" + body).utf8).write(to: report)
+        let lookup = { AppCrashReport.latest(bundleID: "com.example.live", udid: "UDID-1", since: nil, in: directory.url) }
+
+        let crashed = #expect(throws: LiveScreenError.self) {
+            try InspectCommand.outcome(runnerFailure: nil, handback: nil, readingScreen: { Self.screen(state: .notRunning) }, match: nil, crashReport: lookup)
+        }
+        let plain = #expect(throws: LiveScreenError.self) {
+            try InspectCommand.outcome(runnerFailure: nil, handback: nil, readingScreen: { Self.screen(state: .notRunning) }, match: nil, crashReport: { nil })
+        }
+
+        let text = try "\(#require(crashed))"
+
+        // The temporary directory is listed back through `/private`, so the report is matched by its directory's name and its own.
+        #expect(text.hasPrefix("com.example.live is not running on UDID-1: it crashed at 2026-10-23T22:32:32Z (crash report /"))
+        #expect(text.contains("\(directory.url.lastPathComponent)/\(report.lastPathComponent)) — "))
+        #expect(text.contains("xcrun simctl launch UDID-1 com.example.live"))
+        #expect(crashed?.usageFailureKind == .inputRefused)
+        #expect(plain == .appNotRunning(bundleID: "com.example.live", udid: "UDID-1"))
     }
 
     /// A live read of `screen`, which the scripted runner leaves where the command told it to write.

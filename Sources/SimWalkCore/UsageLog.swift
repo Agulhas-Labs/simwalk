@@ -35,6 +35,11 @@ public struct UsageLog: Sendable {
         "SIMWALK_USAGE_LOG"
     }
 
+    /// The tool name of the line a `--parallel` walk adds beside its `walk` line: a breakdown of that call, not a call of its own, so ``UsageReport`` leaves it out of every tally.
+    public static var parallelTool: String {
+        "walk.parallel"
+    }
+
     // Host-only: `homeDirectoryForCurrentUser` (read only by ``HomeDirectories``) is unavailable on iOS, and rightly — the runner executes
     // inside a simulator where `~` is an app container, so a "standard location" there would be a
     // per-install directory nobody could find and nothing could aggregate. The log's own machinery is
@@ -66,8 +71,10 @@ public struct UsageLog: Sendable {
     ///
     /// `session` is whose Claude Code session the call belongs to, so a status line can price its own calls and nobody else's. It is a parameter rather than an environment read inside this type, on the same rule the clock follows: which face attributes a call to a session is a decision at the call site. The MCP face passes its own; the CLI passes the session a `PreToolUse` hook slip names for its arguments (``CallAttribution``, SimWalk#14), and nothing when there is none — a CLI is also run by hand and by scripts under no session at all, and a session guessed at would credit one session with another's saving.
     ///
+    /// `parallel` is a `--parallel` walk's per-shard breakdown, written on the `walk.parallel` line `walkShards` adds beside the CLI's `walk` record; absent on every other line.
+    ///
     /// `kind` says why a failed call failed — `nil` for a call that succeeded, where a kind means nothing, and for a failure whose site has not been mapped to one (``UsageFailureKind``). Read off the thrown error at the call site (``UsageFailureKind/of(_:)``) or stated directly, never inferred here: this type only ever writes what it is told.
-    public func record(tool: String, target: String?, milliseconds: Int, succeeded: Bool, err: String? = nil, saving: ContextSaving? = nil, session: String? = nil, kind: UsageFailureKind? = nil) {
+    public func record(tool: String, target: String?, milliseconds: Int, succeeded: Bool, err: String? = nil, saving: ContextSaving? = nil, session: String? = nil, kind: UsageFailureKind? = nil, parallel: ParallelTimings? = nil) {
         let entry = Entry(
             timestamp: Timestamp.string(from: now()),
             tool: tool,
@@ -80,7 +87,8 @@ public struct UsageLog: Sendable {
             imageTokens: saving.map { $0.screenshotTokens.reduce(0, +) },
             treeBytes: saving?.treeBytes,
             answerBytes: saving?.servedBytes,
-            kind: kind
+            kind: kind,
+            parallel: parallel
         )
         let encoder = JSONEncoder()
         // Paths are most of what a log line carries, and an escaped one is unreadable when triaging.
@@ -164,6 +172,9 @@ public extension UsageLog {
         /// Never written by this build (there is no `UsageFailureKind` case it would refuse to encode), and excluded from `CodingKeys` accordingly: it exists only to carry forward what a newer binary's line said, for `simwalk usage` to report as a gap rather than silently fold into the same bucket as a line that said nothing.
         public var unrecognizedKind: String?
 
+        /// Where a `--parallel` walk's time went, per shard; absent on every line but the `walk.parallel` one, and on every line written before this field existed.
+        public var parallel: ParallelTimings?
+
         public init(
             timestamp: String,
             tool: String,
@@ -176,7 +187,8 @@ public extension UsageLog {
             imageTokens: Int? = nil,
             treeBytes: Int? = nil,
             answerBytes: Int? = nil,
-            kind: UsageFailureKind? = nil
+            kind: UsageFailureKind? = nil,
+            parallel: ParallelTimings? = nil
         ) {
             self.timestamp = timestamp
             self.tool = tool
@@ -190,6 +202,7 @@ public extension UsageLog {
             self.treeBytes = treeBytes
             self.answerBytes = answerBytes
             self.kind = kind
+            self.parallel = parallel
         }
 
         /// Decodes leniently over `kind`: a value this build's `UsageFailureKind` has no case for must not fail the whole line.
@@ -210,6 +223,7 @@ public extension UsageLog {
             imageTokens = try container.decodeIfPresent(Int.self, forKey: .imageTokens)
             treeBytes = try container.decodeIfPresent(Int.self, forKey: .treeBytes)
             answerBytes = try container.decodeIfPresent(Int.self, forKey: .answerBytes)
+            parallel = try container.decodeIfPresent(ParallelTimings.self, forKey: .parallel)
             if container.contains(.kind), try !container.decodeNil(forKey: .kind) {
                 let stringKind = try? container.decode(String.self, forKey: .kind)
                 let rawKind = stringKind ?? Self.nonStringKindText(in: container)
@@ -264,5 +278,6 @@ extension UsageLog.Entry {
         case treeBytes
         case answerBytes = "outBytes"
         case kind
+        case parallel
     }
 }

@@ -24,8 +24,8 @@ struct AppleAuditDiffTests {
         )
     }
 
-    private static func record(_ issues: [AppleAuditRecord.Issue] = [], error: String? = nil) -> AppleAuditRecord {
-        AppleAuditRecord(milliseconds: 1500, error: error, issues: issues)
+    private static func record(_ issues: [AppleAuditRecord.Issue] = [], error: String? = nil, elementsRead: Bool? = nil) -> AppleAuditRecord {
+        AppleAuditRecord(milliseconds: 1500, error: error, issues: issues, elementsRead: elementsRead)
     }
 
     private static func capture(_ state: Walkbook.CaptureState, _ record: AppleAuditRecord?) -> Fixture.Capture {
@@ -74,6 +74,30 @@ struct AppleAuditDiffTests {
         let diff = try Self.diff(reference: [Self.record(), Self.record()], run: [Self.record([Self.issue("unknown(99)", elementType: nil, description: "Odd")]), Self.record()])
 
         #expect(Self.lines(diff) == ["  apple  unknown(99)  root/light: (no element) — Odd, not in reference"])
+    }
+
+    @Test
+    func aFlagSaysWhyThereIsNoElementAsFarAsTheRecordCanTell() throws {
+        let bare = Self.issue(elementType: nil)
+        var lost = bare
+        lost.elementUnreadable = "snapshot failed"
+        let old = try Self.diff(reference: [Self.record(), Self.record()], run: [Self.record([bare]), Self.record()])
+        let none = try Self.diff(reference: [Self.record(), Self.record()], run: [Self.record([bare], elementsRead: true), Self.record()])
+        let unreadable = try Self.diff(reference: [Self.record(), Self.record()], run: [Self.record([lost], elementsRead: true), Self.record()])
+
+        #expect(Self.lines(old) == ["  apple  appleContrast  root/light: (no element) — Contrast nearly passed, not in reference"])
+        #expect(Self.lines(none) == ["  apple  appleContrast  root/light: Apple named no element — Contrast nearly passed, not in reference"])
+        #expect(Self.lines(unreadable) == ["  apple  appleContrast  root/light: the element could not be read after the audit (snapshot failed) — Contrast nearly passed, not in reference"])
+    }
+
+    @Test
+    func anIssueWithAnUnreadableElementIsTheSameIssueAsOneWithNoElementInTheReference() throws {
+        let bare = Self.issue(elementType: nil)
+        var lost = bare
+        lost.elementUnreadable = "snapshot failed"
+        let diff = try Self.diff(reference: [Self.record([bare]), Self.record()], run: [Self.record([lost]), Self.record()])
+
+        #expect(diff.flagCount == 0)
     }
 
     @Test

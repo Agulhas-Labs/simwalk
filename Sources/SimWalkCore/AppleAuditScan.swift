@@ -14,6 +14,8 @@ public struct AppleAuditScan: Sendable {
     public let audited: Int
     /// Captures whose call threw, with why; their issues, found before the throw, stay in ``findings``.
     public let failures: [Failure]
+    /// The failures that are XCTest's audit timeout (``AppleAuditRecord/timedOut``), in manifest order.
+    public let timeouts: [Failure]
     public let unreadable: [Unreadable]
     public let findings: [Finding]
 
@@ -26,10 +28,23 @@ public struct AppleAuditScan: Sendable {
         audited + failed + unreadable.count
     }
 
+    /// The timed-out audits whose records are on disk under `bundleURL`, read without its manifest, in path order; a record that cannot be read is skipped.
+    ///
+    /// For a bundle whose manifest was never finalised (SimWalk#190): the runner stopped or crashed after an audit timed out, so there is no manifest for ``init(_:)`` to scan, yet the record is on disk and the device's `testmanagerd` is still computing that audit (SimWalk#173). Each timeout is named by its directory, its screen by its slug.
+    public static func timeouts(recordedIn bundleURL: URL, fileManager: FileManager = .default) -> [Failure] {
+        let decoder = JSONDecoder()
+        return CaptureBundleLayout.appleAuditStates(in: bundleURL, fileManager: fileManager).compactMap { state in
+            let url = CaptureBundleLayout.url(forRelativePath: CaptureBundleLayout.appleAuditPath(screenID: state.screenSlug, stateSlug: state.stateSlug), in: bundleURL)
+            guard let record = try? decoder.decode(AppleAuditRecord.self, from: Data(contentsOf: url)), record.timedOut, let error = record.error else { return nil }
+            return Failure(screenID: state.screenSlug, stateSlug: state.stateSlug, error: error)
+        }
+    }
+
     /// Reads the record of every capture that has an entry.
     public init(_ bundle: CaptureBundle) {
         var audited = 0
         var failures: [Failure] = []
+        var timeouts: [Failure] = []
         var unreadable: [Unreadable] = []
         var findings: [Finding] = []
         var count = 0
@@ -51,18 +66,22 @@ public struct AppleAuditScan: Sendable {
                 }
                 if let error = record.error {
                     failures.append(Failure(screenID: screen.id, stateSlug: capture.state.slug, error: error))
+                    if record.timedOut {
+                        timeouts.append(Failure(screenID: screen.id, stateSlug: capture.state.slug, error: error))
+                    }
                 } else {
                     audited += 1
                 }
                 let identities = AppleAuditIdentity.identities(of: record.issues, screenID: screen.id)
                 for (issue, identity) in zip(record.issues, identities) {
-                    findings.append(Finding(screenID: screen.id, stateSlug: capture.state.slug, issue: issue, identity: identity))
+                    findings.append(Finding(screenID: screen.id, stateSlug: capture.state.slug, issue: issue, identity: identity, elementsRead: record.elementsRead == true))
                 }
             }
         }
         captureCount = count
         self.audited = audited
         self.failures = failures
+        self.timeouts = timeouts
         self.unreadable = unreadable
         self.findings = findings
     }
@@ -124,6 +143,12 @@ public extension AppleAuditScan {
         public let stateSlug: String
         public let issue: AppleAuditRecord.Issue
         public let identity: AppleAuditIdentity
+        /// Whether the finding's record says each issue's element was read after the audit.
+        public let elementsRead: Bool
+
+        var elementCase: AppleElementCase {
+            AppleElementCase(issue, elementsRead: elementsRead)
+        }
     }
 
     /// A capture whose audit call threw.

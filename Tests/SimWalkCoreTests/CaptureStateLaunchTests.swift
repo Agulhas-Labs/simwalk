@@ -51,7 +51,7 @@ struct CaptureStateLaunchTests {
         #expect(first.slug.hasPrefix("light-env_"))
     }
 
-    /// Theme, then `dt_`, `loc_`, `args_`, `env_` — the environment hashed over its pairs sorted by key, so the order a dictionary happens to hold them in changes nothing.
+    /// Theme, then `dt_`, `loc_`, `args_`, `env_`, and `orientation` last of all — the environment hashed over its pairs sorted by key, so the order a dictionary happens to hold them in changes nothing.
     @Test
     func everyAxisSlugsInItsFixedOrder() {
         let state = Walkbook.CaptureState(
@@ -59,10 +59,11 @@ struct CaptureStateLaunchTests {
             dynamicTypeSize: "UICTContentSizeCategoryAccessibilityL",
             locale: "en_GB",
             arguments: ["a", "b"],
-            environment: ["B": "2", "A": "1"]
+            environment: ["B": "2", "A": "1"],
+            orientation: .landscape
         )
 
-        #expect(state.slug == "dark-dt_uictcontentsizecategoryaccessibilityl-loc_en_gb-args_facdde7a-env_a6df947a")
+        #expect(state.slug == "dark-dt_uictcontentsizecategoryaccessibilityl-loc_en_gb-args_facdde7a-env_a6df947a-landscape")
     }
 
     /// The length-prefixed encoding is unambiguous where a `key=value` join would collide: an environment key holding `=` and a value holding `=` can spell the same joined string from different pairs.
@@ -121,7 +122,7 @@ struct CaptureStateLaunchTests {
         #expect(state.launchEnvironment(over: ["DYLD_INSERT_LIBRARIES": "/b", "SHARED": "base"]) == ["DYLD_INSERT_LIBRARIES": "/s:/b", "SHARED": "state"])
     }
 
-    /// A state carrying neither encodes exactly as before SimWalk#44 — its JSON is unchanged, while every manifest this build writes declares format 8.
+    /// A state carrying neither encodes exactly as before SimWalk#44 — its JSON is unchanged, while every manifest this build writes declares the current format.
     @Test
     func astateWithNeitherWritesNeitherKey() throws {
         let encoder = JSONEncoder()

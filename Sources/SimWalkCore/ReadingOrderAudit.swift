@@ -16,6 +16,10 @@ import Foundation
 ///
 /// A control is one element whatever it contains: its children are what it says.
 ///
+/// So is a labelled table cell with no enabled control below it (SimWalk#236): UIKit reads it as one element, so its children's order is never swiped, and it is not descended into. Its label need not carry the children's text.
+///
+/// "To its left" is judged only between elements on one row: their vertical overlap is at least half the taller one's height, or the taller is under three times the shorter (SimWalk#237). A paragraph with a picture beside it is not a line read out of order.
+///
 /// So is a labelled container that speaks for its text (SimWalk#105). A SwiftUI `.accessibilityElement(children: .combine)` is an `Other` labelled "Step 3 of 4, Setup" whose children are the StaticTexts "3" and "Setup": VoiceOver stops on the parent once and reads its label, so the order of the children inside it is never swiped. A non-control node with a non-blank label is one element, and is not descended into, when it has at least one text-carrying leaf, every such leaf's text (label, else value; trimmed) occurs in the node's own label, and no descendant is an enabled control. Anything short of that is collected child by child: text the label does not carry is a stop of its own, and a control inside is a stop of its own.
 public struct ReadingOrderAudit: PerTreeLabelAuditRule {
     public static let name = AuditRuleName.readingOrder
@@ -31,7 +35,7 @@ public struct ReadingOrderAudit: PerTreeLabelAuditRule {
         "element"
     }
 
-    private static let skipped: Set<String> = ["TabBar", "NavigationBar", "Toolbar", "Keyboard"]
+    private static let skipped: Set<String> = ["TabBar", "NavigationBar", "Toolbar"]
     private static let controls = AuditedControl.types.union(["SecureTextField", "SearchField"])
     private static let rightToLeft: Set<String> = ["ar", "he", "fa", "ur", "iw", "yi", "ps", "ckb", "ug"]
     /// Points of slack when comparing edges, so two elements that touch are not ordered by rounding.
@@ -68,16 +72,17 @@ public struct ReadingOrderAudit: PerTreeLabelAuditRule {
     }
 
     private func collect(_ node: AXNode, screen: AXNode.Frame, into found: inout [AXNode]) {
-        if Self.skipped.contains(node.type) {
+        if Self.skipped.contains(node.type) || ScreenIdentifier.isKeyboard(node) {
             return
         }
         let isControl = Self.controls.contains(node.type)
         let carriesText = node.children.isEmpty && (!AuditedControl.isBlank(node.label) || !AuditedControl.isBlank(node.value))
-        if isControl && node.isEnabled || carriesText || !isControl && Self.speaksForItsText(node), node.frame.isOnScreen(screen) {
+        let isOneStop = !isControl && (Self.speaksForItsText(node) || Self.isLabelledCellWithoutControl(node))
+        if isControl && node.isEnabled || carriesText || isOneStop, node.frame.isOnScreen(screen) {
             found.append(node)
         }
         if !isControl {
-            if Self.speaksForItsText(node) {
+            if isOneStop {
                 return
             }
             for child in node.children {
@@ -92,6 +97,12 @@ public struct ReadingOrderAudit: PerTreeLabelAuditRule {
         var leafTexts: [String] = []
         guard gatherLeafTexts(node.children, into: &leafTexts) else { return false }
         return !leafTexts.isEmpty && leafTexts.allSatisfy { label.contains($0) }
+    }
+
+    /// Whether a labelled table cell is one VoiceOver stop (SimWalk#236): UIKit reads a cell with a label as a single element unless it holds a control, so the order of its children is never swiped. Unlike `speaksForItsText`, the label need not carry the children's text (an icon's symbol name is not in it).
+    private static func isLabelledCellWithoutControl(_ node: AXNode) -> Bool {
+        var leafTexts: [String] = []
+        return node.type == "Cell" && !node.children.isEmpty && !AuditedControl.isBlank(node.label) && gatherLeafTexts(node.children, into: &leafTexts)
     }
 
     /// Collects the trimmed text of each text-carrying leaf below, or reports `false` at the first enabled control.
@@ -116,8 +127,10 @@ public struct ReadingOrderAudit: PerTreeLabelAuditRule {
     private static func position(of later: AXNode, relativeTo earlier: AXNode) -> String? {
         let a = earlier.frame
         let b = later.frame
+        // "To its left" is judged only on one row: a picture beside a paragraph three or more times its height is not a line read out of order (SimWalk#237), while a title beside a taller button still is.
         if b.verticalOverlap(with: a) >= 0.5 * min(a.height, b.height) {
-            return b.maxX <= a.minX + tolerance ? "to its left" : nil
+            let isOneRow = b.verticalOverlap(with: a) >= 0.5 * max(a.height, b.height) || max(a.height, b.height) < 3 * min(a.height, b.height)
+            return isOneRow && b.maxX <= a.minX + tolerance ? "to its left" : nil
         }
         if b.maxY <= a.minY + tolerance, b.horizontalOverlap(with: a) > 0 {
             return "above it"

@@ -20,6 +20,12 @@ final class WalkRunner: XCTestCase {
     private var setsLocation = false
     /// The location the device was simulating when the walk began, walked under by every state without its own.
     private var foundLocation: XCUILocation?
+    /// Whether any state of this walk sets an orientation — the device's own is read and handed back only then (SimWalk#199).
+    private var setsOrientation = false
+    /// The orientation the device was in when the walk began, walked under by every state without its own.
+    private var foundOrientation: UIDeviceOrientation?
+    /// Whether a launch has turned the device to a landscape app on a device held portrait, so the walk hands the orientation back as it does a state's (SimWalk#222).
+    private var turnedToApp = false
     /// The records the device walk's measure runs produced (`SIMWALK_PERFORMANCE_JSON`), filed on each capture they name (SimWalk#67, M4); empty on every other walk.
     private var measured = MeasuredPerformance()
 
@@ -64,6 +70,11 @@ final class WalkRunner: XCTestCase {
         // state without its own is walked under this, and the walk hands it back at the end.
         setsLocation = walkbook.screens.contains { $0.states.contains { $0.location != nil } }
         foundLocation = setsLocation ? XCUIDevice.shared.location : nil
+        // The orientation the device was in before any state turned it, read only when a state will, as the location is.
+        setsOrientation = walkbook.screens.contains { $0.states.contains { $0.orientation != nil } }
+        // Read whatever the states say: a launch may turn the device to a landscape app (SimWalk#222), and the walk puts it back where it found it.
+        foundOrientation = XCUIDevice.shared.orientation
+        handBackOnTeardown(appearance: true)
         // The progress file the host started, taken over for `running` and each screen (`Docs/SIMWALK-PROGRESS.md`
         // §3). It only adds writes, every one of them silent when it fails: progress never fails a walk, and the
         // bundle is what it would be without it.
@@ -76,14 +87,9 @@ final class WalkRunner: XCTestCase {
             records.append(record)
             progress?.commit { $0.finishScreen(record, at: position, of: screenIDs, in: writer.url) }
         }
-        if setsLocation {
-            XCUIDevice.shared.location = foundLocation
-        }
         // The same reset once more after the last state, so the host's read after the walk says whether
         // the resets this walk relied on actually held — the device should be back where it was found.
-        if let found = Self.deviceAppearance {
-            XCUIDevice.shared.appearance = Self.style(found)
-        }
+        handBack(appearance: true)
 
         let manifest = try CaptureManifest(
             walkName: walkbook.name,
@@ -189,6 +195,14 @@ final class WalkRunner: XCTestCase {
         let walkbook = try Self.walkbook(from: environment)
         let screen = try XCTUnwrap(walkbook.screens.first { $0.id == run.screenID }, "measure \(run.subject): the walkbook has no screen '\(run.screenID)'")
         let state = try XCTUnwrap(screen.states.first { $0.slug == run.stateSlug }, "measure \(run.subject): screen '\(screen.id)' has no state '\(run.stateSlug)'")
+        // XCTest runs this test on a fresh instance, so `testWalk`'s reads of the device never reached it: the state's
+        // own orientation is read here, as the walk reads it, so the measure launches rotated and hands the device back (SimWalk#199).
+        setsOrientation = state.orientation != nil
+        foundOrientation = XCUIDevice.shared.orientation
+        // The state's location is applied and handed back here the same way, so the measure runs under the place the state names, not the device's (SimWalk#217).
+        setsLocation = state.location != nil
+        foundLocation = setsLocation ? XCUIDevice.shared.location : nil
+        handBackOnTeardown(appearance: true)
         let app = XCUIApplication(bundleIdentifier: walkbook.appBundleID)
         let baseEnvironment = AnimationsOptIn.inserting(AnimationsOptIn.library(in: ProcessInfo.processInfo.environment), into: app.launchEnvironment)
         let quiet = SettleWindow.quiet(forScreenMilliseconds: screen.settle, default: Self.settleQuiet)
@@ -208,7 +222,17 @@ final class WalkRunner: XCTestCase {
             guard !failed else { return }
             app.terminate()
             XCUIDevice.shared.appearance = Self.style(state.theme)
+            // Once turned to the app the device stays turned across iterations, so the turn is not timed (SimWalk#222).
+            if setsOrientation, let foundOrientation {
+                XCUIDevice.shared.orientation = Self.orientation(of: state, found: foundOrientation)
+            }
+            if let location = state.location {
+                XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: location.latitude, longitude: location.longitude))
+            }
             Self.launch(app, under: state, over: baseEnvironment)
+            if let foundOrientation, Self.alignDevice(to: app, stated: state.orientation, found: foundOrientation) {
+                turnedToApp = true
+            }
             let route = follow(screen, of: walkbook, in: app, budget: budget).probe
             switch route.outcome {
             case .resolved:
@@ -223,8 +247,26 @@ final class WalkRunner: XCTestCase {
             }
         }
         // The device as the host found it, as a walk hands it back.
-        if let found = Self.deviceAppearance {
+        handBack(appearance: true)
+    }
+
+    /// Puts back what this test changed: the location and the orientation only when a state set them or a launch turned the device (so a walk that changed neither hands back nothing), and the appearance the host read when `appearance`. Idempotent, and reads the values found at the start, so running it again after the explicit hand-back changes nothing.
+    private func handBack(appearance: Bool) {
+        if setsLocation {
+            XCUIDevice.shared.location = foundLocation
+        }
+        if setsOrientation || turnedToApp, let foundOrientation {
+            XCUIDevice.shared.orientation = Self.handedBack(foundOrientation)
+        }
+        if appearance, let found = Self.deviceAppearance {
             XCUIDevice.shared.appearance = Self.style(found)
+        }
+    }
+
+    /// Registers the hand-back as an XCTest teardown block, so a failed `app.launch()` or an interrupted test still gives the device back (SimWalk#225); called once the test has recorded what it found. The explicit hand-back after the last screen stays, because the host reads the device right after the walk.
+    private func handBackOnTeardown(appearance: Bool) {
+        addTeardownBlock { [self] in
+            handBack(appearance: appearance)
         }
     }
 
@@ -256,14 +298,24 @@ final class WalkRunner: XCTestCase {
         let outputPath = try XCTUnwrap(environment[Input.output], "\(Input.output) not set — the host driver passes it as TEST_RUNNER_\(Input.output)")
         let nonce = try XCTUnwrap(environment[Input.nonce], "\(Input.nonce) not set — the host driver passes it as TEST_RUNNER_\(Input.nonce)")
         let started = Date()
+        let app = XCUIApplication(bundleIdentifier: bundleID)
+        var picture: Data?
         let screen = try Self.liveScreen(
-            of: XCUIApplication(bundleIdentifier: bundleID),
+            of: app,
             bundleID: bundleID,
             runnerCommit: environment[Input.runnerCommit],
-            nonce: nonce
+            nonce: nonce,
+            kept: { picture = $0 }
         )
+        // Only an app that was read: a screenshot of one not running fails XCTest, where the host's refusal is clean.
+        let screenshot = screen.tree != nil && screen.appState != .notRunning
+            ? environment[Input.screenshotOutput].map { path in (path: path, png: picture ?? Self.screenshot(of: app)) }
+            : nil
         do {
             try screen.write(to: URL(fileURLWithPath: outputPath))
+            if let screenshot {
+                try screenshot.png.write(to: URL(fileURLWithPath: screenshot.path), options: .withoutOverwriting)
+            }
         } catch {
             log("inspect.runner", target: bundleID, since: started, succeeded: false, err: "\(error)")
             throw error
@@ -271,12 +323,41 @@ final class WalkRunner: XCTestCase {
         log("inspect.runner", target: bundleID, since: started, succeeded: true, err: nil)
     }
 
+    /// The one screenshot every consumer takes: the whole screen, turned upright when the device is rotated to landscape and the app is in front (SimWalk#199, SimWalk#221).
+    ///
+    /// A rotated device's `XCUIScreen` screenshot comes back in the device's portrait pixel grid with the content drawn sideways and an Orientation tag nothing honours. `app.screenshot()` is not the cure: it returns the landscape pixel size over that same portrait grid, cropped, so the right third is black and the rest of the screen is lost (SimWalk#221). So the whole screen is taken and its stored pixels are turned a quarter with ``UprightScreenshot``: `landscapeLeft` counter-clockwise, `landscapeRight` clockwise. The decision is the device's, not the app's frame, so it costs no accessibility query per screenshot, and the state check keeps it off an app that died since the tree was read. A portrait capture takes today's call, so it changes no byte.
+    static func screenshot(of app: XCUIApplication) -> Data {
+        let shot = XCUIScreen.main.screenshot()
+        let png = shot.pngRepresentation
+        // Only the portrait grid is turned: a picture already wider than tall (a device or side not yet measured) is kept as it came rather than turned sideways (SimWalk#221 review).
+        guard app.state == .runningForeground, let stored = shot.image.cgImage, stored.height > stored.width else { return png }
+        let turn: UprightScreenshot.QuarterTurn
+        switch XCUIDevice.shared.orientation {
+        case .landscapeLeft: turn = .counterClockwise
+        case .landscapeRight: turn = .clockwise
+        default: return png
+        }
+        return UprightScreenshot.png(png, turned: turn) ?? png
+    }
+
+    /// The picture a tree with no text is told from another by (SimWalk#150); `nil` for a tree with text, or an app not running, since XCTest fails a screenshot of one.
+    ///
+    /// **The one function** a `session read` takes its picture with and the stepper takes its before-picture with: ``screenshot(of:)``, the whole screen, turned upright when the device is landscape, so a hash guarded across the stepper and a read always compares like with like (SimWalk#150, SimWalk#221).
+    static func pixelSignature(for tree: AXNode, of app: XCUIApplication, kept: (Data) -> Void = { _ in }) -> PixelSignature? {
+        guard PixelSignature.isNeeded(for: tree), app.state != .notRunning else { return nil }
+        let png = screenshot(of: app)
+        kept(png)
+        return PixelSignature(png: png)
+    }
+
     /// Reads `app` as it stands into one ``LiveScreen`` — what `inspect` writes and a live session's `read` answers.
     ///
     /// **Never launches.** It attaches by bundle identifier: an app not running is read as ``LiveScreen/AppState/notRunning`` with no tree, for the host to refuse with the reason, because a launch would serve the launch screen as the screen somebody left the app on. One in the background is brought forward with `activate()`, which resumes a running app and never relaunches it.
     ///
     /// **Read twice, a settle interval apart**, keeping the second read and recording whether the two agreed, so a read taken mid-push says so rather than naming labels that are gone a moment later.
-    static func liveScreen(of app: XCUIApplication, bundleID: String, runnerCommit: String?, nonce: String) throws -> LiveScreen {
+    ///
+    /// `kept` is handed the PNG when the read took one for the picture, so a caller that also wants the screenshot reuses it rather than taking a second.
+    static func liveScreen(of app: XCUIApplication, bundleID: String, runnerCommit: String?, nonce: String, kept: (Data) -> Void = { _ in }) throws -> LiveScreen {
         let appState: LiveScreen.AppState
         switch app.state {
         case .runningForeground:
@@ -303,6 +384,7 @@ final class WalkRunner: XCTestCase {
             // SpringBoard's alerts are invisible in the app's tree; a SpringBoard that cannot be read says nothing rather than failing the read.
             systemAlert = (try? AXTreeCapture.tree(of: XCUIApplication(bundleIdentifier: StepPerformer.springboardBundleID))).flatMap(SystemAlertCheck.alert(in:))
         }
+        let pixels = tree.flatMap { pixelSignature(for: $0, of: app, kept: kept) }
         let native = UIScreen.main.nativeBounds
         return LiveScreen(
             appBundleID: bundleID,
@@ -314,7 +396,8 @@ final class WalkRunner: XCTestCase {
             tree: tree,
             settled: settled,
             screenPixels: LiveScreen.Pixels(width: Int(native.width), height: Int(native.height)),
-            systemAlert: systemAlert
+            systemAlert: systemAlert,
+            pixels: pixels
         )
     }
 
@@ -335,6 +418,9 @@ final class WalkRunner: XCTestCase {
         var lastBound: [CaptureManifest.BoundElement] = []
         // Written as each launch applies its reset, so it reaches every record below, the refused and failed ones included.
         var launchResets: [CaptureManifest.LaunchReset] = []
+        var deviceTurns: [String] = []
+        // States whose app kept the other orientation than they named: refused at launch, their route never followed (SimWalk#222).
+        var launchRefusals: [(state: Walkbook.CaptureState, clause: String)] = []
         // This screen's own quiet period when its walkbook entry states one, so a tab whose content
         // streams in over a second pays for itself instead of the whole walk paying for it. Recorded on
         // the record only where it differs from the walk's, which is where a reader's question is.
@@ -364,7 +450,23 @@ final class WalkRunner: XCTestCase {
                     XCUILocation(location: CLLocation(latitude: $0.latitude, longitude: $0.longitude))
                 } ?? foundLocation
             }
+            // Turned before the launch, so the app's first layout is in it; a state without one is walked in what the
+            // device was found in, never in an earlier state's.
+            if setsOrientation || turnedToApp, let foundOrientation {
+                XCUIDevice.shared.orientation = Self.orientation(of: state, found: foundOrientation)
+            }
             let reset = Self.launch(app, under: state, over: baseEnvironment)
+            // A state that names an orientation is held to it before its route runs: a portrait-locked app on an iPad keeps its portrait
+            // frame under `landscape`, and a route written for the other layout would fail as `unreachable` instead of the state being refused (SimWalk#222).
+            if let stated = state.orientation, let clause = OrientationCheck.refusal(stated: stated, frame: Self.settledFrame(of: app, stated: stated)) {
+                launchRefusals.append((state, clause))
+                continue
+            }
+            // After the launch, because only the launched app's frame says it drew landscape (SimWalk#222).
+            if let foundOrientation, Self.alignDevice(to: app, stated: state.orientation, found: foundOrientation) {
+                turnedToApp = true
+                deviceTurns.append(state.slug)
+            }
             if !reset.isEmpty {
                 launchResets.append(CaptureManifest.LaunchReset(state: state.slug, resources: reset.map(\.rawValue)))
             }
@@ -387,7 +489,7 @@ final class WalkRunner: XCTestCase {
                     outcome: .captureFailed(reason: "state '\(state.slug)': route step \(followed.failedStep.map(String.init(describing:)) ?? "?"): \(reason)"),
                     routeTaken: followed.resolvedSteps,
                     writing: taken,
-                    carrying: Carried(ownSettle: ownSettle, launchResets: launchResets, boundElements: lastBound),
+                    carrying: Carried(ownSettle: ownSettle, launchResets: launchResets, boundElements: lastBound, deviceTurns: deviceTurns, launchRefusals: launchRefusals),
                     with: writer
                 )
             case let .drifted(_, reason, cause):
@@ -401,7 +503,7 @@ final class WalkRunner: XCTestCase {
                     outcome: .unreachable(routeTried: followed.resolvedSteps + [followed.failedStep].compactMap(\.self), reason: reason, cause: cause, state: ScreenOutcome.UnreachableState(failing: state.slug, among: screen.states.map(\.slug))),
                     routeTaken: followed.resolvedSteps,
                     settleQuietMilliseconds: ownSettle,
-                    launchResets: launchResets,
+                    launches: CaptureManifest.ScreenRecord.Launches(resets: launchResets, deviceTurns: deviceTurns),
                     boundElements: bound
                 )
             }
@@ -423,13 +525,13 @@ final class WalkRunner: XCTestCase {
                     outcome: .captureFailed(reason: "state '\(state.slug)': \(error)"),
                     routeTaken: followed.resolvedSteps,
                     writing: taken,
-                    carrying: Carried(ownSettle: ownSettle, launchResets: launchResets, boundElements: lastBound),
+                    carrying: Carried(ownSettle: ownSettle, launchResets: launchResets, boundElements: lastBound, deviceTurns: deviceTurns, launchRefusals: launchRefusals),
                     with: writer
                 )
             }
         }
 
-        return Self.record(screen, outcome: .captured, routeTaken: lastCompleted, writing: taken, carrying: Carried(ownSettle: ownSettle, launchResets: launchResets, boundElements: lastBound), with: writer)
+        return Self.record(screen, outcome: .captured, routeTaken: lastCompleted, writing: taken, carrying: Carried(ownSettle: ownSettle, launchResets: launchResets, boundElements: lastBound, deviceTurns: deviceTurns, launchRefusals: launchRefusals), with: writer)
     }
 
     /// Launches `app` under `state`'s own launch conditions — its permission resets, arguments and environment — once the device is set as the state asks and any earlier launch is gone: the tail of every state a walk launches, and of a live session's launch.
@@ -497,20 +599,30 @@ final class WalkRunner: XCTestCase {
 
     /// Follows every screen's route and writes what each came to — `walk --dry-run`, which captures nothing.
     ///
-    /// **One launch per screen, not per state**: a route is stated from the launch state and a dry run asks only whether it still leads anywhere, so the first state's launch arguments stand in for the rest — a locale changes labels, and the one a walk would try first is the honest one to try. **The device's appearance is never touched**, because it changes no label; that leaves the run nothing to put back but the accessibility the XCUITest teardown switches off, which the host restores as it does after a walk.
+    /// **One launch per screen, not per state**: a route is stated from the launch state and a dry run asks only whether it still leads anywhere, so the first state's launch arguments stand in for the rest — a locale changes labels, and the one a walk would try first is the honest one to try. **The device's appearance is never touched**, because it changes no label; that leaves the run nothing to put back but the accessibility the XCUITest teardown switches off, which the host restores as it does after a walk. **The orientation is turned only to match a landscape-only app** (`alignDevice`, as a walk does after a launch, SimWalk#225), so a screen-point step is taken in the grid the app drew in; the turn is recorded in the report (`deviceTurns`) and handed back at the end, and by a teardown block if the run is cut short.
     private func probeRoutes(of walkbook: Walkbook, to url: URL) throws {
         let started = Date()
         let app = XCUIApplication(bundleIdentifier: walkbook.appBundleID)
         let baseEnvironment = AnimationsOptIn.inserting(AnimationsOptIn.library(in: ProcessInfo.processInfo.environment), into: app.launchEnvironment)
-        let probes = walkbook.screens.map { screen in
+        foundOrientation = XCUIDevice.shared.orientation
+        handBackOnTeardown(appearance: false)
+        var probes: [RouteProbe] = []
+        var turned: [String] = []
+        for screen in walkbook.screens {
             app.terminate()
             app.launchArguments = screen.states.first?.launchArguments ?? []
             app.launchEnvironment = screen.states.first?.launchEnvironment(over: baseEnvironment) ?? baseEnvironment
             app.launch()
+            // `stated: nil`: a dry run never applies a state's orientation, so a stated one must not stop the alignment.
+            if let foundOrientation, Self.alignDevice(to: app, stated: nil, found: foundOrientation) {
+                turnedToApp = true
+                turned.append(screen.id)
+            }
             let quiet = SettleWindow.quiet(forScreenMilliseconds: screen.settle, default: Self.settleQuiet)
-            return follow(screen, of: walkbook, in: app, budget: SettleWindow.budget(forQuiet: quiet)).probe
+            probes.append(follow(screen, of: walkbook, in: app, budget: SettleWindow.budget(forQuiet: quiet)).probe)
         }
         app.terminate()
+        handBack(appearance: false)
         let environment = ProcessInfo.processInfo.environment
         let report = try RouteProbeReport(
             walkName: walkbook.name,
@@ -521,7 +633,8 @@ final class WalkRunner: XCTestCase {
             device: Self.device(),
             startedAt: started,
             nonce: environment[Input.nonce] ?? "",
-            probes: probes
+            probes: probes,
+            deviceTurns: turned
         )
         do {
             try report.write(to: url, of: walkbook)
@@ -554,8 +667,9 @@ final class WalkRunner: XCTestCase {
             expectMenu: screen.expectMenu,
             instead: outcome,
             deviceAppearance: deviceAppearance,
-            deviceLocale: deviceLocale
-        )
+            deviceLocale: deviceLocale,
+            fixedAppearance: screen.fixedAppearance
+        ).refusingAtLaunch(carried.launchRefusals)
         do {
             let captures = try taken.filter { filing.kept.contains($0.state) }.map { taken in
                 // Recorded, not refused: a state asking for the device's own locale draws what its base draws (SimWalk#18).
@@ -571,8 +685,9 @@ final class WalkRunner: XCTestCase {
                 settleQuietMilliseconds: ownSettle,
                 refusedStates: filing.refused,
                 refusedOnAppearance: filing.refusedOnAppearance,
-                launchResets: launchResets,
-                boundElements: boundElements
+                launches: CaptureManifest.ScreenRecord.Launches(resets: launchResets, deviceTurns: carried.deviceTurns),
+                boundElements: boundElements,
+                fixedAppearance: screen.fixedAppearance
             )
         } catch {
             // The disk, not the app, and not the screen: whatever verdict was about to be recorded, what
@@ -587,8 +702,9 @@ final class WalkRunner: XCTestCase {
                 settleQuietMilliseconds: ownSettle,
                 refusedStates: failed.refused,
                 refusedOnAppearance: failed.refusedOnAppearance,
-                launchResets: launchResets,
-                boundElements: boundElements
+                launches: CaptureManifest.ScreenRecord.Launches(resets: launchResets, deviceTurns: carried.deviceTurns),
+                boundElements: boundElements,
+                fixedAppearance: screen.fixedAppearance
             )
         }
     }
@@ -610,24 +726,34 @@ final class WalkRunner: XCTestCase {
             failure = "\(error)"
         }
         let milliseconds = Int((Date().timeIntervalSince(start) * 1000).rounded())
-        // One snapshot per element, outside the timed region; one that cannot be taken leaves the issue without an element.
+        // One snapshot per element, outside the timed region; one that cannot be taken is recorded as unreadable, so an issue Apple named no element for reads differently from one whose element was lost.
         let issues = found.map { entry in
-            AppleAuditRecord.Issue(
-                type: auditTypeName(entry.issue.auditType),
-                compactDescription: entry.issue.compactDescription,
-                detailedDescription: entry.issue.detailedDescription,
-                element: entry.element.flatMap { try? $0.snapshot() }.map { snapshot in
+            var element: AppleAuditRecord.Element?
+            var unreadable: String?
+            if let live = entry.element {
+                do {
+                    let snapshot = try live.snapshot()
                     let frame = snapshot.frame
-                    return AppleAuditRecord.Element(
+                    element = AppleAuditRecord.Element(
                         type: AXTreeCapture.name(of: snapshot.elementType),
                         identifier: snapshot.identifier,
                         label: snapshot.label,
                         frame: AXNode.Frame(x: frame.origin.x, y: frame.origin.y, width: frame.size.width, height: frame.size.height)
                     )
+                } catch {
+                    let described = "\(error)".split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+                    unreadable = described.isEmpty ? String(describing: type(of: error)) : described
                 }
+            }
+            return AppleAuditRecord.Issue(
+                type: auditTypeName(entry.issue.auditType),
+                compactDescription: entry.issue.compactDescription,
+                detailedDescription: entry.issue.detailedDescription,
+                element: element,
+                elementUnreadable: unreadable
             )
         }
-        return AppleAuditRecord(milliseconds: milliseconds, error: failure, issues: issues)
+        return AppleAuditRecord(milliseconds: milliseconds, error: failure, issues: issues, elementsRead: true)
     }
 
     /// The stable name of an audit type; a value this list does not know is `unknown(<raw>)` (``AppleAuditRecord/typeName(known:raw:)``).
@@ -705,6 +831,55 @@ final class WalkRunner: XCTestCase {
         theme == .dark ? .dark : .light
     }
 
+    /// The device orientation a state is walked in: its own (`landscape` always as `.landscapeLeft`, so runs repeat), else the one the device was found in (SimWalk#199).
+    static func orientation(of state: Walkbook.CaptureState, found: UIDeviceOrientation) -> UIDeviceOrientation {
+        switch state.orientation {
+        case .portrait: .portrait
+        case .landscape: .landscapeLeft
+        case nil: handedBack(found)
+        }
+    }
+
+    /// The launched app's root frame, in the interface orientation.
+    static func frame(of app: XCUIApplication) -> AXNode.Frame {
+        AXNode.Frame(x: app.frame.origin.x, y: app.frame.origin.y, width: app.frame.size.width, height: app.frame.size.height)
+    }
+
+    /// The app's frame once the device has had the chance to take `stated`, turning away and back once if it did not (SimWalk#224).
+    static func settledFrame(of app: XCUIApplication, stated: Walkbook.Orientation) -> AXNode.Frame {
+        OrientationSettle.settledFrame(
+            stated: stated,
+            frame: { frame(of: app) },
+            turn: { XCUIDevice.shared.orientation = $0 == .landscape ? .landscapeLeft : .portrait },
+            wait: { Thread.sleep(forTimeInterval: $0) }
+        )
+    }
+
+    /// The app's frame polled for up to `OrientationSettle.pollBudget` while it contradicts `stated`, with no turn (SimWalk#224).
+    static func awaitedFrame(of app: XCUIApplication, stated: Walkbook.Orientation) -> AXNode.Frame {
+        OrientationSettle.settledFrame(stated: stated, frame: { frame(of: app) }, turn: { _ in }, wait: { Thread.sleep(forTimeInterval: $0) }, turnsAway: false)
+    }
+
+    /// Turns the device to landscape when the launched app drew landscape on a device held portrait, and answers whether it did (SimWalk#222).
+    ///
+    /// An iPad app that supports landscape only launches landscape while `XCUIDevice.shared.orientation` stays portrait, and a screen-point step is mapped through the device, so it would land in the portrait grid. A state naming an orientation is never aligned (`DeviceAlignment`). The turn is confirmed by re-reading the app's frame; if the app is not landscape after it, the device is put back to `found` and `false` is answered.
+    static func alignDevice(to app: XCUIApplication, stated: Walkbook.Orientation?, found: UIDeviceOrientation) -> Bool {
+        guard DeviceAlignment.turnsToLandscape(stated: stated, frame: frame(of: app), deviceIsLandscape: XCUIDevice.shared.orientation.isLandscape) else { return false }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        if OrientationCheck.judged(awaitedFrame(of: app, stated: .landscape)) == .landscape {
+            return true
+        }
+        XCUIDevice.shared.orientation = handedBack(found)
+        return false
+    }
+
+    /// The orientation to set to put the device back where it was found: the found one when it is one of the four interface orientations, else `.portrait`.
+    ///
+    /// Face up, face down and unknown are device poses, not interface orientations: setting one leaves the interface where the last state put it, so it would hand back a landscape app.
+    static func handedBack(_ found: UIDeviceOrientation) -> UIDeviceOrientation {
+        found.isValidInterfaceOrientation ? found : .portrait
+    }
+
     /// The `XCUIProtectedResource` a walkbook's `resetPermissions` name stands for — the core spells the names, since it cannot import XCTest.
     private static func protectedResource(_ name: ProtectedResourceName) -> XCUIProtectedResource {
         switch name {
@@ -748,6 +923,11 @@ private extension WalkRunner {
 
         static var output: String {
             "SIMWALK_OUTPUT"
+        }
+
+        /// For `simwalk inspect` only: where to write the PNG of the app taken right after the read, beside ``output``; absent means no screenshot.
+        static var screenshotOutput: String {
+            "SIMWALK_SCREENSHOT_OUTPUT"
         }
 
         /// The walkbook's own JSON, for a runner that cannot read the host's files (a physical device, SimWalk#116); takes the place of ``walkbook``.
@@ -862,8 +1042,9 @@ extension WalkRunner {
             try AXTreeCapture.tree(of: springboard)
         }
 
+        /// The screen's picture, upright (``WalkRunner/screenshot(of:)``).
         func screenshot() -> Data {
-            XCUIScreen.main.screenshot().pngRepresentation
+            WalkRunner.screenshot(of: app)
         }
 
         func elapsed() -> TimeInterval {
@@ -1020,6 +1201,10 @@ extension WalkRunner {
         let ownSettle: Int?
         let launchResets: [CaptureManifest.LaunchReset]
         let boundElements: [CaptureManifest.BoundElement]
+        /// The slugs of the states whose launch turned the device to the app (SimWalk#222).
+        let deviceTurns: [String]
+        /// The states refused at launch for the orientation the app kept, their route never followed (SimWalk#222).
+        let launchRefusals: [(state: Walkbook.CaptureState, clause: String)]
     }
 }
 

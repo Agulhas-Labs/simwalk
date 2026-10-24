@@ -375,7 +375,7 @@ struct CaptureBundleIntegrityTests {
         ])
     }
 
-    /// Only a `tap`, `scrollTo` or `type` step binds an element, so a record on a `tab` step was not written by a walk (SimWalk#96 item 10).
+    /// Only a `tap`, `scrollTo`, `type` or `longPress` step binds an element, so a record on a `tab` step was not written by a walk (SimWalk#96 item 10).
     @Test
     func aBoundElementOnAStepThatBindsNothingIsAProblem() {
         let route: [Walkbook.RouteStep] = [.tab(label: "Today"), .tap(label: "Power")]
@@ -391,6 +391,22 @@ struct CaptureBundleIntegrityTests {
         #expect(CaptureManifestValidator.problems(in: manifest) == [
             .boundElementOnStepThatBindsNothing(screenID: "power-detail", step: 0, routeStep: .tab(label: "Today")),
         ])
+    }
+
+    /// A `longPress` binds the element it pressed, so a record on its step is one a walk writes (SimWalk#198).
+    @Test
+    func aBoundElementOnALongPressStepIsNotAProblem() {
+        let route: [Walkbook.RouteStep] = [.longPress(label: "Power", seconds: 1)]
+        let manifest = Self.manifest(screens: [
+            CaptureManifest.ScreenRecord(
+                id: "power-detail",
+                outcome: .unreachable(routeTried: route),
+                routeTaken: route,
+                boundElements: [Self.bound(step: 0)]
+            ),
+        ])
+
+        #expect(CaptureManifestValidator.problems(in: manifest).isEmpty)
     }
 
     private static func bound(step: Int) -> CaptureManifest.BoundElement {

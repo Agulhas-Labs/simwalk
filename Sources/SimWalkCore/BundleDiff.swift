@@ -203,13 +203,12 @@ extension BundleDiff {
 }
 
 private extension CaptureManifest.ScreenRecord {
-    /// Whether the route the runner completed scrolled to a label.
+    /// Whether the route the runner completed scrolled to a label or swiped, which leaves a list wherever the fling stopped.
     var scrolls: Bool {
         routeTaken.contains { step in
-            if case .scrollTo = step {
-                true
-            } else {
-                false
+            switch step {
+            case .scrollTo, .swipe, .drag: true
+            default: false
             }
         }
     }

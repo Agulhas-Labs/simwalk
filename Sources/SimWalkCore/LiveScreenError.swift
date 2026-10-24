@@ -8,6 +8,8 @@ import Foundation
 public enum LiveScreenError: Error, Equatable, CustomStringConvertible {
     /// The app was not running on the device, so there was nothing to read — and inspect never launches it.
     case appNotRunning(bundleID: String, udid: String)
+    /// The app was not running because it crashed: the system's crash report for it on this device is newer than the device's boot (SimWalk#243).
+    case appCrashed(bundleID: String, udid: String, report: AppCrashReport)
     /// No readable file where the runner was told to write — it did not write one.
     case missing(path: String, reason: String)
     /// The file is not a live read.
@@ -23,6 +25,8 @@ public enum LiveScreenError: Error, Equatable, CustomStringConvertible {
         switch self {
         case let .appNotRunning(bundleID, udid):
             "\(bundleID) is not running on \(udid) — inspect reads the app as it stands and never launches it; bring it to the screen you want (xcrun simctl launch \(udid) \(bundleID), or a walk), then inspect again"
+        case let .appCrashed(bundleID, udid, report):
+            "\(bundleID) is not running on \(udid): it crashed at \(report.crashedAt.formatted(.iso8601)) (crash report \(report.path.path)) — inspect never launches it; relaunch it (xcrun simctl launch \(udid) \(bundleID)) and bring it to the screen you want, then inspect again"
         case let .missing(path, reason):
             "no live read at \(path) — the runner did not write one: \(reason)"
         case let .malformed(path, reason):
@@ -38,10 +42,10 @@ public enum LiveScreenError: Error, Equatable, CustomStringConvertible {
 }
 
 extension LiveScreenError: UsageFailureClassifiable {
-    /// An app not running is the device as the caller left it — a refusal of what was asked, not a failure of the tool; everything else is the host reading back what its own runner wrote, or failed to.
+    /// An app not running, crashed or not, is the device as the caller left it — a refusal of what was asked, not a failure of the tool; everything else is the host reading back what its own runner wrote, or failed to.
     public var usageFailureKind: UsageFailureKind {
         switch self {
-        case .appNotRunning:
+        case .appNotRunning, .appCrashed:
             .inputRefused
         case .missing, .malformed, .unsupportedFormatVersion, .fromAnotherRun, .notWritable:
             .runnerFailed

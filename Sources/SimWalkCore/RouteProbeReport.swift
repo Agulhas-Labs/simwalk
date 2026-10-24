@@ -37,6 +37,10 @@ public struct RouteProbeReport: Codable, Equatable, Sendable {
     public let nonce: String
     /// One entry per walkbook screen, in walkbook order.
     public let probes: [RouteProbe]
+    /// The screens whose launch left the app landscape on a device held portrait, so the runner turned the device to match and handed it back (SimWalk#225); `nil` in a file an older runner wrote, which never turned it.
+    ///
+    /// A lenient optional key inside format 3, as `ScreenRecord.deviceTurns` is inside a manifest's: an older reader ignores it and loses only the disclosure.
+    public let deviceTurns: [String]?
 
     public init(
         formatVersion: Int = RouteProbeReport.currentFormatVersion,
@@ -48,7 +52,8 @@ public struct RouteProbeReport: Codable, Equatable, Sendable {
         device: CaptureManifest.Device,
         startedAt: Date,
         nonce: String,
-        probes: [RouteProbe]
+        probes: [RouteProbe],
+        deviceTurns: [String]? = nil
     ) {
         self.formatVersion = formatVersion
         self.walkName = walkName
@@ -61,6 +66,7 @@ public struct RouteProbeReport: Codable, Equatable, Sendable {
         self.startedAt = Timestamp.millisecondRounded(startedAt)
         self.nonce = nonce
         self.probes = probes
+        self.deviceTurns = deviceTurns
     }
 }
 

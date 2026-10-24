@@ -55,6 +55,65 @@ struct DisclosureAffordanceAuditTests {
         #expect(DisclosureAffordanceAudit.disclosureRows(in: midRow, screenID: "s", stateSlug: "light").isEmpty)
     }
 
+    /// The system scroll indicator is a labelled element with a thin thumb at its trailing edge, which is the whole shape of a disclosure row; it is a bar, not a row (SimWalk#228). Built from a real capture; its thumb is off the bar's centre (the centred thumb is pinned next).
+    @Test
+    func aScrollIndicatorIsNotADisclosureRow() {
+        let bar = AXNode(
+            type: "Other",
+            frame: AXNode.Frame(x: 387, y: 122, width: 30, height: 704),
+            label: "Vertical scroll bar, 2 pages",
+            value: "0%",
+            children: [AXNode(type: "Other", frame: AXNode.Frame(x: 414, y: 816, width: 3, height: 7))]
+        )
+        let list = AXNode(type: "CollectionView", frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874), children: [bar])
+
+        #expect(DisclosureAffordanceAudit.disclosureRows(in: list, screenID: "s", stateSlug: "light").isEmpty)
+    }
+
+    /// A mid-scroll bar has its thumb at the bar's vertical centre, so only the scroll-indicator guard rejects it (SimWalk#228).
+    @Test
+    func aScrollIndicatorWithItsThumbAtTheCentreIsNotADisclosureRow() {
+        let bar = AXNode(
+            type: "Other",
+            frame: AXNode.Frame(x: 387, y: 122, width: 30, height: 704),
+            label: "Vertical scroll bar, 2 pages",
+            value: "50%",
+            children: [AXNode(type: "Other", frame: AXNode.Frame(x: 414, y: 470, width: 3, height: 7))]
+        )
+        let list = AXNode(type: "CollectionView", frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874), children: [bar])
+
+        #expect(DisclosureAffordanceAudit.disclosureRows(in: list, screenID: "s", stateSlug: "light").isEmpty)
+    }
+
+    /// A glyph at the bottom edge of a short labelled row is not a chevron, which is drawn at the row's vertical centre; this pins that test alone, with a row no scroll indicator could be (SimWalk#228).
+    @Test
+    func aGlyphAtTheRowsBottomEdgeIsNotADisclosure() {
+        let rowNode = AXNode(
+            type: "Other",
+            frame: AXNode.Frame(x: 14, y: 100, width: 374, height: 44),
+            label: "Notifications",
+            children: [AXNode(type: "Other", frame: AXNode.Frame(x: 377, y: 137, width: 3, height: 7))]
+        )
+
+        #expect(DisclosureAffordanceAudit.disclosureRows(in: rowNode, screenID: "s", stateSlug: "light").isEmpty)
+    }
+
+    /// The control for the two above: a settings row with its chevron centred is still found (SimWalk#228).
+    @Test
+    func aCentredChevronInASettingsRowIsStillADisclosure() {
+        let settingsRow = AXNode(
+            type: "Button",
+            frame: AXNode.Frame(x: 16, y: 156.33, width: 370, height: 52),
+            label: "App Icon",
+            children: [
+                AXNode(type: "StaticText", frame: AXNode.Frame(x: 31.67, y: 170, width: 108, height: 25), label: "App Icon"),
+                AXNode(type: "Image", frame: AXNode.Frame(x: 360.67, y: 176.33, width: 7, height: 12), identifier: "chevron.forward"),
+            ]
+        )
+
+        #expect(DisclosureAffordanceAudit.disclosureRows(in: settingsRow, screenID: "s", stateSlug: "dark").count == 1)
+    }
+
     /// The finding is a minority against a majority: rows typed two ways in one bundle.
     @Test
     func rowsTypedTwoWaysAreInconsistentAndUniformOnesAreNot() {

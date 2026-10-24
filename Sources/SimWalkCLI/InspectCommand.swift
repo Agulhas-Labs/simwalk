@@ -30,6 +30,8 @@ struct InspectCommand: ParsableCommand {
     @Option(name: .long, parsing: .unconditional, help: "Only the text elements whose label or value contains this text (case-insensitive).")
     var match: String?
 
+    @OptionGroup var screenshot: ScreenshotOptions
+
     func validate() throws {
         if device != nil, lease != nil {
             throw ValidationError("pass --device or --lease, not both — a lease already names its device")
@@ -62,7 +64,9 @@ struct InspectCommand: ParsableCommand {
         builds: RunnerBuilds,
         leases: LeaseStore = .standard(),
         scratch: URL = FileManager.default.temporaryDirectory,
+        screenshotsDirectory: URL = HomeDirectories.simwalk().appendingPathComponent("screenshots", isDirectory: true),
         firstLaunch: XcodeFirstLaunch.Check = XcodeFirstLaunch.Check(),
+        crashReports: URL = HomeDirectories.diagnosticReports(),
         note: (String) -> Void = { _ in }
     ) throws -> Answer {
         // Refused before any `simctl` call when this Xcode's `simctl` would first wait on an administrator password (SimWalk#136).
@@ -85,7 +89,7 @@ struct InspectCommand: ParsableCommand {
         }
         let runner = RunnerInvocation(projectPath: source.projectPath, derivedDataPath: builds.directory(for: source).path, shell: shell)
         runner.coldBuildNote(commit: source.commit).map(note)
-        try runner.build(for: simulator)
+        try runner.build(for: simulator, note: note)
 
         // Held from the read of the appearance the handback puts back until that handback is made, so a `session end` or
         // `session list` on this device leaves it alone, under a session's own `--lease` too (a walk claim is exempt under
@@ -99,6 +103,9 @@ struct InspectCommand: ParsableCommand {
         let runNonce = nonce()
         let outputURL = scratch.appendingPathComponent("simwalk-inspect-\(runNonce).json")
         defer { try? FileManager.default.removeItem(at: outputURL) }
+        let screenshotRequest = try screenshot.request()
+        let runnerPNG = scratch.appendingPathComponent("simwalk-inspect-\(runNonce).png")
+        defer { try? FileManager.default.removeItem(at: runnerPNG) }
         // Named before the run, as a walk's is, so a refusal reads this run's result bundle (SimWalk#50).
         let resultBundlePath = runner.resultBundlePath(launchedAt: now(), id: runNonce)
         var runnerFailure: Error?
@@ -109,6 +116,7 @@ struct InspectCommand: ParsableCommand {
                 logFilePath: logFileURL.path,
                 runnerCommit: source.commit,
                 nonce: runNonce,
+                screenshotPath: screenshotRequest == nil ? nil : runnerPNG.path,
                 resultBundlePath: resultBundlePath,
                 on: simulator
             )
@@ -122,8 +130,29 @@ struct InspectCommand: ParsableCommand {
             handback: handback,
             diagnosingRunnerFailure: { RunnerFailureDiagnosis.read(resultBundlePath: resultBundlePath, shell: shell) },
             readingScreen: { try read.get() },
-            match: match
+            match: match,
+            // Since the device's boot, so a crash on an earlier boot is not named as why the app is not running now.
+            crashReport: { AppCrashReport.latest(bundleID: app, udid: simulator.udid, since: simulator.bootedAt(now: now(), shell: shell), in: crashReports) },
+            screenshotOutcome: screenshotRequest.map { request in
+                { tree in
+                    Self.screenshotOutcome(runnerPNG: runnerPNG, nonce: runNonce, tree: tree, request: request, in: screenshotsDirectory)
+                }
+            }
         )
+    }
+
+    /// The screenshot outcome once the runner has had its say: the image it left at `runnerPNG` fitted and filed as `inspect-<nonce>.png` in `directory`, which is then pruned; or the refusal saying the runner wrote none.
+    static func screenshotOutcome(runnerPNG: URL, nonce: String, tree: AXNode, request: ScreenshotFit.Request, in directory: URL) -> ScreenshotFit.Outcome {
+        let outcome = ScreenshotOption.outcome(
+            png: try? Data(contentsOf: runnerPNG),
+            refusal: nil,
+            absentReason: "the runner wrote no image",
+            tree: tree,
+            request: request,
+            to: directory.appendingPathComponent("inspect-\(nonce).png")
+        )
+        ScreenshotOption.prune(directory)
+        return outcome
     }
 
     /// What a live read answers once the runner has had its say — the whole decision and none of the I/O, as `WalkDryRun.outcome` is for a dry run.
@@ -134,7 +163,9 @@ struct InspectCommand: ParsableCommand {
         handback: DeviceHandback?,
         diagnosingRunnerFailure diagnose: () -> RunnerFailureDiagnosis? = { nil },
         readingScreen read: () throws -> LiveScreen,
-        match: String?
+        match: String?,
+        crashReport: () -> AppCrashReport? = { nil },
+        screenshotOutcome: ((AXNode) -> ScreenshotFit.Outcome)? = nil
     ) throws -> Answer {
         let screen: LiveScreen
         do {
@@ -142,7 +173,7 @@ struct InspectCommand: ParsableCommand {
         } catch {
             let refusal = runnerFailure ?? error
             guard let handback else { throw refusal }
-            throw WalkCommand.Refusal(underlying: refusal, handback: handback, runnerDiagnosis: runnerFailure == nil ? [] : diagnose()?.lines ?? [])
+            throw WalkCommand.Refusal(underlying: refusal, handback: handback, actor: "this inspect", runnerDiagnosis: runnerFailure == nil ? [] : diagnose()?.lines ?? [])
         }
         let survived = runnerFailure.map { "⚠ the runner reported a failure and this read survived it: \($0)" }
         let query = LiveScreenQuery(
@@ -151,10 +182,16 @@ struct InspectCommand: ParsableCommand {
             notes: [survived].compactMap(\.self) + (handback?.notes(by: "this inspect") ?? [])
         )
         do {
-            return try query.answer(match: match)
+            return try query.answer(match: match, screenshot: screen.tree.flatMap { tree in screenshotOutcome?(tree) })
         } catch {
-            guard let handback else { throw error }
-            throw WalkCommand.Refusal(underlying: error, handback: handback)
+            // An app that is not running may have crashed, which sends the caller to a different fix than a launch (SimWalk#243).
+            let refusal = if case let LiveScreenError.appNotRunning(bundleID, udid) = error, let report = crashReport() {
+                LiveScreenError.appCrashed(bundleID: bundleID, udid: udid, report: report)
+            } else {
+                error
+            }
+            guard let handback else { throw refusal }
+            throw WalkCommand.Refusal(underlying: refusal, handback: handback, actor: "this inspect")
         }
     }
 }

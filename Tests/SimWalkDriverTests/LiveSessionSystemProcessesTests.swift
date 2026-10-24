@@ -67,7 +67,8 @@ struct LiveSessionSystemProcessesTests {
 
         let pid = try processes.spawn(RunnerCommand(executable: "/usr/bin/true", arguments: [], environment: [:]), log: directory.url.appendingPathComponent("runner.log"))
 
-        let deadline = Date().addingTimeInterval(5)
+        // Two minutes, as `waitForExit` allows: a loaded machine can take seconds to run the reaper (SimWalk#209).
+        let deadline = Date().addingTimeInterval(120)
         while kill(pid, 0) == 0, Date() < deadline {
             Thread.sleep(forTimeInterval: 0.02)
         }
@@ -75,8 +76,9 @@ struct LiveSessionSystemProcessesTests {
         #expect(kill(pid, 0) == -1 && errno == ESRCH)
     }
 
+    /// The log's first line once one is written, waited for up to two minutes: a loaded machine can take seconds to schedule the child (SimWalk#209), and a line already written returns at once.
     private static func firstLine(of log: URL) -> String? {
-        let deadline = Date().addingTimeInterval(5)
+        let deadline = Date().addingTimeInterval(120)
         while Date() < deadline {
             if let text = try? String(contentsOf: log, encoding: .utf8), let line = text.split(separator: "\n").first {
                 return String(line)
@@ -86,8 +88,9 @@ struct LiveSessionSystemProcessesTests {
         return nil
     }
 
+    /// Whether `pid` has exited, waited for up to two minutes: a loaded machine can take seconds to deliver a signal and reap (SimWalk#209), and a process already gone returns at once.
     fileprivate static func waitForExit(_ pid: Int32, _ processes: LiveSessionSystemProcesses) -> Bool {
-        let deadline = Date().addingTimeInterval(5)
+        let deadline = Date().addingTimeInterval(120)
         while processes.isAlive(pid), Date() < deadline {
             Thread.sleep(forTimeInterval: 0.02)
         }
@@ -117,10 +120,23 @@ extension LiveSessionSystemProcessesTests {
         let whileRunning = ProgressClaim.take(session: "s", in: directory.url).progressURL
         _ = processes.signalGroup(pid, SIGTERM)
         let exited = Self.waitForExit(pid, processes)
-        let afterExit = ProgressClaim.take(session: "s", in: directory.url).progressURL
+        let afterExit = Self.take(first, session: "s", in: directory.url)
 
         #expect(whileRunning != first)
         #expect(exited)
         #expect(afterExit == first)
+    }
+
+    /// The claim at `wanted` once it is free, waited for rather than tried once; the slot taken instead if it is still held after two minutes.
+    ///
+    /// The runner's own hold ends before it is seen to exit: the kernel closes an exiting process's descriptors before it marks it a zombie. But a test beside this one spawning at the same moment holds a copy of the claim's descriptor from its fork until its exec, since a spawn copies a close-on-exec descriptor and closes it only at exec, and the lock outlives the runner until that spawn's exec, which a loaded machine can delay (SimWalk#204). A hold that never ends still fails.
+    private static func take(_ wanted: URL, session: String, in directory: URL) -> URL {
+        let deadline = Date().addingTimeInterval(120)
+        var taken = ProgressClaim.take(session: session, in: directory).progressURL
+        while taken != wanted, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+            taken = ProgressClaim.take(session: session, in: directory).progressURL
+        }
+        return taken
     }
 }

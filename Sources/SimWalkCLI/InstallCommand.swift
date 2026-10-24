@@ -103,7 +103,7 @@ struct InstallCommand: ParsableCommand {
         }
         var decisions: SimWalkInstallDryRun.ClaudeDecisions?
         if picks.contains(where: { $0.agent == .claude }) {
-            let surroundings = claudeSurroundings ?? (try? InstallHookCommand.parse(guide.map { ["--guide", $0] } ?? []))?.standardSurroundings()
+            let surroundings = claudeSurroundings ?? (try? InstallHookCommand.parse(guide.map { ["--guide", $0] } ?? []))?.standardSurroundings(environment: machine.environment)
             decisions = surroundings.map { SimWalkInstallDryRun.ClaudeDecisions(locations: $0.locations, claudeOnPath: $0.claude != nil) }
         }
         SimWalkInstallDryRun.lines(picks, binary: binary, environment: machine.environment, cursorDirectory: cursorDirectory, claude: decisions).forEach(emit)
@@ -184,7 +184,7 @@ struct InstallCommand: ParsableCommand {
     /// What `install-hook` does for this binary — a refusal throws, which `InstallStepReport.attempt` turns into this agent's failure.
     private func claudeStep(binary: String) throws -> InstallHookCommand.Installed {
         let hook = try InstallHookCommand.parse(guide.map { ["--guide", $0] } ?? [])
-        return try hook.installed(executable: binary, in: claudeSurroundings)
+        return try hook.installed(executable: binary, environment: machine.environment, in: claudeSurroundings)
     }
 
     /// The summary `simwalk install` prints: the lines Cursor's installer repeats on every run are said once, and its restart line gives way to each agent's next step.

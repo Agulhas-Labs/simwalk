@@ -94,6 +94,23 @@ struct OverlapRuleTests {
         ])
     }
 
+    /// Crossing runs of one text without containment (x 0 w 200 and x 100 w 200) are still an overlap once segmented: only one text exposed twice is collapsed (#171).
+    @Test
+    func crossingRunsOfOneTextAreStillAnOverlapThroughTheSegmenter() {
+        let list = AXNode(type: "CollectionView", frame: AXNode.Frame(x: 0, y: 100, width: 402, height: 700), children: [
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 0, y: 728, width: 200, height: 62), label: "Footer note"),
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 100, y: 728, width: 200, height: 62), label: "Footer note"),
+        ])
+        let tree = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874), label: "Logbook", children: [
+            AXNode(type: "Window", frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874), children: [list]),
+        ])
+        let capture = SegmentedCapture(tree: tree, screenshotPath: "screens/root/light/screen.png", segmenter: AXSegmenter())
+
+        #expect(OverlapRule().flags(reference: capture, run: capture).map(\.finding) == [
+            .overlappingRuns(first: "Footer note", second: "Footer note", alsoInReference: true),
+        ])
+    }
+
     static func run(_ shape: String, y: Double, height: Double) -> ScreenSection.TextRun {
         ScreenSection.TextRun(shape: shape, frame: AXNode.Frame(x: 22, y: y, width: 120, height: height))
     }

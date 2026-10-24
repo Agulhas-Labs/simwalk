@@ -130,6 +130,16 @@ struct InstallFamilyTests {
         Self.expectNothingWritten(scratch, claude: claude)
     }
 
+    /// The Claude step takes its paths from the command's injected environment: with `CLAUDE_CONFIG_DIR` there and no explicit surroundings, the dry run names the settings file under that directory (SimWalk#157).
+    @Test
+    func claudeDryRunTakesItsPathsFromTheInjectedClaudeConfigDir() throws {
+        let fixture = try Fixture()
+        let moved = fixture.root.appendingPathComponent("moved-claude", isDirectory: true)
+        let run = try fixture.run(["--agent", "claude", "--dry-run"], path: "", extra: ["CLAUDE_CONFIG_DIR": moved.path], surroundings: nil)
+
+        #expect(run.output.lines.contains { $0.contains("PreToolUse hook") && $0.hasSuffix(" in \(moved.appendingPathComponent("settings.json").path)") }, "\(run.output.text)")
+    }
+
     /// Where sift is not installed the status line goes into `settings.json`, and the dry run says so.
     @Test
     func claudeDryRunWithoutSiftNamesSettingsForTheStatusLine() throws {

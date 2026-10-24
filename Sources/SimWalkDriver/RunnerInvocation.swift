@@ -46,20 +46,36 @@ public struct RunnerInvocation {
         return "building the runner\(name) — a first build takes several minutes"
     }
 
+    /// The line `note` is given when a build waits for another run's build of the same directory (SimWalk#242).
+    static var waitingForBuildNote: String {
+        "waiting for another run's runner build"
+    }
+
     /// Builds the runner for a device, reusing the cached build when nothing has changed.
     ///
-    /// `xcodebuild` decides what "unchanged" means; this does not try to outsmart it. A warm build is a second or two, which is well under the cost of being wrong about staleness.
-    public func build(for simulator: Simulator) throws {
-        let result = try shell.run("/usr/bin/xcodebuild", [
-            "build-for-testing",
-            "-project", projectPath,
-            "-scheme", Self.scheme,
-            "-destination", "platform=iOS Simulator,id=\(simulator.udid)",
-            "-derivedDataPath", derivedDataPath,
-        ])
+    /// `xcodebuild` decides what "unchanged" means; this does not try to outsmart it. A warm build is a second or two, which is well under the cost of being wrong about staleness. One build at a time per directory (``withBuildLock(note:_:)``).
+    public func build(for simulator: Simulator, note: (String) -> Void = { _ in }) throws {
+        let result = try withBuildLock(note: note) {
+            try shell.run("/usr/bin/xcodebuild", [
+                "build-for-testing",
+                "-project", projectPath,
+                "-scheme", Self.scheme,
+                "-destination", "platform=iOS Simulator,id=\(simulator.udid)",
+                "-derivedDataPath", derivedDataPath,
+            ])
+        }
         guard result.succeeded else {
             throw RunnerError.buildFailed(reason: Self.diagnostic(from: result))
         }
+    }
+
+    /// Runs `body`, an `xcodebuild` into ``derivedDataPath``, holding an exclusive lock on that directory, so a second run waits for the first and then finds its build warm; `note` hears ``waitingForBuildNote`` when it has to wait.
+    ///
+    /// **Two builds into one derived-data directory fail each other** (SimWalk#242): walks started together on a cold build collided on package resolution (`... already exists unexpectedly`) or on the build database (`unable to attach DB: ... database is locked`). The lock is the directory itself, so no lock file sits among the products, and the system drops it when its holder dies.
+    private func withBuildLock<Value>(note: (String) -> Void, _ body: () throws -> Value) throws -> Value {
+        let directory = URL(fileURLWithPath: derivedDataPath, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return try ExclusiveFileLock(file: directory).withLock(whileWaiting: { note(Self.waitingForBuildNote) }, body)
     }
 
     /// Runs one walk, returning nothing — the bundle on disk is the result, or with `dryRun` the route-probe report.
@@ -177,7 +193,7 @@ public struct RunnerInvocation {
     /// Builds the runner for a physical device and signs it, which a simulator build does not.
     ///
     /// `runnerBundleID` replaces the project's committed identifier, for a team that cannot register `com.agulhaslabs.simwalk.runner`; absent, the project's own is kept.
-    public func buildForDevice(udid: String, team: String, runnerBundleID: String? = nil) throws {
+    public func buildForDevice(udid: String, team: String, runnerBundleID: String? = nil, note: (String) -> Void = { _ in }) throws {
         var arguments = [
             "build-for-testing",
             "-project", projectPath,
@@ -191,7 +207,7 @@ public struct RunnerInvocation {
         if let runnerBundleID {
             arguments.append("PRODUCT_BUNDLE_IDENTIFIER=\(runnerBundleID)")
         }
-        let result = try shell.run("/usr/bin/xcodebuild", arguments)
+        let result = try withBuildLock(note: note) { try shell.run("/usr/bin/xcodebuild", arguments) }
         guard result.succeeded else {
             throw RunnerError.buildFailed(reason: Self.diagnostic(from: result))
         }
@@ -311,6 +327,7 @@ public struct RunnerInvocation {
         logFilePath: String?,
         runnerCommit: String?,
         nonce: String,
+        screenshotPath: String? = nil,
         resultBundlePath: String? = nil,
         on simulator: Simulator
     ) throws {
@@ -325,6 +342,9 @@ public struct RunnerInvocation {
         }
         if let runnerCommit {
             environment["TEST_RUNNER_SIMWALK_RUNNER_COMMIT"] = runnerCommit
+        }
+        if let screenshotPath {
+            environment["TEST_RUNNER_SIMWALK_SCREENSHOT_OUTPUT"] = screenshotPath
         }
         try runBuilt(environment: environment, resultBundlePath: resultBundlePath, on: simulator)
     }
@@ -413,7 +433,8 @@ public struct RunnerInvocation {
         let result = try shell.run("/usr/bin/xcodebuild", testArguments(only: "testWalk", resultBundlePath: resultBundlePath, destination: Self.destination(of: simulator)), environment: environment)
 
         guard result.succeeded else {
-            throw RunnerError.walkFailed(reason: Self.diagnostic(from: result))
+            // The status rides along, so a walk can tell a test that failed (65) from every other way a runner ends (SimWalk#176).
+            throw RunnerError.walkFailed(reason: Self.diagnostic(from: result), status: result.status)
         }
     }
 

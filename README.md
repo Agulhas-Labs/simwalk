@@ -69,8 +69,8 @@ Settings, `Fixtures/Settings/settings.walkbook.json`. Here are two of its five s
 Each screen has three keys that matter here.
 
 - `route` is the taps to reach the screen from a fresh launch. A label is the accessibility label you see
-  on screen. Other steps are `tab`, `scrollTo`, `type`, `back`, `openURL`, `tapPoint` and `systemTap` (for
-  permission sheets).
+  on screen. Other steps are `tab`, `scrollTo`, `type`, `longPress`, `swipe`, `back`, `openURL`, `tapPoint`, `drag` and
+  `systemTap` (for permission sheets).
 - `states` is the list of ways to capture it. A state can set the theme, the Dynamic Type size, the locale,
   the layout direction, the location, launch arguments and environment variables (and it can reset a
   permission first). See [States](Docs/Reference.md#states).
@@ -146,7 +146,7 @@ The audit then read the bundle without a device. Its output, trimmed:
 
 ```
 walk: 'apple-settings'  app: com.apple.Preferences  build: 57388b49  walkbook: d21ef61b  runner: 90b9fe86  device: iPhone19,3 (27.0)  animations: off  settled: 9/9
-qualified — 9 controls with neither a label nor an identifier; 8 labels shared by distinct controls on one screen; 1 control smaller than 44×44 points · audited 5 of 5 screens by 7 rules
+qualified — 9 controls with neither a label nor an identifier with VoiceOver off; 8 labels shared by distinct controls on one screen; 1 control smaller than 44×44 points · audited 5 of 5 screens by 7 rules
 …
 [unlabelledControl] 9 found — 111 controls examined across 9 captures
   general:
@@ -169,8 +169,7 @@ sections moved, vanished or started to overlap.
 ![The same five rows of the demo app's Account screen at an accessibility text size, cropped from the baseline run (labelled before: each title above its value) and from the run with the regression (labelled after: each title drawn over its value), side by side.](Docs/Images/diff-crops.png)
 
 `simwalk bundle oracle run.simwalk --walkbook app.walkbook.json` checks figures on screen against a program
-you write that computes them. The walkbook needs `oracle` and `figures` entries. See
-[The value oracle](Docs/Reference.md#the-value-oracle).
+you write that computes them. See [Checking the numbers](#checking-the-numbers).
 
 `simwalk bundle coverage run.simwalk` lists the controls no route step reaches, as the steps to add, so
 you learn which parts of the app the walkbook never visits. It exits 2 when it finds any. See
@@ -202,6 +201,61 @@ Differentiate Without Color. Each claim comes back as holds, fails, incomplete o
 incomplete claim names the state to add to the walkbook to finish it. If your app is in a sector the
 European Accessibility Act covers, the report is evidence for that work. It is not a claim of conformance.
 See [`bundle labels`](Docs/Reference.md#bundle-labels).
+
+## Checking the numbers
+
+A screen can be laid out perfectly and still show the wrong total. `simwalk bundle oracle` reads the figures
+you name off each capture and asks a small program of yours what they should be. The repo's demo app has
+an example: a Usage screen with three figures computed from a bundled log of downloads, one of which is
+titled "Data today" but adds up the last 24 hours.
+
+The walkbook, `Fixtures/DemoApp/downloads.walkbook.json`, names the program and, per screen, each figure:
+the accessibility identifier it is drawn in and the windows to ask about. Window names are yours; SimWalk
+passes them through.
+
+```json
+"oracle": { "command": ["./downloads-oracle.sh"] },
+"screens": [{
+  "id": "usage",
+  "route": [{ "tap": { "label": "Usage" } }],
+  "states": [{ "theme": "light", "locale": "en_US" }, { "theme": "light", "locale": "de_DE" }],
+  "figures": [
+    { "id": "downloads-today", "element": "downloads-today", "windows": ["today", "last24h"] },
+    { "id": "data-today", "element": "data-today", "windows": ["today", "last24h"] },
+    { "id": "average-download", "element": "average-download", "windows": ["today", "last24h"] }
+  ]
+}]
+```
+
+The program reads one JSON request per line on stdin and writes one reply per line, in order. The
+example, `Fixtures/DemoApp/downloads-oracle.sh`, is 60 lines of `sh` and `awk` over the same data file the
+app reads:
+
+```
+{"capturedAt":"2026-10-24T08:36:48.870Z","figure":"data-today","locale":"en_US","screen":"usage","state":"light-loc_en_us","windows":["today","last24h"]}
+{"values":{"today":1272.6,"last24h":2567.3},"unit":"MB","attribution":"downloads.csv as of 2026-10-24T08:36:48.870Z: 9 in today, 16 in last24h"}
+```
+
+Walk the app, then check the bundle (how to build the demo app and lease a simulator is in
+`Fixtures/DemoApp/README.md`):
+
+```sh
+$ simwalk walk Fixtures/DemoApp/downloads.walkbook.json --lease <token> --app-path $APP --output usage.simwalk
+$ simwalk bundle oracle usage.simwalk --walkbook Fixtures/DemoApp/downloads.walkbook.json
+ok — 6 of 6 figure checks matched
+usage/light-loc_en_us downloads-today: 9 matches today (exact) — today 9, last24h 16 downloads — …
+usage/light-loc_en_us data-today: 2,567.3 MB matches last24h (±0.05) — today 1272.6, last24h 2567.3 MB — …
+usage/light-loc_en_us average-download: 141.4 MB matches today (±0.05) — today 141.4, last24h 160.4563 MB — …
+usage/light-loc_de_de data-today: 2.567,3 MB matches last24h (±0.05) — today 1272.6, last24h 2567.3 MB — …
+…
+```
+
+Each line says which window the figure on screen equals, so "Data today" shows up as the last 24 hours
+rather than since midnight. The German capture is read with that locale's separators. Ask only the window
+the figure should follow, here `"windows": ["today"]` for `data-today`, and the line becomes
+`2,567.3 MB matches none — today 1272.6 MB` with exit code 2. A figure that is not on screen, holds no
+number, or that the program could not answer has a line of its own too. See
+[The value oracle](Docs/Reference.md#the-value-oracle).
 
 ## In CI
 
@@ -276,7 +330,8 @@ answers saved ([Usage report](Docs/Reference.md#usage-report-simwalk-usage)).
 iPad. The team ID is the Apple signing team the runner is built under. `simwalk device` checks that a
 phone can be walked, and `simwalk device clean` uninstalls the runner app from it. `simwalk lease acquire
 --physical <udid>` reserves a phone so two sessions do not use it at once; `lease list`, `renew` and
-`release` manage leases, and a plain `lease acquire` hands out a simulator of your own. Details are in
+`release` manage leases, and a plain `lease acquire` hands out a simulator of your own, an iPhone in preference to an iPad (an iPhone-only
+app is refused on an iPad, SimWalk#166; `--family ipad` asks for one). Details are in
 [Physical iPhones and iPads](Docs/Reference.md#physical-iphones-and-ipads) and
 [Leases](Docs/Reference.md#leases).
 
@@ -327,8 +382,8 @@ another MCP client, such as Cursor, run `simwalk mcp` as a stdio server.
 `simwalk install` does the same for every agent it finds, asking once per agent: Claude Code (exactly what
 `install-hook` does) and Cursor (the MCP server in `mcp.json` and the `preToolUse` hook in `hooks.json`,
 beside whatever else they hold). Codex is skipped. Without a terminal, pass `--yes` (every agent found),
-`--all`, or `--agent claude|cursor|codex`. `install-hook` stays for Claude Code alone. No command removes
-Cursor's entries: delete the `simwalk` entry from `.cursor/hooks.json` and `mcp.json` by hand. Afterwards
+`--all`, or `--agent claude|cursor|codex`. `install-hook` stays for Claude Code alone. `simwalk uninstall` takes
+SimWalk back out of both, leaving other tools' entries alone. Afterwards
 `install` runs the other Fieldwork tools' installs (sift) once, into the same agents, so one command sets
 the family up. `--dry-run` shows what would change in each agent, and in the other tools, and writes nothing.
 

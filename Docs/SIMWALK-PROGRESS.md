@@ -57,6 +57,7 @@ Every key except `schemaVersion`, `tool`, `phase`, `pid`, `startedAt` and `updat
   - `installMs` is the app install, when `appPath` is given.
   - `buildMs` is the runner's `build-for-testing`. It is cached after the first run and is not your app's build.
   - `runMs` is the whole `xcodebuild test-without-building` call. It includes launching the runner and the app, and it ends before the `matching` phase.
+  - `parallel` is present on a `walk --parallel` only, once the shards have merged: each shard's device, origin and ready, runner-start and runner-end offsets, and the merge's duration. The usage-log section of the reference lists its fields.
   - A slow `bootMs` is the simulator. A slow `runMs` is the app or its launch.
 - `pid` and `updatedAt`: if the phase is not final and the `pid` is dead, or `updatedAt` is more than 30 seconds old with no live `pid`, treat the run as over. A killed run usually dies without a chance to write anything, so this check is how you spot one.
 
@@ -123,6 +124,7 @@ case, in precedence order (rows 1–12), is in `Docs/Reference.md`; it is not re
 
 - `verdict` is `passed`, `failed` or `refused`. A step's `outcome` is `passed` or `failed`. `kind` is the failure's outcome name, as in the `matches` list above.
 - `expected` and `actual` are the screen identifiers the walkbook expected and the ones the screen showed (`unexpectedScreen`). An `unreachable` failure has the last route step it was reaching for as `expected`, and no `actual`. The whole route it tried is in `reason`. `screenshotPath` is the capture of what the screen actually showed, as an absolute path. There is no reference screenshot and no diff percentage, because a walk has no reference.
+- `timings` is the progress file's `summary`, final. On a `walk --parallel` it carries `parallel`, as §2 describes.
 - `steps` lists every screen in walkbook order. When the 16 KiB cap bites, passed steps are dropped from the end first, then failed ones. `truncated.omittedSteps` counts both. A dropped failed step stays in full in `failures`.
 - If the file is still over the cap, each failure's `reason`, `expected` and each `actual` entry are clipped to 512 characters, ending in `…`. `truncated.clippedFailures` counts the failures changed. An older file may omit it, so read a missing value as 0. Entries in `failures` are never dropped, so a walk with enough failures can pass 16 KiB.
 - `verbose` (CLI `--verbose`, MCP `verbose`) lifts the cap and adds each step's `states` (slug, screenshot and tree paths) and `routeTaken`.

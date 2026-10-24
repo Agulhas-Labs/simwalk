@@ -39,7 +39,7 @@ struct MCPToolRunner {
         case .audit: try parsed(BundleAuditCommand.self, arguments).answer()
         case .diff: try parsed(BundleDiffCommand.self, arguments).answer()
         case .oracle: try parsed(BundleOracleCommand.self, arguments).answer()
-        case .session: try sessionAnswer(arguments, cancellation: cancellation, animationsLibrary: animationsLibrary(environment))
+        case .session: try sessionAnswer(arguments, cancellation: cancellation, shell: walking.shell, runner: walking.runner, builds: walking.builds, environment: environment, animationsLibrary: animationsLibrary(environment))
         case .mirror: try mirrorAnswer(arguments)
         case .walkStatus: throw MCPError(message: "walk_status is answered by the server, not the runner", kind: .toolError)
         }
@@ -80,13 +80,12 @@ struct MCPToolRunner {
         runner: (() throws -> RunnerSource)? = nil,
         builds: RunnerBuilds = .standard(),
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        logFileURL: URL = UsageLog.standard().fileURL,
         animationsLibrary: WalkCommand.AnimationsLibrary? = nil
     ) throws -> Answer {
         let rest = Array(arguments.dropFirst())
         switch arguments.first {
         case SessionStartCommand.configuration.commandName:
-            return try parsed(SessionStartCommand.self, rest).perform(shell: shell, pause: pause, now: now, runner: runner, logFileURL: logFileURL, builds: builds, store: store, processes: processes, environment: environment, cancellation: cancellation, animationsLibrary: animationsLibrary)
+            return try parsed(SessionStartCommand.self, rest).perform(shell: shell, pause: pause, now: now, runner: runner, builds: builds, store: store, processes: processes, environment: environment, cancellation: cancellation, animationsLibrary: animationsLibrary)
         case SessionReadCommand.configuration.commandName:
             return try parsed(SessionReadCommand.self, rest).perform(store: store, processes: processes, pause: pause, now: now)
         case SessionStepCommand.configuration.commandName:
@@ -148,6 +147,8 @@ struct MCPToolRunner {
 
 extension MCPToolRunner {
     /// What a walk touches on the machine, named so a test hands scratch ones: the shell, the runner it resolves, and where it records builds and leases.
+    ///
+    /// A session start is handed the first three.
     struct WalkSeams {
         var shell = Shell()
         var runner: (() throws -> RunnerSource)?

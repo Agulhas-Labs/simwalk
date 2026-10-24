@@ -124,22 +124,30 @@ public extension ScreenDiff {
         public var name: String?
         /// Apple's one-line description of the issue.
         public var compactDescription: String
+        /// Why the element could not be read after the audit, when that is why there is none.
+        public var elementUnreadable: String?
+        /// Whether the issue's record says each element was read after the audit.
+        public var elementsRead: Bool?
 
-        public init(slug: String, rule: String, elementType: String?, name: String?, compactDescription: String) {
+        public init(slug: String, rule: String, elementType: String?, name: String?, compactDescription: String, elementUnreadable: String? = nil, elementsRead: Bool? = nil) {
             self.slug = slug
             self.rule = rule
             self.elementType = elementType
             self.name = name
             self.compactDescription = compactDescription
+            self.elementUnreadable = elementUnreadable
+            self.elementsRead = elementsRead
         }
 
-        init(slug: String, issue: AppleAuditRecord.Issue) {
+        init(slug: String, issue: AppleAuditRecord.Issue, elementsRead: Bool) {
             self.init(
                 slug: slug,
                 rule: AuditRuleName.allCases.first { $0.appleIssueType == issue.type }?.rawValue ?? issue.type,
                 elementType: issue.element?.type,
                 name: AppleAuditIdentity.name(of: issue.element),
-                compactDescription: issue.compactDescription
+                compactDescription: issue.compactDescription,
+                elementUnreadable: issue.elementUnreadable,
+                elementsRead: elementsRead ? true : nil
             )
         }
     }

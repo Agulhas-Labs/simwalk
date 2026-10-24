@@ -113,7 +113,9 @@ struct TargetResolution {
     /// **Both, never the frame alone.** List rows are drawn alike, so a row inserted between the read and the bind puts its neighbour at precisely the recorded frame; a frame-only search would tap the neighbour and the step's arrival check would pass. And the label in the predicate keeps the query small: the frame is read one element at a time, which across every descendant of a real screen is dozens of resolutions per tap. An element whose label changed in the moment between the two is not bound here at all: a `{n}` pattern or a lead-in is then chosen again from one fresh read (`bind`), and anything else says it moved — which it did.
     static func recorded(_ target: RouteTarget.Candidate, among query: XCUIElementQuery) -> XCUIElement? {
         let predicate: NSPredicate
-        if target.match == .identifier, let identifier = target.node.identifier {
+        if target.match == .placeholder, let placeholder = target.node.placeholder {
+            predicate = NSPredicate(format: "placeholderValue == %@", placeholder)
+        } else if target.match == .identifier, let identifier = target.node.identifier {
             predicate = NSPredicate(format: "identifier == %@", identifier)
         } else if let label = target.node.label {
             predicate = NSPredicate(format: "label == %@", label)
