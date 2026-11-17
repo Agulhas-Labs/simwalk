@@ -161,6 +161,26 @@ struct StrictKeyDecodingTests {
         }
     }
 
+    /// SimWalk#259: `expectValues` round-trips, is omitted when absent, refuses an entry's unknown key or missing or null value, and is told where it belongs when written on a step.
+    @Test
+    func expectValuesRoundTripsIsOmittedWhenAbsentAndABadEntryIsRefused() throws {
+        let json = #"{"id":"home","route":[{"tab":{"label":"Home"}}],"states":[{"theme":"light"}],"expectValues":[{"label":"Choosing a strategy","value":"Done"}]}"#
+        let screen = try JSONDecoder().decode(Walkbook.Screen.self, from: Data(json.utf8))
+
+        #expect(screen.expectValues == [Walkbook.ExpectedValue(label: "Choosing a strategy", value: "Done")])
+        #expect(try JSONDecoder().decode(Walkbook.Screen.self, from: JSONEncoder().encode(screen)) == screen)
+
+        let plain = Walkbook.Screen(id: "home", route: [], states: [Walkbook.CaptureState(theme: .light)])
+        #expect(try !String(decoding: JSONEncoder().encode(plain), as: UTF8.self).contains("expectValues"))
+
+        for bad in [#"{"label":"X","value":"Done","extra":1}"#, #"{"label":"X"}"#, #"{"label":"X","value":null}"#] {
+            let entry = json.replacingOccurrences(of: #"{"label":"Choosing a strategy","value":"Done"}"#, with: bad)
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(Walkbook.Screen.self, from: Data(entry.utf8))
+            }
+        }
+    }
+
     /// `"setle"` for `"settle"`: the same silent-discard shape on a different screen key.
     @Test
     func amisspelledScreenSettleKeyIsRefused() throws {

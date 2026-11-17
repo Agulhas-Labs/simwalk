@@ -215,6 +215,44 @@ struct SessionCommandTests {
         #expect(answer.residue.prefix(3) == [#"step: {"tap":{"label":"Steps"}}"#, "screen \(ScreenHash.of(tree))", "delta: nothing appeared or disappeared"])
     }
 
+    /// SimWalk#253: a step's usage line carries the step as sent and the verdict the caller saw, so an answer lost to `| tail` can be reconstructed.
+    @Test
+    func stepLogsTheStepAsSentAndTheVerdictLine() throws {
+        let fixture = try Fixture()
+        try fixture.session("s1", pid: 77)
+        fixture.processes.runner(77)
+        let tree = try #require(Self.screen.tree)
+        fixture.onPause = {
+            let channel = fixture.channel("s1")
+            if (try? channel.request(1)) != nil, (try? channel.response(to: 1)) == nil {
+                try? channel.respond(LiveSessionResponse(n: 1, action: .step, screen: Self.screen, step: .landed(.tap(label: "Steps"), delta: ScreenDelta(from: tree, to: tree))))
+            }
+        }
+        let directory = try TemporaryDirectory()
+        let log = UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 0) })
+        let json = #"{"tap":{"label":"Steps"}}"#
+        let command = try SessionStepCommand.parse(["s1", json])
+        var printed = ""
+
+        try command.run(
+            log: log,
+            emit: { printed += $0 },
+            perform: { try command.perform(store: fixture.store, processes: fixture.processes, pause: fixture.pause, now: fixture.now) }
+        )
+
+        let entry = try #require(try Self.entries(of: log).first)
+        #expect(entry.tool == "session step")
+        #expect(entry.step == json)
+        #expect(entry.verdict?.hasPrefix("ok — landed tap 'Steps'") == true)
+        try #expect(printed.contains(#require(entry.verdict)))
+    }
+
+    private static func entries(of log: UsageLog) throws -> [UsageLog.Entry] {
+        try String(contentsOf: log.fileURL, encoding: .utf8).split(separator: "\n").map {
+            try JSONDecoder().decode(UsageLog.Entry.self, from: Data($0.utf8))
+        }
+    }
+
     /// SimWalk#75: a session whose pid another process has since taken has no runner to answer — `read` and `step` say so at once rather than waiting out their timeout on a live stranger.
     @Test(arguments: ["read", "step"])
     func readAndStepOnAReusedPidSayTheRunnerStopped(_ verb: String) throws {

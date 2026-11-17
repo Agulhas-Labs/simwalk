@@ -12,7 +12,7 @@ import Foundation
 ///
 /// **What it cannot tell.** A label that is deliberately fuller than the text drawn, such as a `Loading…` placeholder over the label `Loading your library` or a message preview cut by design, reads as truncation at every size, so it says nothing about what a larger type size did. Text drawn in a different case from its label, such as an uppercased section header, is not matched, so it is never a finding.
 ///
-/// **Not every capture is checked.** Without a recogniser the rule examined nothing and its heading says so (never `clean`); a capture whose screenshot is missing or unreadable is counted as not checked.
+/// **Not every capture is checked.** Without a recogniser the rule examined nothing and its heading says so (never `clean`); a capture whose screenshot is missing or unreadable, or on which recognition failed, is counted as not checked, and the answer says which (and the failure's cause).
 public struct TruncatedTextAudit: LabelAuditRule {
     public static let name = AuditRuleName.truncatedText
 
@@ -38,21 +38,42 @@ public struct TruncatedTextAudit: LabelAuditRule {
         if recognizer == nil {
             return "no text recognizer on this face, so the rule did not run"
         }
-        return !captures.isEmpty && result.unchecked == captures.count ? "no capture's screenshot could be read" : "no text runs on any screen"
+        guard !captures.isEmpty, result.unchecked == captures.count else {
+            return "no text runs on any screen"
+        }
+        if result.recognitionFailed == result.unchecked {
+            return "text recognition failed on every capture (\(result.recognitionFailure ?? "no cause given"))"
+        }
+        return "no capture's screenshot could be read"
     }
 
     public func evaluate(_ captures: [BundleAuditScope.Capture]) -> LabelRuleResult {
         var result = LabelRuleResult()
         for capture in captures {
-            guard let recognizer, let url = capture.screenshotURL, let lines = try? recognizer.lines(inPNGAt: url) else {
-                if recognizer != nil {
-                    result.unchecked += 1
-                }
+            guard let recognizer else {
+                continue
+            }
+            guard let url = capture.screenshotURL, FileManager.default.isReadableFile(atPath: url.path) else {
+                result.unchecked += 1
+                continue
+            }
+            let lines: [MirrorTextLine]
+            do {
+                lines = try recognizer.lines(inPNGAt: url)
+            } catch {
+                result.unchecked += 1
+                result.recognitionFailed += 1
+                result.recognitionFailure = result.recognitionFailure ?? Self.cause(of: error)
                 continue
             }
             result.absorb(evaluate(capture.tree, lines: lines, screenID: capture.screenID, stateSlug: capture.stateSlug))
         }
         return result
+    }
+
+    /// The words for why recognition failed: the error's own cause when it gives one, else its description.
+    private static func cause(of error: any Error) -> String {
+        (error as? any ScreenTextRecognitionFailure)?.cause ?? String(describing: error)
     }
 
     /// The rule over one tree and the lines recognised in its screenshot.

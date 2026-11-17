@@ -9,11 +9,22 @@ import Testing
 /// `truncatedText`: text drawn cut short with an ellipsis, judged from the recognised pixels against the tree's label.
 struct TruncatedTextAuditTests {
     /// A 400 x 800 screen holding one 150-point title at the top left, labelled `Notifications`.
-    private static func capture(label: String = "Notifications") -> BundleAuditScope.Capture {
+    private static func capture(label: String = "Notifications", screenshot: URL) -> BundleAuditScope.Capture {
         let title = AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 100, width: 150, height: 20), label: label)
         let screen = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 400, height: 800), children: [title])
-        return BundleAuditScope.Capture(screenID: "settings", stateSlug: "dark-dt_uictcontentsizecategoryaccessibilityxl", tree: screen, screenshotURL: URL(fileURLWithPath: "/nonexistent/screen.png"))
+        return BundleAuditScope.Capture(screenID: "settings", stateSlug: "dark-dt_uictcontentsizecategoryaccessibilityxl", tree: screen, screenshotURL: screenshot)
     }
+
+    /// Runs `body` with a file on disk to stand for a screenshot (the fake recognisers never decode it, but the rule only asks a recogniser about a file it can read), and removes it after.
+    private static func withScreenshot<Value>(_ body: (URL) -> Value) -> Value {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("truncated-text-\(UUID().uuidString).png")
+        FileManager.default.createFile(atPath: url.path, contents: Data([0]))
+        defer { try? FileManager.default.removeItem(at: url) }
+        return body(url)
+    }
+
+    /// A path no file is at, for a capture whose screenshot is missing.
+    private static let missingScreenshot = URL(fileURLWithPath: "/nonexistent/screen.png")
 
     /// A recognised line whose centre lies in `capture()`'s title frame unless `y` says otherwise.
     private static func line(_ text: String, x: Double = 0.2, y: Double = 0.125) -> MirrorTextLine {
@@ -21,15 +32,17 @@ struct TruncatedTextAuditTests {
     }
 
     private static func evaluate(_ lines: [MirrorTextLine], label: String = "Notifications") -> LabelRuleResult {
-        TruncatedTextAudit(recognizer: FakeRecognizer(recognised: lines)).evaluate([capture(label: label)])
+        withScreenshot { TruncatedTextAudit(recognizer: FakeRecognizer(recognised: lines)).evaluate([capture(label: label, screenshot: $0)]) }
     }
 
     /// A two-line title: the frame is tall enough for both lines at y 0.1 and 0.15 of an 800-pt screen.
     private static func evaluateWrapped(_ lines: [MirrorTextLine], label: String) -> LabelRuleResult {
         let title = AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 60, width: 150, height: 80), label: label)
         let screen = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 400, height: 800), children: [title])
-        let capture = BundleAuditScope.Capture(screenID: "timeline", stateSlug: "light", tree: screen, screenshotURL: URL(fileURLWithPath: "/nonexistent/screen.png"))
-        return TruncatedTextAudit(recognizer: FakeRecognizer(recognised: lines)).evaluate([capture])
+        return withScreenshot { url in
+            let capture = BundleAuditScope.Capture(screenID: "timeline", stateSlug: "light", tree: screen, screenshotURL: url)
+            return TruncatedTextAudit(recognizer: FakeRecognizer(recognised: lines)).evaluate([capture])
+        }
     }
 
     @Test
@@ -119,10 +132,12 @@ struct TruncatedTextAuditTests {
     func linesOfAWrappedElementAreJoinedInReadingOrder() {
         let tall = AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 100, width: 150, height: 60), label: "Background app refresh")
         let screen = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 400, height: 800), children: [tall])
-        let capture = BundleAuditScope.Capture(screenID: "settings", stateSlug: "light", tree: screen, screenshotURL: URL(fileURLWithPath: "/nonexistent/screen.png"))
         let lines = [Self.line("refr…", y: 0.15), Self.line("Background app", y: 0.125)]
 
-        let result = TruncatedTextAudit(recognizer: FakeRecognizer(recognised: lines)).evaluate([capture])
+        let result = Self.withScreenshot { url in
+            let capture = BundleAuditScope.Capture(screenID: "settings", stateSlug: "light", tree: screen, screenshotURL: url)
+            return TruncatedTextAudit(recognizer: FakeRecognizer(recognised: lines)).evaluate([capture])
+        }
 
         #expect(result.findings.first?.note == "reads \"Background app refr…\"")
     }
@@ -130,7 +145,7 @@ struct TruncatedTextAuditTests {
     @Test
     func withoutARecognizerTheRuleDoesNotRunAndIsNeverClean() {
         let audit = TruncatedTextAudit(recognizer: nil)
-        let captures = [Self.capture()]
+        let captures = [Self.capture(screenshot: Self.missingScreenshot)]
 
         let result = audit.evaluate(captures)
 
@@ -141,46 +156,89 @@ struct TruncatedTextAuditTests {
 
     @Test
     func aCaptureWithoutAScreenshotIsCountedAsNotChecked() {
-        let bare = BundleAuditScope.Capture(screenID: "settings", stateSlug: "light", tree: Self.capture().tree)
+        let bare = BundleAuditScope.Capture(screenID: "settings", stateSlug: "light", tree: Self.capture(screenshot: Self.missingScreenshot).tree)
 
-        let result = TruncatedTextAudit(recognizer: FakeRecognizer(recognised: [Self.line("Notific…")])).evaluate([bare, Self.capture()])
+        let result = Self.withScreenshot { TruncatedTextAudit(recognizer: FakeRecognizer(recognised: [Self.line("Notific…")])).evaluate([bare, Self.capture(screenshot: $0)]) }
 
         #expect(result.unchecked == 1)
+        #expect(result.recognitionFailed == 0)
         #expect(result.findings.count == 1)
     }
 
     @Test
-    func aRecognizerThatThrowsLeavesTheCaptureUncheckedNotClean() {
+    func aScreenshotThatIsNotThereIsNoScreenshotReadWhateverTheRecognizerWouldSay() {
         let audit = TruncatedTextAudit(recognizer: ThrowingRecognizer())
-        let captures = [Self.capture(), Self.capture()]
+        let captures = [Self.capture(screenshot: Self.missingScreenshot), Self.capture(screenshot: Self.missingScreenshot)]
 
         let result = audit.evaluate(captures)
 
         #expect(result.unchecked == 2)
-        #expect(result.examined == 0)
-        #expect(result.findings.isEmpty)
+        #expect(result.recognitionFailed == 0)
+        #expect(result.recognitionFailure == nil)
+        #expect(audit.notApplicableReason(over: captures, result: result) == "no capture's screenshot could be read")
+    }
+
+    @Test
+    func aRecognizerThatThrowsOnReadableFilesLeavesTheCapturesUncheckedAndKeepsTheFirstCause() {
+        Self.withScreenshot { url in
+            let audit = TruncatedTextAudit(recognizer: ThrowingRecognizer())
+            let captures = [Self.capture(screenshot: url), Self.capture(screenshot: url)]
+
+            let result = audit.evaluate(captures)
+
+            #expect(result.unchecked == 2)
+            #expect(result.recognitionFailed == 2)
+            #expect(result.examined == 0)
+            #expect(result.findings.isEmpty)
+            #expect(result.recognitionFailure == "busy")
+            #expect(audit.notApplicableReason(over: captures, result: result) == "text recognition failed on every capture (busy)")
+        }
+    }
+
+    @Test
+    func anErrorWithoutACauseIsDescribed() {
+        Self.withScreenshot { url in
+            let result = TruncatedTextAudit(recognizer: PlainThrowingRecognizer()).evaluate([Self.capture(screenshot: url)])
+
+            #expect(result.recognitionFailure == String(describing: PlainFailure.broken))
+        }
     }
 
     @Test
     func theReasonComesFromTheCountsNotTheFiles() {
-        let captures = [Self.capture(), Self.capture()]
-        let throwing = TruncatedTextAudit(recognizer: ThrowingRecognizer())
         let reading = TruncatedTextAudit(recognizer: FakeRecognizer(recognised: []))
-        let noText = BundleAuditScope.Capture(screenID: "settings", stateSlug: "light", tree: AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 400, height: 800)), screenshotURL: URL(fileURLWithPath: "/nonexistent/screen.png"))
-
-        #expect(throwing.notApplicableReason(over: captures, result: throwing.evaluate(captures)) == "no capture's screenshot could be read")
-        #expect(reading.notApplicableReason(over: [noText], result: reading.evaluate([noText])) == "no text runs on any screen")
-        // One capture read and none of its text is a run: not every capture is unchecked.
-        let mixed = [noText, BundleAuditScope.Capture(screenID: "settings", stateSlug: "light", tree: noText.tree)]
-        #expect(reading.notApplicableReason(over: mixed, result: reading.evaluate(mixed)) == "no text runs on any screen")
+        Self.withScreenshot { url in
+            let noText = BundleAuditScope.Capture(screenID: "settings", stateSlug: "light", tree: AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 400, height: 800)), screenshotURL: url)
+            #expect(reading.notApplicableReason(over: [noText], result: reading.evaluate([noText])) == "no text runs on any screen")
+            // One capture read and none of its text is a run: not every capture is unchecked.
+            let mixed = [noText, BundleAuditScope.Capture(screenID: "settings", stateSlug: "light", tree: noText.tree)]
+            #expect(reading.notApplicableReason(over: mixed, result: reading.evaluate(mixed)) == "no text runs on any screen")
+        }
     }
 }
 
 private extension TruncatedTextAuditTests {
-    /// A recogniser whose every read fails.
+    /// A recognition failure that names its cause.
+    private struct Busy: ScreenTextRecognitionFailure {
+        let cause = "busy"
+    }
+
+    /// An error that is not a `ScreenTextRecognitionFailure`.
+    private enum PlainFailure: Error {
+        case broken
+    }
+
+    /// A recogniser whose every read fails, saying why.
     private struct ThrowingRecognizer: ScreenTextRecognizing {
         func lines(inPNGAt _: URL) throws -> [MirrorTextLine] {
-            throw CocoaError(.fileReadCorruptFile)
+            throw Busy()
+        }
+    }
+
+    /// A recogniser whose every read fails with an error that carries no cause.
+    private struct PlainThrowingRecognizer: ScreenTextRecognizing {
+        func lines(inPNGAt _: URL) throws -> [MirrorTextLine] {
+            throw PlainFailure.broken
         }
     }
 

@@ -352,10 +352,45 @@ struct RouteTargetTrackerTests {
         ])
     }
 
-    /// A screen whose only `Edit` is the toolbar's, with a line of text that may still be changing.
-    private static func barOnly(loading: String = "Loading") -> AXNode {
+    /// A bar-only `Edit` on a screen whose other element an endless animation widens 6% on every read is still for the quiet period (SimWalk#252), rather than waiting out the whole budget.
+    @Test
+    func apulsingScreenCountsAsStillForTheQuietPeriod() {
+        let reads = (0 ..< 12).map { Self.barOnly(loading: "Loading", pulse: $0.isMultiple(of: 2)) }
+
+        let decisions = Self.replay(reads, label: "Edit")
+
+        #expect(decisions.count == 2)
+        #expect(Self.acted(decisions)?.isBarControl == true)
+    }
+
+    /// The quiet run is held against its first read, not the read before (SimWalk#252): a line creeping two points a read is a steady shift of its neighbour every time, yet leaves the allowance within a few reads, so the bar's `Edit` waits for the creep to stop rather than being taken mid-slide.
+    @Test
+    func acreepingScreenIsNotStillUntilItStops() {
+        let creeping = (0 ..< 20).map { Self.barOnly(creepingTo: Double($0) * 2) }
+        let stopped = Array(repeating: Self.barOnly(creepingTo: 40), count: 12)
+
+        let whileCreeping = Self.replay(creeping, label: "Edit", quiet: 2, budget: 60, lookup: 60)
+        let afterwards = Self.replay(creeping + stopped, label: "Edit", quiet: 2, budget: 60, lookup: 60)
+
+        #expect(whileCreeping.allSatisfy { $0 == .watch })
+        #expect(afterwards.count == creeping.count + 9)
+        #expect(Self.acted(afterwards)?.isBarControl == true)
+    }
+
+    /// A screen whose only `Edit` is the toolbar's, with a 100-point line of text at `x`.
+    private static func barOnly(creepingTo x: Double) -> AXNode {
         screen([
-            AXNode(type: "StaticText", frame: frame(y: 300, height: 20), label: loading),
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: x, y: 300, width: 100, height: 20), label: "Loading"),
+            AXNode(type: "Toolbar", frame: frame(y: 740, height: 50), children: [
+                AXNode(type: "Button", frame: AXNode.Frame(x: 16, y: 745, width: 60, height: 40), label: "Edit"),
+            ]),
+        ])
+    }
+
+    /// A screen whose only `Edit` is the toolbar's, with a line of text that may still be changing and, when `pulse`, widened by 6% as an endless animation does.
+    private static func barOnly(loading: String = "Loading", pulse: Bool = false) -> AXNode {
+        screen([
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 0, y: 300, width: pulse ? 426 : 402, height: 20), label: loading),
             AXNode(type: "Toolbar", frame: frame(y: 740, height: 50), children: [
                 AXNode(type: "Button", frame: AXNode.Frame(x: 16, y: 745, width: 60, height: 40), label: "Edit"),
             ]),

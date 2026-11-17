@@ -4,13 +4,15 @@
 
 import Foundation
 
-/// Whether a capture holds a screen at all, or only the frame the app draws around one.
+/// Whether a capture holds a screen at all, or only the frame the app draws around one, and whether it is still loading.
 ///
 /// **A spinner holds still, and stillness is what the settle window rewards.** A real app's Browse tab takes one to three seconds to populate on a cold visit; at the default quiet period its capture is a bare spinner with an accessibility tree carrying nothing but the tab bar, filed as `captured` with `axTreeSettled: true` — a perfectly true statement about the tree and a perfectly false impression of the screen (SimWalk#7). A loading tree is *more* still than a real one, so no timing threshold separates them.
 ///
 /// **This is a content check, so a slow machine cannot defeat it.** It asks what the capture holds rather than how long the runner waited: a tree whose only labels belong to the tab bar is a screen that has not arrived, on any machine, at any settle.
 ///
 /// **It flags rather than refuses**, and that is the whole difference from `StateApplicationCheck`. A state the device discarded produces evidence that cannot be attributed to anything, so nothing may be filed; a screen that had not populated produces an entirely honest picture of a screen mid-load — worth keeping, worth reading, and worth not mistaking for the screen itself. The flag rides `CaptureManifest.StateCapture.axTreeHasContent` and moves the walk's exit code, exactly as an unsettled capture does.
+///
+/// **A labelled spinner is not content** (SimWalk#267). A screen with a title above a `ProgressView` carries labels, so `isChromeOnly` calls it a screen, yet it is as loading as a bare one; ``spinner(in:)`` asks the other question, whether an activity indicator is showing anywhere, and the settle watch treats a hit like a bare tree.
 public struct ScreenContentCheck {
     /// The container types whose subtrees are the app's frame rather than one screen's content.
     ///
@@ -29,6 +31,21 @@ public struct ScreenContentCheck {
     /// Labels rather than values: the spinner in that specimen carries a `value` of `1` and no label, and a check that counted values would read the loading indicator itself as the content it exists to notice was missing.
     public static func contentLabels(in tree: AXNode) -> [String] {
         tree.children.flatMap(labels(in:))
+    }
+
+    /// The first activity indicator in the tree, in tree order, or `nil` when nothing is spinning (SimWalk#267).
+    ///
+    /// **It looks everywhere, the app's chrome and the root included**, because a spinner in a navigation bar is still a screen loading. Only `ActivityIndicator` counts: a `ProgressIndicator` is a determinate bar, which reports progress rather than an unknown wait. The value is not read, since a spinner's value says nothing a label-free tree could rely on.
+    public static func spinner(in tree: AXNode) -> AXNode? {
+        if tree.type == "ActivityIndicator" {
+            return tree
+        }
+        for child in tree.children {
+            if let found = spinner(in: child) {
+                return found
+            }
+        }
+        return nil
     }
 
     private static func labels(in node: AXNode) -> [String] {

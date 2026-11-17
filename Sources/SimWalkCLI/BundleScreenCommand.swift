@@ -26,7 +26,7 @@ struct BundleScreenCommand: ParsableCommand {
     var step: [String] = []
 
     /// `.unconditional` so a value beginning with `-` is the option's value rather than a second option — `--state -x` as well as `--state=-x`.
-    @Option(name: .long, parsing: .unconditional, help: "Which of the screen's captured states to read, by slug (for example 'light' or 'dark'). With none named, a screen holding several answers for the first and names the others.")
+    @Option(name: .long, parsing: .unconditional, help: "Which of the screen's captured states to read, by slug or its leading component (light, dark). With none named, a screen holding several answers for the first and names the others.")
     var state: String?
 
     /// `.unconditional` for the reason `state` is: `--match -2` is a search for "-2", not `--match` given nothing.

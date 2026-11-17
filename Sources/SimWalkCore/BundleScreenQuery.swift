@@ -72,18 +72,41 @@ public struct BundleScreenQuery {
         offScreenHint: String? = nil,
         stillNeeding screenshot: String
     ) -> (residue: [String], clause: String) {
-        let (onScreen, offScreen) = deduplicated(tree)
-        let listed = match.map { text in onScreen.filter { element($0, contains: text) } } ?? onScreen
-        let offScreenHits = match.map { text in offScreen.filter { element($0, contains: text) } } ?? offScreen
+        let (onScreen, offScreen) = rows(of: tree, folding: true)
+        let listed = match.map { text in onScreen.filter { element($0.node, contains: text) } } ?? onScreen
+        let offScreenHits = match.map { text in offScreen.filter { element($0.node, contains: text) } } ?? offScreen
         let offListed = match != nil || listingOffScreen ? offScreenHits : []
 
-        var residue = listed.map(line) + offListed.map { "\(line($0)) (off screen)" }
+        // `--match` reaches inside a fold: a folded descendant that matches is listed on its own line, saying whose row it is in.
+        func insideLines(_ row: Row) -> [String] {
+            guard let match else { return [] }
+            return row.insides.filter { element($0, contains: match) }.map { "\(line($0)) (inside '\(row.node.label ?? "")')" }
+        }
+        var residue: [String] = []
+        var insideCount = 0
+        for row in onScreen {
+            if match.map({ element(row.node, contains: $0) }) ?? true {
+                residue.append(foldedLine(row))
+            }
+            residue += insideLines(row)
+            insideCount += insideLines(row).count
+        }
+        if match != nil || listingOffScreen {
+            for row in offScreen {
+                if match.map({ element(row.node, contains: $0) }) ?? true {
+                    residue.append("\(foldedLine(row)) (off screen)")
+                }
+                residue += insideLines(row).map { "\($0) (off screen)" }
+                insideCount += insideLines(row).count
+            }
+        }
         residue.append("")
         residue.append("text only — colour, shape and visual emphasis (a capsule vs. a line) still need \(screenshot)")
 
         let countClause: String
         if let match {
-            let more = offListed.isEmpty ? "" : ", and \(offListed.count) off screen (listed)"
+            let inside = insideCount == 0 ? "" : ", and \(insideCount) inside a folded row (listed)"
+            let more = (offListed.isEmpty ? "" : ", and \(offListed.count) off screen (listed)") + inside
             countClause = "\(listed.count) of \(onScreen.count) on-screen elements match '\(match)'\(more)"
         } else {
             let more = if offScreen.isEmpty {
@@ -100,14 +123,29 @@ public struct BundleScreenQuery {
 
     /// The screen's on-screen text elements, one line each, exactly as the residue lists them — what ``ScreenDelta`` compares before and after a step.
     static func lines(of tree: AXNode) -> [String] {
-        deduplicated(tree).onScreen.map(line)
+        elements(of: tree).map(line)
+    }
+
+    /// The elements ``lines(of:)`` makes its lines from, in the same order, for a comparison that needs more than a line's text.
+    static func elements(of tree: AXNode) -> [AXNode] {
+        deduplicated(tree).onScreen
+    }
+
+    /// The row's line: the element's own line, its type followed by what is folded into it — `8 stars · Other (8 images inside) · 254,526 311×30`.
+    static func foldedLine(_ row: Row) -> String {
+        guard !row.insides.isEmpty else { return line(row.node) }
+        let images = row.insides.filter { $0.type == "Image" }.count
+        let texts = row.insides.count - images
+        let parts = [(images, "image"), (texts, "text")].filter { $0.0 > 0 }.map { "\($0.0) \($0.1)\($0.0 == 1 ? "" : "s")" }
+        return line(row.node, typeNote: " (\(parts.joined(separator: ", ")) inside)")
     }
 
     /// The verdict: every qualification the one capture this reads carries, then `detail` — which screen, which state, its root, and how much text answered.
     private static func verdict(_ capture: CaptureManifest.StateCapture, detail: String) -> AnswerVerdict {
         let qualifications = [
-            AnswerVerdict.qualification(capture.axTreeSettled == false && capture.axTreeHasContent != false ? 1 : 0, "capture", "taken before the tree settled"),
+            AnswerVerdict.qualification(capture.axTreeSettled == false && capture.axTreeHasContent != false && capture.axTreeSpinner == nil ? 1 : 0, "capture", "taken before the tree settled"),
             AnswerVerdict.qualification(capture.axTreeHasContent == false ? 1 : 0, "capture", "holding the app's chrome and nothing else"),
+            AnswerVerdict.qualification(capture.axTreeSettled == false && capture.axTreeHasContent != false && capture.axTreeSpinner != nil ? 1 : 0, "capture", "still showing a spinner"),
             AnswerVerdict.qualification(capture.unverifiedAxes?.isEmpty == false ? 1 : 0, "capture", "with a state axis set and unverified"),
         ].compactMap(\.self)
         return AnswerVerdict.reporting(qualifications: qualifications, detail: detail)
@@ -161,14 +199,22 @@ public struct BundleScreenQuery {
             throw BundleScreenError.screenNotCaptured(step: position, screenID: screen.id, outcome: outcomeLabel(screen.outcome))
         }
         if let state {
-            guard let capture = screen.captures.first(where: { $0.state.slug == state }) else {
-                let available = screen.captures.map(\.state.slug)
-                if screen.refusedStates?.contains(where: { $0.slug == state }) == true {
-                    throw BundleScreenError.stateRefused(step: position, screenID: screen.id, requested: state, available: available)
-                }
-                throw BundleScreenError.stateNotFound(step: position, screenID: screen.id, requested: state, available: available)
+            if let exact = screen.captures.first(where: { $0.state.slug == state }) {
+                return exact
             }
-            return capture
+            // Not a whole slug: a leading component (`light` for `light-args_ab12`) names the capture when exactly one slug starts with it.
+            let leading = screen.captures.filter { $0.state.slug.hasPrefix("\(state)-") }
+            if leading.count == 1 {
+                return leading[0]
+            }
+            if leading.count > 1 {
+                throw BundleScreenError.stateAmbiguous(step: position, screenID: screen.id, requested: state, matching: leading.map(\.state.slug))
+            }
+            let available = screen.captures.map(\.state.slug)
+            if screen.refusedStates?.contains(where: { $0.slug == state }) == true {
+                throw BundleScreenError.stateRefused(step: position, screenID: screen.id, requested: state, available: available)
+            }
+            throw BundleScreenError.stateNotFound(step: position, screenID: screen.id, requested: state, available: available)
         }
         return screen.captures[0]
     }
@@ -177,7 +223,7 @@ public struct BundleScreenQuery {
     private static func outcomeLabel(_ outcome: ScreenOutcome) -> String {
         switch outcome {
         case .captured: "captured" // unreachable in practice: CaptureManifestValidator holds `.captured` to at least one capture.
-        case let .unreachable(_, _, _, state): state.map { "UNREACHABLE \($0.clause)" } ?? "UNREACHABLE"
+        case let .unreachable(_, _, _, state, _): state.map { "UNREACHABLE \($0.clause)" } ?? "UNREACHABLE"
         case .buildMismatch: "REFUSED, build mismatch"
         case .captureFailed: "CAPTURE FAILED"
         case .stateNotApplied: "REFUSED, state not applied"
@@ -195,6 +241,14 @@ public struct BundleScreenQuery {
     ///
     /// The app root itself is never a candidate — its own label is the app's display name, which is not text on the screen — so this walks `tree.children`, never `tree` itself.
     private static func deduplicated(_ tree: AXNode) -> (onScreen: [AXNode], offScreen: [AXNode]) {
+        let (onScreen, offScreen) = rows(of: tree, folding: false)
+        return (onScreen.map(\.node), offScreen.map(\.node))
+    }
+
+    /// ``deduplicated(_:)``'s elements as rows.
+    ///
+    /// With `folding`, a labelled node whose insides are only images and text its label contains (``LabelledStop/foldedInsides(of:)``) is one row carrying them, and they are not listed; `ScreenDelta` reads the unfolded form, so a step that adds or removes a child image is still seen.
+    private static func rows(of tree: AXNode, folding: Bool) -> (onScreen: [Row], offScreen: [Row]) {
         struct Key: Hashable {
             let label: String?
             let value: String?
@@ -215,7 +269,7 @@ public struct BundleScreenQuery {
             }
         }
         var listedAt: [Key: Int] = [:]
-        var result: [(node: AXNode, onScreen: Bool)] = []
+        var result: [(row: Row, onScreen: Bool)] = []
         let isOnScreen = onScreenTest(for: tree)
 
         // Lists `node`, or points at the line an exact repeat of it already has — which is on the same side of the edge, having the same frame.
@@ -224,7 +278,7 @@ public struct BundleScreenQuery {
             if let index = listedAt[key] {
                 return index
             }
-            result.append((node, isOnScreen(node)))
+            result.append((Row(node: node), isOnScreen(node)))
             listedAt[key] = result.count - 1
             return result.count - 1
         }
@@ -235,8 +289,8 @@ public struct BundleScreenQuery {
             var listed: Int?
             if nonEmpty(node.label) != nil {
                 if let index = ancestors.last(where: { $0.listed != nil && restates(node, $0.node) })?.listed {
-                    if onScreen || !result[index].onScreen, specificity(node) > specificity(result[index].node) {
-                        result[index].node = node
+                    if onScreen || !result[index].onScreen, specificity(node) > specificity(result[index].row.node) {
+                        result[index].row.node = node
                         listedAt[Key(node)] = index
                     }
                     listed = index
@@ -248,10 +302,22 @@ public struct BundleScreenQuery {
             {
                 listed = list(node)
             }
+            // A descendant that only restates the node is not a count of its own, but it keeps collapsing into the row as above: its type may be the more specific.
+            if folding, let listed, let folded = LabelledStop.foldedInsides(of: node) {
+                let insides = folded.filter { !restates($0, node) }
+                if !insides.isEmpty {
+                    for restater in folded where restates(restater, node) && (onScreen || !result[listed].onScreen) && specificity(restater) > specificity(result[listed].row.node) {
+                        result[listed].row.node = restater
+                        listedAt[Key(restater)] = listed
+                    }
+                    result[listed].row.insides = insides
+                    return
+                }
+            }
             node.children.forEach { visit($0, ancestors: ancestors + [(node, listed)]) }
         }
         tree.children.forEach { visit($0, ancestors: []) }
-        return (result.filter(\.onScreen).map(\.node), result.filter { !$0.onScreen }.map(\.node))
+        return (result.filter(\.onScreen).map(\.row), result.filter { !$0.onScreen }.map(\.row))
     }
 
     /// The element types a reader acts on — kept over a same-text container when the two collapse.
@@ -301,9 +367,13 @@ public struct BundleScreenQuery {
 
     /// One element's residue line: its label (or `(no label)`), its value when it carries one — a switch's state, a chart's summary — its type, and its frame.
     static func line(_ element: AXNode) -> String {
+        line(element, typeNote: "")
+    }
+
+    private static func line(_ element: AXNode, typeNote: String) -> String {
         let label = nonEmpty(element.label) ?? "(no label)"
         let text = nonEmpty(element.value).map { "\(label) = \($0)" } ?? label
-        return "\(text) · \(element.type) · \(frameText(element.frame))"
+        return "\(text) · \(element.type)\(typeNote) · \(frameText(element.frame))"
     }
 
     private static func nonEmpty(_ text: String?) -> String? {
@@ -313,10 +383,23 @@ public struct BundleScreenQuery {
 
     /// A frame as a reader can act on without opening the screenshot: whole points, `x,y w×h`.
     static func frameText(_ frame: AXNode.Frame) -> String {
-        "\(point(frame.x)),\(point(frame.y)) \(point(frame.width))×\(point(frame.height))"
+        "\(positionText(frame)) \(point(frame.width))×\(point(frame.height))"
+    }
+
+    /// A frame's origin alone, `x,y` in whole points as ``frameText(_:)`` starts: where an element moved to, when its size is not the news.
+    static func positionText(_ frame: AXNode.Frame) -> String {
+        "\(point(frame.x)),\(point(frame.y))"
     }
 
     private static func point(_ value: Double) -> String {
         String(format: "%.0f", value)
+    }
+}
+
+extension BundleScreenQuery {
+    /// One listed element and, when its label speaks for what is inside it, the descendants folded into its row (SimWalk#264).
+    struct Row {
+        var node: AXNode
+        var insides: [AXNode] = []
     }
 }

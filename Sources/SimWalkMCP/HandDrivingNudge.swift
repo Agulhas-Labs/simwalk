@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Fieldwork
 import Foundation
 
 /// Refuses, once, a context's second distinct call that drives a simulator by hand in a repository whose walkbook already drives it — and says what one walk would have captured instead (SimWalk#12).
@@ -21,7 +22,7 @@ public struct HandDrivingNudge {
         // A subagent's payload carries its parent's session, so the agent is what keeps its re-runs and its cap its own.
         let context = call.agentID.map { "\(call.sessionID)-\($0)" } ?? call.sessionID
         guard !walkbooks.isEmpty, ledger.refuses(context: context, call: refused.key) else { return nil }
-        return denial(reason: reason(offering: walkbooks, letThrough: refused.shellCommands))
+        return HookOutput.preToolUseDenial(reason: reason(offering: walkbooks, letThrough: refused.shellCommands))
     }
 
     /// The refusal's text: each walkbook with the command that walks it and what that captures, then the way through.
@@ -171,20 +172,5 @@ private extension HandDrivingNudge {
     /// A command word as the name of what it runs, however its path reaches it.
     static func executableName(_ word: String) -> String {
         word.split(separator: "/").last.map(String.init) ?? word
-    }
-
-    /// Claude Code's `PreToolUse` refusal, which it hands the model as the call's result; `nil` when it cannot be encoded, since a hook that prints what the harness cannot parse is worse than one that prints nothing.
-    static func denial(reason: String) -> String? {
-        let output: [String: Any] = [
-            "hookSpecificOutput": [
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": reason,
-            ],
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys, .withoutEscapingSlashes]) else {
-            return nil
-        }
-        return String(bytes: data, encoding: .utf8)
     }
 }

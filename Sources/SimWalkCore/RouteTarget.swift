@@ -9,7 +9,7 @@ import RegexBuilder
 ///
 /// **The first match in tree order used to win, and on a real screen the first match is chrome.** On a category landing, `tap 'Sleep'` (the category's name) matched the navigation bar — whose identifier is the screen title — and the large title before it reached the row labelled `Sleep, Nothing earlier to compare with` that opens the record. The tap landed on the bar, the screen did not move, and the step came back UNREACHABLE looking exactly like a missing route. The only step that worked named the row's data-carrying note, which changes the moment the store does.
 ///
-/// **Ranked, and still deterministic.** Every candidate is ranked first by the tier it matched in — literally (a whole label, an identifier, a leading comma-separated component), then the same with its no-break spaces read as spaces, then a `{n}` pattern, then a lead-in to its data, each consulted only when nothing at all matched in the tier before — then by what it is — a control that can navigate (a button, a cell, a link, a switch) in the screen, above a control inside a bar (a tab item, a toolbar's Edit), above content (static text, images, containers), above chrome and anything that cannot take a tap (a navigation bar, a tab bar, a toolbar themselves, text inside them, a disabled or zero-sized element) — and, among literal matches, a whole label or identifier above a leading component. The best rank wins, and **a tie at the best rank goes to the first in tree order**, which is what the tool always did.
+/// **Ranked, and still deterministic.** Every candidate is ranked first by the tier it matched in — literally (a whole label, an identifier, a leading comma-separated component, a leading sentence), then the same with its no-break spaces read as spaces, then a `{n}` pattern, then a lead-in to its data, each consulted only when nothing at all matched in the tier before — then by what it is — a control that can navigate (a button, a cell, a link, a switch) in the screen, above a control inside a bar (a tab item, a toolbar's Edit), above content (static text, images, containers), above chrome and anything that cannot take a tap (a navigation bar, a tab bar, a toolbar themselves, text inside them, a disabled or zero-sized element) — and, among literal matches, a whole label or identifier above a leading component. The best rank wins, and **a tie at the best rank goes to the first in tree order**, which is what the tool always did.
 ///
 /// **Ties are not refused, and that was measured rather than assumed.** Refusing them was the other option on the issue, and the first cut did: the next full walk of a field walkbook lost two screens, whose `tap 'Coastal Cruise'` names a family of eighteen rides and means the first — the newest, at the top of the list. Tapping "the first row that starts with this" is how a walkbook reaches a list's head without pinning its data, which is the whole point of matching a leading component. So a tie keeps tree order, and when the step then fails to land its reason says it was a tie, and among how many.
 ///
@@ -97,10 +97,13 @@ public struct RouteTarget {
         if node.label?.hasPrefix("\(label), ") == true {
             return .leadingComponent
         }
+        if !label.isEmpty, let nodeLabel = node.label, sentenceEnders.contains(where: { nodeLabel.hasPrefix("\(label)\($0) ") }) {
+            return .leadingSentence
+        }
         if let nodeLabel = node.label {
             let spoken = readingSpacesAsSpaces(label)
             let drawn = readingSpacesAsSpaces(nodeLabel)
-            if drawn == spoken || drawn.hasPrefix("\(spoken), ") {
+            if drawn == spoken || drawn.hasPrefix("\(spoken), ") || (!spoken.isEmpty && sentenceEnders.contains(where: { drawn.hasPrefix("\(spoken)\($0) ") })) {
                 return .spacing
             }
         }
@@ -113,10 +116,55 @@ public struct RouteTarget {
         return reach == .textEntry && !label.isEmpty && node.placeholder == label ? .placeholder : nil
     }
 
+    /// The labels on screen a step that found nothing probably meant, each with how it compared: the part of a `scrollTo` miss after `nothing on screen is labelled or identified '…'` (SimWalk#273).
+    ///
+    /// **A miss that never says which rule it applied leaves the author to guess.** `scrollTo 'Reset asked for'` found nothing on a text reading `Reset asked for. The PIN clears at 18:02 on Sun 25 Oct.` while a longer form matched; nothing in the refusal said a step matches the start of a label only up to a comma, a sentence's end, or a space before a number. So the refusal lists up to three labels that contain the step's text, both compared ignoring case and with no-break spaces read as spaces: those that start with it first, then the rest, each in tree order, each label once, each cut to 60 characters. The first label that starts with it carries the rule in full, the later ones only the fact.
+    ///
+    /// Empty when nothing contains the text, or the text is empty.
+    static func nearest(to label: String, in tree: AXNode) -> [String] {
+        let wanted = normalised(label)
+        guard !wanted.isEmpty else { return [] }
+        var seen = Set<String>()
+        var starting: [(label: String, caseOnly: Bool)] = []
+        var containing: [String] = []
+        for node in tree.flattened {
+            guard let nodeLabel = node.label, seen.insert(nodeLabel).inserted else { continue }
+            let drawn = normalised(nodeLabel)
+            if drawn.hasPrefix(wanted) {
+                // Only case keeps a step from matching a label that begins with its text, or the label is the text but for case.
+                starting.append((nodeLabel, drawn == wanted || !readingSpacesAsSpaces(nodeLabel).hasPrefix(readingSpacesAsSpaces(label))))
+            } else if drawn.contains(wanted) {
+                containing.append(nodeLabel)
+            }
+        }
+        var explained = false
+        let startingEntries = starting.map { entry in
+            if entry.caseOnly {
+                return "'\(cut(entry.label))' (differs in case)"
+            }
+            defer { explained = true }
+            return "'\(cut(entry.label))' (starts with it\(explained ? "" : ", but a step matches the start of a label only up to a comma, a sentence's end, or a space before a number"))"
+        }
+        let containingEntries = containing.map { "'\(cut($0))' (contains it)" }
+        return Array((startingEntries + containingEntries).prefix(3))
+    }
+
+    private static func normalised(_ text: String) -> String {
+        readingSpacesAsSpaces(text).lowercased()
+    }
+
+    /// `label` cut to 60 characters, the last of them `…` when it was longer.
+    private static func cut(_ label: String) -> String {
+        label.count > 60 ? String(label.prefix(59)) + "…" : label
+    }
+
+    /// What ends a sentence, so a label that begins with the step's text followed by one of these and a space is a leading sentence (SimWalk#273).
+    private static let sentenceEnders = [".", "?", "!"]
+
     /// `text` with each no-break (U+00A0) and narrow no-break (U+202F) space read as an ordinary space — what a `.spacing` match compares on both sides (SimWalk#99).
     ///
     /// Only those two: they are the spaces an app writes so a name never wraps (`CO₂ level`), and the ones a person authoring a walkbook cannot tell from a space. A thin space (U+2009) is a visible difference and is not read as one.
-    fileprivate static func readingSpacesAsSpaces(_ text: String) -> String {
+    static func readingSpacesAsSpaces(_ text: String) -> String {
         String(text.map { $0 == "\u{00A0}" || $0 == "\u{202F}" ? " " : $0 })
     }
 
@@ -282,16 +330,16 @@ public extension RouteTarget {
             return "a \(node.type) \(named)\(qualifier)"
         }
 
-        /// Whether a live element read while scrolling towards this one is still this one: the label the snapshot recorded — or its identifier, for a match on that — at the same width and height, wherever it now sits.
+        /// Whether a live element read while scrolling towards this one is still this one: the label the snapshot recorded — or its identifier, for a match on that — at a steady width and height (`AXNode.Frame.hasSteadySize(with:)`), wherever it now sits.
+        ///
+        /// **Steady, not equal** (SimWalk#258): a SwiftUI pulse keeps scaling an element a few percent during a walk, so a size held to half a point lost every pulsing element on the first swipe, though it never left the screen.
         ///
         /// **A bound element is not a fixed element.** The runner binds by an index among a query's matches, and every read resolves that index again; once a lazy list recycles the rows above, the same index can name a later row. So a scroll that finds its element's label or size changed has lost it — and says so rather than landing on whatever the index names now.
         ///
         /// **The origin is not compared, horizontal or vertical** (SimWalk#241). A swipe moves an element up or down, and a table that builds its rows before they scroll into view reports one not yet laid out at a placeholder origin: a settings sheet's off-screen row read at `0,117`, its scroll view's corner, and at `32,…` once on screen, the same `308×52` both times. Holding the horizontal position lost every such row on the first swipe, where a `tap` — bound once and never read again — reached it.
         public func isStill(label: String?, identifier: String?, frame: AXNode.Frame) -> Bool {
             let named = match == .identifier ? identifier == node.identifier : label == node.label
-            return named
-                && abs(frame.width - node.frame.width) < 0.5
-                && abs(frame.height - node.frame.height) < 0.5
+            return named && frame.hasSteadySize(with: node.frame)
         }
 
         fileprivate var kind: Kind {
@@ -357,6 +405,10 @@ public extension RouteTarget {
         case identifier
         /// The leading comma-separated component of a composed label.
         case leadingComponent
+        /// The leading sentence of a label: the step's text, then `.`, `?` or `!` and a space (SimWalk#273) — `'Reset asked for'` against `'Reset asked for. The PIN clears at 18:02 on Sun 25 Oct.'`.
+        ///
+        /// It ranks as a leading component does, but the runner's live predicate (`BEGINSWITH "X, "`) would not return it, so it is bound by the label and frame the snapshot recorded.
+        case leadingSentence
         /// The whole label, or its leading component, once a no-break space (U+00A0) or narrow no-break space (U+202F) is read as a space on both sides (SimWalk#99) — `'CO₂ level'` against `'CO₂\u{00A0}level, 38.8 ppm'`, which an app writes so the name never wraps and its author cannot see.
         ///
         /// Identifiers are not normalised: an identifier is a name the app chose, compared as written.
@@ -373,7 +425,7 @@ public extension RouteTarget {
         /// A later tier is consulted only when nothing on screen matched in an earlier one (SimWalk#9, SimWalk#13, SimWalk#99): the spacing match, the lead-in and the pattern each exist to reach a label nothing else can, and neither may take a step away from an element it reached before them. A label that literally reads `'Week {n}'` is the placeholder's case of that.
         fileprivate var tier: Int {
             switch self {
-            case .label, .identifier, .leadingComponent: 0
+            case .label, .identifier, .leadingComponent, .leadingSentence: 0
             case .spacing: 1
             case .pattern: 2
             case .prefix: 3
@@ -387,7 +439,7 @@ public extension RouteTarget {
         fileprivate var precedence: Int {
             switch self {
             case .label, .identifier, .spacing, .pattern, .prefix, .placeholder: 0
-            case .leadingComponent: 1
+            case .leadingComponent, .leadingSentence: 1
             }
         }
 
@@ -397,7 +449,7 @@ public extension RouteTarget {
         fileprivate var isLivePredicate: Bool {
             switch self {
             case .label, .identifier, .leadingComponent: true
-            case .spacing, .pattern, .prefix, .placeholder: false
+            case .leadingSentence, .spacing, .pattern, .prefix, .placeholder: false
             }
         }
     }
@@ -465,7 +517,7 @@ public extension RouteTarget {
             guard case let .chosen(candidate, _) = self else { return false }
             return switch candidate.match {
             case .placeholder: true
-            case .label, .identifier, .leadingComponent: candidate.isBarControl || candidate.reach == .anything
+            case .label, .identifier, .leadingComponent, .leadingSentence: candidate.isBarControl || candidate.reach == .anything
             case .spacing, .pattern, .prefix: false
             }
         }
@@ -476,6 +528,18 @@ public extension RouteTarget {
         public func rebinding(labelled label: String, in tree: AXNode) -> Rebinding {
             guard case let .chosen(candidate, _) = self else { return .final }
             return rebinding(to: RouteTarget.choose(labelled: label, in: tree, reaching: candidate.reach))
+        }
+
+        /// What a bind that missed this choice's element because it is still moving may do with `tree`, one more read in the runner's wait for it to hold steady (`MovingTargetSettle`).
+        ///
+        /// **`rebinding(labelled:in:)` with the literal match let in, for the same element only.** That one leaves a literal match's miss final, because one fresh read cannot tell a moved element from a moving one; the wait can, by reading on. So the same place in the tree matched the same way is followed at any tier (SimWalk#255: a button on a panel a spring is still sliding in), and anything else is answered exactly as `rebinding(to:)` answers it.
+        public func following(labelled label: String, in tree: AXNode) -> Rebinding {
+            guard case let .chosen(candidate, _) = self else { return .final }
+            let fresh = RouteTarget.choose(labelled: label, in: tree, reaching: candidate.reach)
+            if case let .chosen(retarget, _) = fresh, retarget.path == candidate.path, retarget.match == candidate.match {
+                return .same(fresh)
+            }
+            return rebinding(to: fresh)
         }
 
         /// What a bind that missed this choice's element may do with `fresh`, the step's label chosen again.

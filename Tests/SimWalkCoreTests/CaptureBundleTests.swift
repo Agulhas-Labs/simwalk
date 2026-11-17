@@ -46,6 +46,69 @@ struct CaptureBundleTests {
         #expect(read.manifest.screens.first?.captures.first?.axTreeHasContent == false)
     }
 
+    /// The spinner a capture was filed still showing survives the trip through a bundle, labelled and unlabelled, and a capture counts as loading rather than moving (SimWalk#267).
+    @Test
+    func aCapturesSpinnerSurvivesTheTripThroughABundle() throws {
+        let directory = try TemporaryDirectory()
+        let written = try CaptureBundleFixture.write(in: directory, captures: [
+            CaptureBundleFixture.Capture(
+                screenID: "answer",
+                state: Walkbook.CaptureState(theme: .light),
+                tree: CaptureBundleFixture.populatedScreen(),
+                settled: false,
+                spinner: CaptureManifest.Spinner(label: "Loading the answer…")
+            ),
+            CaptureBundleFixture.Capture(
+                screenID: "answer",
+                state: Walkbook.CaptureState(theme: .dark),
+                tree: CaptureBundleFixture.populatedScreen(),
+                settled: false,
+                spinner: CaptureManifest.Spinner(label: nil)
+            ),
+        ])
+
+        let read = try CaptureBundle.read(at: written.url)
+        let captures = try #require(read.manifest.screens.first?.captures)
+
+        #expect(captures.first?.axTreeSpinner == CaptureManifest.Spinner(label: "Loading the answer…"))
+        #expect(captures.last?.axTreeSpinner == CaptureManifest.Spinner(label: nil))
+        #expect(read.manifest.loadingCaptures.count == 2)
+        #expect(read.manifest.movingCaptures.isEmpty)
+        #expect(read.manifest.chromeOnlyCaptures.isEmpty)
+    }
+
+    /// A bare tree with a spinner is the chrome-only shape (SimWalk#81) and counts there alone.
+    @Test
+    func aChromeOnlyCaptureWithASpinnerIsOnlyChromeOnly() throws {
+        let directory = try TemporaryDirectory()
+        let written = try CaptureBundleFixture.write(in: directory, captures: [
+            CaptureBundleFixture.Capture(
+                screenID: "browse",
+                state: Walkbook.CaptureState(theme: .light),
+                tree: CaptureBundleFixture.loadingScreen(),
+                settled: false,
+                hasContent: false,
+                spinner: CaptureManifest.Spinner(label: nil)
+            ),
+        ])
+
+        let read = try CaptureBundle.read(at: written.url)
+
+        #expect(read.manifest.chromeOnlyCaptures.map(\.screenID) == ["browse"])
+        #expect(read.manifest.loadingCaptures.isEmpty)
+        #expect(read.manifest.movingCaptures.isEmpty)
+    }
+
+    /// A manifest without the key reads no spinner, and an unlabelled one encodes as `{}`.
+    @Test
+    func aManifestWithoutASpinnerReadsNoneAndAnUnlabelledOneIsAnEmptyObject() throws {
+        let directory = try TemporaryDirectory()
+        let read = try CaptureBundle.read(at: Self.writtenBundle(in: directory).url)
+
+        #expect(read.manifest.screens.first?.captures.first?.axTreeSpinner == nil)
+        #expect(try String(decoding: JSONEncoder().encode(CaptureManifest.Spinner(label: nil)), as: UTF8.self) == "{}")
+    }
+
     /// A bundle written before the check existed says nothing about it, rather than being read as a screen that held nothing.
     @Test
     func abundleWrittenWithoutTheContentFlagClaimsNothingAboutIt() throws {
@@ -462,6 +525,22 @@ struct CaptureBundleTests {
         #expect(read.manifest.screens[0].captures.map(\.state) == [Walkbook.CaptureState(theme: .light)])
         #expect(read.manifest.screens[0].refusedStates == [Walkbook.CaptureState(theme: .dark)])
         #expect(try !#require(String(bytes: JSONEncoder().encode(Self.manifest()), encoding: .utf8)).contains("refusedStates"))
+    }
+
+    /// SimWalk#288: the device's size survives the round trip, and a manifest without the field (every older bundle) decodes with none and encodes without it.
+    @Test
+    func theDevicesTextSizeSurvivesTheRoundTripAndIsAbsentWhenUnrecorded() throws {
+        let directory = try TemporaryDirectory()
+        var manifest = Self.manifest()
+        manifest.device.contentSize = "UICTContentSizeCategoryAccessibilityXL"
+
+        let read = try CaptureBundle.read(at: Self.writtenBundle(in: directory, manifest: manifest).url)
+
+        #expect(read.manifest.device.contentSize == "UICTContentSizeCategoryAccessibilityXL")
+        let plain = try #require(String(bytes: JSONEncoder().encode(Self.manifest()), encoding: .utf8))
+        #expect(!plain.contains("contentSize"))
+        let decoded = try JSONDecoder().decode(CaptureManifest.self, from: Data(plain.utf8))
+        #expect(decoded.device.contentSize == nil)
     }
 
     /// SimWalk#18 and #16 on disk: a capture identical to its base says so, the device's locale says why, and the runner commit that wrote the bundle rides with it.

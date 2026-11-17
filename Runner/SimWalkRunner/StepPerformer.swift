@@ -71,7 +71,7 @@ struct StepPerformer {
             var bound: XCUIElement?
             while true {
                 bound = app.buttons.matching(predicate).allElementsBoundByIndex
-                    .first { TargetResolution.frame($0.frame, matches: bindNode.frame) }
+                    .first { TargetResolution.frame($0.frame, exactlyMatches: bindNode.frame) }
                 guard bound == nil, Date() < stepDeadline else { break }
                 Thread.sleep(forTimeInterval: Self.settleInterval)
                 if case let .found(fresh, _) = try TabTarget.locate(label, in: AXTreeCapture.tree(of: app)) {
@@ -110,6 +110,8 @@ struct StepPerformer {
             return try StepResult(arrived(leaving: departed, in: app, budget: budget))
         case let .tap(label):
             return try tapElement(label, gesture: .tap)
+        case let .tapUnchanged(label):
+            return try tapElement(label, gesture: .tap, expectingNoChange: true)
         case let .longPress(label, seconds):
             return try tapElement(label, gesture: .press(seconds))
         case let .swipe(label, direction):
@@ -144,7 +146,7 @@ struct StepPerformer {
                 redactedValue: element.elementType == .secureTextField
             )
             return typed ? .landedOn(target.node) : .blocked(reason: nil)
-        case let .scrollTo(label):
+        case let .scrollTo(label, position):
             // Swipes until the element is actually on screen, and reports failure if it never gets
             // there. The first version swiped **once and returned true regardless**, which meant a
             // target three swipes down was captured at whatever scroll position one swipe reached —
@@ -179,11 +181,15 @@ struct StepPerformer {
                 guard Self.isStill(element, as: target) else {
                     return .blocked(reason: "\(target.description) was lost while scrolling to it: what is bound in its place no longer carries its label at its size")
                 }
-                switch try search.reach(target, in: AXTreeCapture.tree(of: app), hittable: element.isHittable) {
-                case .swipe:
-                    app.swipeUp()
+                // The live frame, so the swipe goes towards where the element is now (SimWalk#280).
+                switch try search.reach(target, at: TargetResolution.frame(element.frame), in: AXTreeCapture.tree(of: app), hittable: element.isHittable) {
+                case let .swipe(direction):
+                    TargetResolution.swipe(app, direction)
                 case .found:
-                    return try BarClearance.clearOfBars(element, as: target, in: app)
+                    let cleared = try BarClearance.clearOfBars(element, as: target, in: app)
+                    // SimWalk#270: a `position` moves the element once it is clear, and only a step that landed.
+                    guard position != nil, case .landedOn = cleared else { return cleared }
+                    return try BarClearance.placeAtTop(element, as: target, in: app)
                 case let .stopped(_, reason):
                     return .blocked(reason: reason)
                 }
@@ -239,7 +245,9 @@ struct StepPerformer {
     }
 
     /// A `tap` or a `longPress`: finds the element by `label`, touches it with `gesture`, and lands as a `tap` lands.
-    private func tapElement(_ label: String, gesture: Gesture) throws -> StepResult {
+    ///
+    /// With `expectingNoChange` (a `tap` with `unchanged`, SimWalk#268) the element is found and touched the same way, the screen is read through the budget for an element appearing or going (`ScreenStructureChange`, not the `ScreenIdentity` a navigating tap is judged by), and the core's `TapLanding.decideUnchanged` inverts the verdict. A keyboard key is refused before it is tapped (`TapLanding.unchangedKeyRefusal(label:)`): a key is tapped to type, so it cannot be held to changing nothing.
+    private func tapElement(_ label: String, gesture: Gesture, expectingNoChange: Bool = false) throws -> StepResult {
         let tappable: Found.Tappable
         switch try findTappable(label, verb: gesture.verb) {
         case let .element(found):
@@ -250,11 +258,23 @@ struct StepPerformer {
         let (element, target, bound) = (tappable.element, tappable.target, tappable.bound)
         let before = try AXTreeCapture.tree(of: app)
         let departed = ScreenIdentity.of(before)
+        // A press XCTest timed out confirming may have landed: the tree is read before a retry, and a screen left or the tapped element's own traits changed is a gesture delivered (SimWalk#274).
+        let deliveredAfterTimeout = {
+            let after = try? AXTreeCapture.tree(of: app)
+            return !SynthesisTimeout.shouldRetry(
+                screenLeft: after.map { departed.hasBeenLeft(by: $0) } ?? false,
+                tappedTraitChanged: after.flatMap { SameScreenChange.tappedTraitChange(from: before, to: $0, tapped: target.node) } != nil
+            )
+        }
         // A keyboard key is judged by the focused field as well (SimWalk#94): a keystroke changes that
         // field's value and nothing `ScreenIdentity` hashes, so identity alone refused every digit
         // typed on a number pad that had in fact landed. A Return exposed as a button inside the keyboard
         // is a key too (SimWalk#96), which is why the core decides it from the tree.
-        guard TypedTextLanding.isKey(target.node, in: before) else {
+        let isKey = TypedTextLanding.isKey(target.node, in: before)
+        if expectingNoChange, isKey {
+            return .blocked(reason: TapLanding.unchangedKeyRefusal(label: label))
+        }
+        guard isKey else {
             // SimWalk#125 and #95 are decided in the core (`TapLanding`): an element selected in the snapshot
             // and live, hittable now, under a navigation bar naming the label in the tree read above, has landed
             // even if the tap changes nothing, its destination already on screen (an iPad sidebar row opened
@@ -270,17 +290,31 @@ struct StepPerformer {
                 Thread.sleep(forTimeInterval: Self.settleInterval)
                 hittable = Self.liveRead(or: false) { element.isHittable }
             }
-            gesture.apply(to: element)
-            let landing = try TapLanding.decide(
-                arrived: arrived(leaving: departed, in: app, budget: budget),
+            guard gesture.apply(to: element, deliveredAfterTimeout: deliveredAfterTimeout) else { return .blocked(reason: SynthesisTimeout.refusal(gesture.synthesized, on: label)) }
+            if expectingNoChange {
+                let (screenChange, stayed) = try structureChange(from: before, in: app, budget: budget)
+                return Self.unchangedResult(screenChange: screenChange, before: before, stayed: stayed, target: target)
+            }
+            let left = try arrived(leaving: departed, in: app, budget: budget)
+            // A screen the tap did not leave is read once more, after the budget, so a lasting selection or
+            // enablement of the tapped element lands the tap (SimWalk#251) and a tapped element that only moved is named as a
+            // scroll rather than "the screen did not change" (#253). Both are decided in the core.
+            let stayed = left ? nil : try AXTreeCapture.tree(of: app)
+            let landing = TapLanding.decide(
+                arrived: left,
+                tappedTraitChanged: stayed.flatMap { SameScreenChange.tappedTraitChange(from: before, to: $0, tapped: target.node) } != nil,
                 wasSelected: selected,
                 hittable: hittable,
                 titled: TapLanding.destinationTitled(label: label, in: before, tapped: target.node)
             )
-            return landing == .notLanded ? .blocked(reason: bound.reason(for: label)) : .landedOn(target.node)
+            guard landing == .notLanded else { return .landedOn(target.node) }
+            if let stayed, let scroll = SameScreenChange.scroll(from: before, to: stayed, tapped: target.node) {
+                return .blocked(reason: scroll.reason(tapped: target.description))
+            }
+            return .blocked(reason: bound.reason(for: label))
         }
         let focusedBefore = Self.focusedFieldValue(in: app)
-        gesture.apply(to: element)
+        guard gesture.apply(to: element, deliveredAfterTimeout: deliveredAfterTimeout) else { return .blocked(reason: SynthesisTimeout.refusal(gesture.synthesized, on: label)) }
         let landed = try keyLanded(leaving: departed, focusedBefore: focusedBefore, in: app, budget: budget)
         return landed ? .landedOn(target.node) : .blocked(reason: bound.keyReason(for: label, fieldHadFocus: focusedBefore != .none || Self.focusedFieldValue(in: app) != .none))
     }
@@ -351,7 +385,7 @@ struct StepPerformer {
                     // drags down HealthKit's 59-type sheet spent the whole budget, and the step was refused
                     // with `Allow` enabled and hittable on screen (2026-09-23).
                     let dragging = Date()
-                    Self.scrollToEnd(of: target.node, in: app, until: label)
+                    guard Self.scrollToEnd(of: target.node, in: app, until: label) else { return .blocked(reason: SynthesisTimeout.refusal(.scroll, on: nil)) }
                     deadline.addTimeInterval(Date().timeIntervalSince(dragging))
                     continue
                 }
@@ -430,16 +464,19 @@ struct StepPerformer {
     /// **The drags bring the control on screen; the step's poll admits and taps it** (SimWalk#59). `SystemTapScroll.keepsDragging` decides from one read of each match, where `firstTappable` reads twice and refuses a box that moved: on HealthKit's sheet `Allow` was in reach from the first drag, but the list was still bouncing, so each check between drags refused it, the next drag kept it bouncing, and all twelve were spent (about 18 s). The step's poll waits `settleInterval` between reads and holds the control to every check, so nothing is tapped here.
     ///
     /// By app coordinates from the box the tree read gave, never through a live element (SimWalk#45). Binding the containers by index and reading each one's frame back is a query per read, and on HealthKit's 59-type sheet the matching set changed between the bind and the read — XCUITest raises that as a test failure ("No matches found for Element at index 1"), which ended the walk with no step outcome at all. A drag between two points, because a `swipeUp()` on the container a `containing` query found hung the runner on the same sheet (2026-09-22). The box is in the sheet's own coordinate space where the sheet is remote (its table reads y 0 in the snapshot and sits at y 62 live, iOS 27.0), so the two points are taken well inside it, at 0.2 and 0.8 of its height, where that offset still lands both on the container.
-    private static func scrollToEnd(of container: AXNode, in app: XCUIApplication, until label: String) {
+    ///
+    /// Answers false when XCTest timed out synthesizing a drag twice (``GestureSynthesis``, SimWalk#274), for the step to be refused.
+    private static func scrollToEnd(of container: AXNode, in app: XCUIApplication, until label: String) -> Bool {
         let box = container.frame
         // A box shorter than this puts the two points nearly together, and each "drag" becomes a press and
         // release — a tap on whatever sits there, up to `scrollAttempts` times (the #45 review).
-        guard box.height >= minimumDragHeight else { return }
+        guard box.height >= minimumDragHeight else { return true }
         let (lower, upper) = dragPoints(in: box, of: app)
         for _ in 0 ..< scrollAttempts {
-            guard keepsDragging(label, in: app) else { return }
-            lower.press(forDuration: scrollPress, thenDragTo: upper)
+            guard keepsDragging(label, in: app) else { return true }
+            guard GestureSynthesis.withRetry({ lower.press(forDuration: scrollPress, thenDragTo: upper) }) else { return false }
         }
+        return true
     }
 
     /// Waits until the hierarchy has left the screen a navigating step was taken on, and answers whether it did.
@@ -460,6 +497,22 @@ struct StepPerformer {
             arrival.landedAfter = Date().timeIntervalSince(acted)
         }
         return left
+    }
+
+    /// Reads the hierarchy until an element has appeared or gone since `before` (`ScreenStructureChange`), or the budget is spent: the change, or `nil` and the read taken after the budget.
+    ///
+    /// A `tap` with `unchanged` asks this rather than `arrived` (SimWalk#268 follow-up), for the change to name in its refusal: both see a screen by the same type, label and nesting (SimWalk#279).
+    private func structureChange(from before: AXNode, in app: XCUIApplication, budget: TimeInterval) throws -> (ScreenStructureChange?, AXNode) {
+        let deadline = Date().addingTimeInterval(budget)
+        repeat {
+            let tree = try AXTreeCapture.tree(of: app)
+            if let change = ScreenStructureChange.between(before, tree) {
+                return (change, tree)
+            }
+            Thread.sleep(forTimeInterval: Self.settleInterval)
+        } while Date() < deadline
+        let stayed = try AXTreeCapture.tree(of: app)
+        return (ScreenStructureChange.between(before, stayed), stayed)
     }
 
     /// The value of the text-entry element holding keyboard focus: `.none` when none does (or it carries no string value), `.unreadable` when a live read of a candidate failed and no other held a value (SimWalk#96).
@@ -618,6 +671,10 @@ extension StepPerformer {
         case element(XCUIElement, RouteTarget.Candidate, RouteTarget.Choice)
         /// The element chosen could not be bound, and nothing else was found to be the same element.
         case moved(RouteTarget.Candidate)
+        /// The element chosen was still moving when the lookup ran out, after this many seconds of waiting for it to hold steady (`MovingTargetSettle`).
+        case keptMoving(RouteTarget.Candidate, seconds: TimeInterval)
+        /// The tree held the element chosen still at least once, but XCUITest found no element at its frame each time, until the lookup ran out after this many seconds (SimWalk#276): not motion, so not `keptMoving`.
+        case unbound(RouteTarget.Candidate, seconds: TimeInterval)
         /// Nothing to act on, and why — where the runner can say.
         case refused(String?)
 
@@ -626,6 +683,8 @@ extension StepPerformer {
             switch self {
             case .element: nil
             case let .moved(target): "\(target.description) moved before it could be \(verb)"
+            case let .keptMoving(target, seconds): "\(target.description) kept moving for \(Int(seconds.rounded())) s before it could be \(verb)"
+            case let .unbound(target, seconds): "\(target.description) could not be \(verb) in \(Int(seconds.rounded())) s: the tree held it still, but XCUITest found no element at its frame"
             case let .refused(reason): reason
             }
         }
@@ -634,9 +693,7 @@ extension StepPerformer {
     /// Whether `element`, read again, is still the one `target` chose (`RouteTarget.Candidate.isStill`) — `false` once it is gone.
     static func isStill(_ element: XCUIElement, as target: RouteTarget.Candidate) -> Bool {
         guard element.exists else { return false }
-        let live = element.frame
-        let frame = AXNode.Frame(x: Double(live.origin.x), y: Double(live.origin.y), width: Double(live.size.width), height: Double(live.size.height))
-        return target.isStill(label: element.label, identifier: element.identifier, frame: frame)
+        return target.isStill(label: element.label, identifier: element.identifier, frame: TargetResolution.frame(element.frame))
     }
 
     /// A control a `systemTap` takes: the node its snapshot read, and the point a tap on it lands on.
@@ -662,11 +719,13 @@ extension StepPerformer {
             throw WalkRunner.InspectRefusal(description: "the container is under \(Int(minimumDragHeight)) points tall: a drag there would be a tap")
         }
         let (lower, upper) = dragPoints(in: scroll.container, of: app)
-        switch scroll.direction {
-        case .down:
-            lower.press(forDuration: scrollPress, thenDragTo: upper)
-        case .up:
-            upper.press(forDuration: scrollPress, thenDragTo: lower)
+        let (from, to) = switch scroll.direction {
+        case .down: (lower, upper)
+        case .up: (upper, lower)
+        }
+        // A drag XCTest timed out synthesizing twice is refused, as a route's scroll is (SimWalk#274).
+        guard GestureSynthesis.withRetry({ from.press(forDuration: scrollPress, thenDragTo: to) }) else {
+            throw WalkRunner.InspectRefusal(description: SynthesisTimeout.refusal(.scroll, on: nil))
         }
     }
 
@@ -688,6 +747,17 @@ extension StepPerformer {
 }
 
 extension StepPerformer {
+    /// The result of a `tap` with `unchanged` (SimWalk#268), judged in the core from the first structural change a read within the budget found or, with none, from the read after the budget (`stayed`).
+    static func unchangedResult(screenChange: ScreenStructureChange?, before: AXNode, stayed: AXNode, target: RouteTarget.Candidate) -> StepResult {
+        let change = screenChange == nil ? SameScreenChange.tappedTraitChange(from: before, to: stayed, tapped: target.node) : nil
+        return switch TapLanding.decideUnchanged(screenChange: screenChange, tappedTraitChange: change, tapped: target.description) {
+        case .landed:
+            .landedOn(target.node)
+        case let .refused(reason):
+            .blocked(reason: reason)
+        }
+    }
+
     /// How a `tap` or a `longPress` touches the element it found; everything before and after the touch is the same step (SimWalk#198).
     private enum Gesture {
         case tap
@@ -701,14 +771,61 @@ extension StepPerformer {
             }
         }
 
-        @MainActor
-        func apply(to element: XCUIElement) {
+        /// The gesture as a synthesis timeout's refusal names it (SimWalk#274).
+        var synthesized: SynthesisTimeout.Gesture {
             switch self {
-            case .tap:
-                element.tap()
-            case let .press(seconds):
-                element.press(forDuration: seconds)
+            case .tap: .tap
+            case .press: .longPress
             }
+        }
+
+        /// Touches `element`, once more when XCTest timed out synthesizing the touch and `deliveredAfterTimeout` does not find it landed; whether the touch was synthesized or found delivered (``GestureSynthesis``).
+        ///
+        /// The second touch reads the element afresh: an `XCUIElement` resolves its query again for each interaction.
+        @MainActor
+        func apply(to element: XCUIElement, deliveredAfterTimeout: () -> Bool) -> Bool {
+            GestureSynthesis.withRetry(deliveredAfterTimeout: deliveredAfterTimeout) {
+                switch self {
+                case .tap:
+                    element.tap()
+                case let .press(seconds):
+                    element.press(forDuration: seconds)
+                }
+            }
+        }
+    }
+
+    /// Holds the issue XCTest records when it times out synthesizing a route gesture, so the test survives it and the gesture is made once more (SimWalk#274).
+    ///
+    /// `WalkRunner.record(_:)` asks ``holds(_:)`` before recording any issue. Only while ``attempt(_:)`` is making a gesture, and only for an issue ``SynthesisTimeout/matches(_:)``, is it held instead of recorded: every other issue, and every issue outside a gesture, is recorded as before. A recorded synthesis failure ended the test even under `continueAfterFailure`, as a recorded launch failure does (SimWalk#266). Main-actor confined: XCTest records issues on the main thread the steps run on, and a live session's steps run inside `WalkRunner.testSession`, so the same override holds theirs.
+    @MainActor
+    struct GestureSynthesis {
+        /// Whether a gesture is being made under ``attempt(_:)``.
+        private static var inFlight = false
+        /// Whether the gesture being made has had a synthesis timeout held.
+        private static var timedOut = false
+
+        /// Whether the issue `description` is held rather than recorded: a synthesis timeout while a gesture is in flight.
+        static func holds(_ description: String) -> Bool {
+            guard inFlight, SynthesisTimeout.matches(description) else { return false }
+            timedOut = true
+            return true
+        }
+
+        /// Makes `gesture` once with its issues watched; whether XCTest synthesized it, no timeout having been held.
+        static func attempt(_ gesture: () -> Void) -> Bool {
+            inFlight = true
+            timedOut = false
+            defer { inFlight = false }
+            gesture()
+            return !timedOut
+        }
+
+        /// Makes `gesture`, and once more when its synthesis timed out and `deliveredAfterTimeout` does not find the first delivered; whether either attempt was synthesized or the first was found delivered.
+        ///
+        /// A drag or scroll passes no check: its retry is unconditional.
+        static func withRetry(deliveredAfterTimeout: () -> Bool = { false }, _ gesture: () -> Void) -> Bool {
+            attempt(gesture) || deliveredAfterTimeout() || attempt(gesture)
         }
     }
 

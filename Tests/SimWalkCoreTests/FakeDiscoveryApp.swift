@@ -67,7 +67,7 @@ final class FakeDiscoveryApp: DiscoverySession {
             tabs[label].map { stack = [$0] } != nil
         case let .tap(label):
             tap(label, in: tree, on: here)
-        case let .scrollTo(label):
+        case let .scrollTo(label, _):
             scrollTo(label, in: tree, on: here)
         case .back:
             screens[here]?.hasBack == true && stack.count > 1 && stack.popLast() != nil

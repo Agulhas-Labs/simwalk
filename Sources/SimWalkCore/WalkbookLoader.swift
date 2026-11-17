@@ -208,6 +208,21 @@ public struct WalkbookLoader {
                 }
             }
         }
+        if let expectValues = screen.expectValues {
+            if expectValues.isEmpty {
+                found.append(.emptyExpectValues(screenID: id, index: index))
+            }
+            for (position, entry) in expectValues.enumerated() {
+                if entry.label.trimmed.isEmpty {
+                    found.append(.blankExpectValueLabel(screenID: id, index: index, position: position))
+                } else if entry.label != entry.label.trimmed {
+                    found.append(.paddedExpectValueLabel(screenID: id, index: index, position: position, value: entry.label))
+                }
+                if entry.value.trimmed.isEmpty {
+                    found.append(.blankExpectValue(screenID: id, index: index, position: position))
+                }
+            }
+        }
         found.append(contentsOf: duplicateStateProblems(in: screen, screenID: id, index: index))
         found.append(contentsOf: unhonouredStateProblems(in: screen, screenID: id, index: index))
         found.append(contentsOf: launchConditionProblems(in: screen, screenID: id, index: index))
@@ -277,6 +292,9 @@ public struct WalkbookLoader {
         }
         if case let .swipe(_, direction) = step, Walkbook.RouteStep.SwipeDirection(rawValue: direction) == nil {
             found.append(.unknownSwipeDirection(screenID: id, index: index, stepIndex: stepIndex, value: direction))
+        }
+        if case let .scrollTo(_, position?) = step, Walkbook.RouteStep.ScrollPosition(rawValue: position) == nil {
+            found.append(.unknownScrollPosition(screenID: id, index: index, stepIndex: stepIndex, value: position))
         }
         if case let .tapPoint(label, point) = step, let fault = pointFault(label: label, point: point) {
             let problem: WalkbookProblem = switch fault {
@@ -441,7 +459,7 @@ private extension Walkbook.RouteStep {
     /// The element label a step targets, or `nil` for steps that name no element.
     var label: String? {
         switch self {
-        case let .tab(label), let .tap(label), let .scrollTo(label):
+        case let .tab(label), let .tap(label), let .tapUnchanged(label), let .scrollTo(label, _):
             label
         case let .type(label, _, _), let .longPress(label, _):
             label

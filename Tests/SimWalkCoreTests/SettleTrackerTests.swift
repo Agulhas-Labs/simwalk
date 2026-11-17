@@ -150,6 +150,125 @@ struct SettleTrackerTests {
         #expect(watched.tracker.reads == 2)
     }
 
+    /// **A pulse is not motion** (SimWalk#252): a SwiftUI element scaled 6% on every read is the same screen read again, so the quiet period passes and the picture's bracketing read, a pulse apart from the tree it photographed, still holds.
+    @Test
+    func aScreenPulsingWithinEightPercentSettlesAfterTheQuietPeriod() {
+        let reads = (0 ..< 12).map { Self.pulsing(large: $0.isMultiple(of: 2)) }
+
+        let replayed = Self.replay(reads: reads, quiet: 0.75)
+
+        #expect(replayed == [.watch, .watch, .watch, .takeScreenshot, .settled])
+    }
+
+    /// The anchor is the start of the quiet run, not the read before: a button creeping two points a read is steady against its neighbour every time, yet leaves the allowance within a few reads, so a long quiet period never accrues until the creep stops.
+    @Test
+    func aScreenCreepingAcrossManyReadsDoesNotSettleUntilItStops() {
+        let creeping = (0 ..< 20).map { Self.pulsing(large: false, x: Double($0) * 2) }
+        let stopped = Array(repeating: Self.pulsing(large: false, x: 40), count: 12)
+
+        let whileCreeping = Self.replay(reads: creeping, quiet: 2, budget: 60)
+        let afterwards = Self.replay(reads: creeping + stopped, quiet: 2, budget: 60)
+
+        #expect(whileCreeping.allSatisfy { $0 == .watch })
+        #expect(afterwards.last == .settled)
+        #expect(afterwards.count > creeping.count + 8)
+    }
+
+    /// A label that changes is a different screen however much of it is steady, so the quiet period restarts.
+    @Test
+    func aLabelChangeOnAPulsingScreenRestartsTheQuietPeriod() {
+        let reads = [
+            Self.pulsing(large: false), Self.pulsing(large: true), Self.pulsing(large: false, label: "Go!"),
+            Self.pulsing(large: true, label: "Go!"), Self.pulsing(large: false, label: "Go!"),
+        ]
+
+        #expect(Self.replay(reads: reads, quiet: 0.5) == [.watch, .watch, .watch, .watch, .takeScreenshot])
+    }
+
+    /// The settle time of a pulsing screen is when its content arrived, not the last pulse.
+    @Test
+    func theSettleTimeOfAPulsingScreenIsWhenItsContentArrived() {
+        let reads = [Self.pushedScreen()] + (0 ..< 8).map { Self.pulsing(large: $0.isMultiple(of: 2)) }
+
+        let watched = Self.watch(reads: reads, quiet: 0.5)
+
+        #expect(watched.decisions.last == .settled)
+        #expect(watched.tracker.settleTime == 0.25)
+    }
+
+    /// **The settle time of a creep is when it stopped**: a button creeping two points a read is a steady shift of the read before every time, so against the last read nothing ever changed and the settle time was the first read.
+    ///
+    /// Held against the last change instead, the creep keeps changing until it stops.
+    @Test
+    func theSettleTimeOfACreepIsWhenItStopped() throws {
+        let creeping = (0 ..< 20).map { Self.pulsing(large: false, x: Double($0) * 2) }
+        let stopped = Array(repeating: Self.pulsing(large: false, x: 40), count: 12)
+
+        let watched = Self.watch(reads: creeping + stopped, quiet: 2, budget: 60)
+        let settleTime = try #require(watched.tracker.settleTime)
+
+        #expect(watched.decisions.last == .settled)
+        #expect(settleTime >= 4.5)
+        #expect(settleTime <= 5)
+    }
+
+    /// A title above a labelled spinner, or the same screen with the spinner gone.
+    private static func loadingScreen(spinning: Bool) -> AXNode {
+        let frame = AXNode.Frame(x: 0, y: 0, width: 402, height: 874)
+        let title = AXNode(type: "StaticText", frame: frame, label: "Another way to see it")
+        let spinner = AXNode(type: "ActivityIndicator", frame: frame, label: "Loading the answer…", value: "1")
+        return AXNode(type: "Application", frame: frame, label: "App", children: spinning ? [title, spinner] : [title])
+    }
+
+    /// **A spinner beside content is waited on, not settled on** (SimWalk#267): no quiet accrues however still it holds, so it is never photographed, and the screen settles once the spinner goes.
+    @Test
+    func aTreeShowingASpinnerAccruesNoQuietUntilItGoes() {
+        var tracker = SettleTracker(quiet: 0.25, budget: 2.5, interval: 0.25, contentWait: SettleWindow.contentWait)
+        var elapsed: TimeInterval = 0
+        for _ in 0 ..< 20 {
+            #expect(tracker.next(tree: Self.loadingScreen(spinning: true), elapsed: elapsed) == .watch)
+            elapsed += 0.25
+        }
+
+        #expect(tracker.next(tree: Self.loadingScreen(spinning: false), elapsed: elapsed) == .watch)
+        #expect(tracker.next(tree: Self.loadingScreen(spinning: false), elapsed: elapsed + 0.25) == .takeScreenshot)
+        #expect(tracker.next(tree: Self.loadingScreen(spinning: false), elapsed: elapsed + 0.25) == .settled)
+    }
+
+    /// The settle budget runs from when the spinner went, so a screen that stops spinning past the budget still gets all of it.
+    @Test
+    func theBudgetRunsFromWhenTheSpinnerWent() {
+        var tracker = SettleTracker(quiet: 2, budget: 2.5, interval: 0.25, contentWait: SettleWindow.contentWait)
+        for read in 0 ..< 40 {
+            #expect(tracker.next(tree: Self.loadingScreen(spinning: true), elapsed: Double(read) * 0.25) == .watch)
+        }
+
+        // Ten seconds in: past the budget, inside the content wait. Quiet needs 2 s, so a watch on the old clock would give up.
+        var decision = tracker.next(tree: Self.loadingScreen(spinning: false), elapsed: 10)
+        var elapsed: TimeInterval = 10
+        while decision == .watch, elapsed < 12.4 {
+            elapsed += 0.25
+            decision = tracker.next(tree: Self.loadingScreen(spinning: false), elapsed: elapsed)
+        }
+
+        #expect(decision == .takeScreenshot)
+    }
+
+    /// A spinner that never goes is given up on at the content wait, not before.
+    @Test
+    func aSpinnerThatNeverGoesIsUnsettledAtTheContentWait() {
+        var tracker = SettleTracker(quiet: 0.25, budget: 2.5, interval: 0.25, contentWait: SettleWindow.contentWait)
+        var elapsed: TimeInterval = 0
+        var decision = tracker.next(tree: Self.loadingScreen(spinning: true), elapsed: elapsed)
+        while decision == .watch, elapsed < 60 {
+            elapsed += 0.25
+            decision = tracker.next(tree: Self.loadingScreen(spinning: true), elapsed: elapsed)
+        }
+
+        #expect(decision == .unsettled)
+        #expect(elapsed == SettleWindow.contentWait)
+    }
+
     /// Reads a bare tree on the runner's cadence until the tracker gives up on it, returning when and what it decided.
     private static func bareWatch(quiet: TimeInterval, budget: TimeInterval) -> (elapsed: TimeInterval, decision: SettleTracker.Decision) {
         let bare = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874), label: "App")
@@ -207,6 +326,15 @@ struct SettleTrackerTests {
             type: "Application",
             frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874),
             children: [AXNode(type: "Cell", frame: AXNode.Frame(x: 14, y: 120, width: 374, height: 55), label: "Rowing, 12 August")]
+        )
+    }
+
+    /// A screen with one button an endless animation scales: 100 points square, or 106 when `large`, optionally moved to `x`.
+    private static func pulsing(large: Bool, x: Double = 100, label: String = "Go") -> AXNode {
+        AXNode(
+            type: "Application",
+            frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874),
+            children: [AXNode(type: "Button", frame: AXNode.Frame(x: x, y: 400, width: large ? 106 : 100, height: large ? 106 : 100), label: label)]
         )
     }
 

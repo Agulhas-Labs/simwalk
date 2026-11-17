@@ -53,7 +53,7 @@ public struct SettleWindow {
         max(2.5, quiet * 4)
     }
 
-    /// How long a capture waits for a tree holding only the app's chrome to fill before filing it unsettled (SimWalk#81) — or the screen's budget, where that is longer.
+    /// How long a capture waits for a tree holding only the app's chrome to fill, or one showing a spinner to lose it, before filing it unsettled (SimWalk#81, #267) — or the screen's budget, where that is longer.
     ///
     /// **A content check with a cap, not a longer timer.** The wait ends the moment content arrives, so a screen that loads costs its load and one that arrived at once costs nothing; only a screen still bare at the cap pays all of it, once per state, and that screen is already a qualification. **15 seconds, from the specimen**: a metric screen on a fresh 12-month seed (1.35M samples) captured a bare spinner at the default settle and the real screen at `--settle 8000`, so it loaded within 8 seconds of the watch starting; 15 is about twice that, for a slower machine or a heavier seed. A screen slower still is captured unsettled and chrome-only — honest, and both lines name it.
     public static let contentWait: TimeInterval = 15

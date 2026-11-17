@@ -25,6 +25,11 @@ public struct MCPToolInvocation: Equatable, Sendable {
     /// What this call is logged as: `tool.logName` for every verb but a screen-scoped `inspect`, which logs as `bundle screen` — so `simwalk usage` prices a one-screen answer against what it actually stood in for rather than folding it into `bundle inspect`'s figures.
     public let logName: String
 
+    /// The route step a `session` `step` call sent, as the JSON text the CLI takes, for the usage log (SimWalk#253); `nil` for every other call.
+    public var sessionStep: String? {
+        tool == .session && argumentVector.first == "step" ? argumentVector.last : nil
+    }
+
     /// Resolves a raw `tools/call`, refusing a tool this server does not serve and any argument it cannot use.
     ///
     /// Every refusal is made here rather than downstream so the failure names the *call* — an unknown tool never reaches an exhaustive switch that would have to invent a case for it, and a missing path never reaches `URL(fileURLWithPath: "")`, which is a directory rather than an error.

@@ -10,6 +10,8 @@ import Foundation
 ///
 /// **A route probed under one set of launch conditions is not claimed for another (SimWalk#36, extended SimWalk#44).** The runner launches each screen once, under its first state's theme, Dynamic Type size, locale, arguments and environment, and any of those can change what a screen shows: a screen walked under `en` and `de`, or under one argument list and another, whose route resolved under the first has said nothing about the rest. Each such screen is a qualification, so a clean exit never claims more than was probed.
 ///
+/// **The routes that did not resolve are listed first**, in walkbook order, then the resolved ones; each line keeps its walkbook position (SimWalk#260). A reader who reads only the top of the answer, or `head`s it, still sees which route drifted.
+///
 /// **Every drifted line names the step and the label it looked for**, with the runner's own reason — what the label matched, and what the tap did — because "route drifted" alone sends an author to re-read the whole route. The steps after it are named as not reached, so a later step that also drifted is not taken to have been checked.
 public struct RouteProbeSummary {
     private let report: RouteProbeReport
@@ -33,7 +35,11 @@ public struct RouteProbeSummary {
     ///
     /// No saving line: a dry run stands in for no material a reader would otherwise have opened — nothing was captured — and the contract prices an absence as no line rather than as a saving of zero.
     public func answer() -> Answer {
-        var residue = report.probes.enumerated().map { Self.probeLine($0.element, position: $0.offset + 1) }
+        let probed = report.probes.enumerated().map { index, probe in
+            let earlier = report.probes[..<index].filter { $0.outcome == .resolved }.map { (id: $0.screenID, route: $0.route) }
+            return (resolved: probe.outcome == .resolved, line: Self.probeLine(probe, position: index + 1, earlier: earlier))
+        }
+        var residue = (probed.filter { !$0.resolved } + probed.filter(\.resolved)).map(\.line)
         residue += launchConditionGaps.map(\.line)
         residue.append(Self.scopeLine)
         var lines = notes
@@ -101,17 +107,17 @@ public struct RouteProbeSummary {
     }
 
     /// One screen's line, leading with its 1-based place in the walkbook.
-    static func probeLine(_ probe: RouteProbe, position: Int) -> String {
+    static func probeLine(_ probe: RouteProbe, position: Int, earlier: [(id: String, route: [Walkbook.RouteStep])] = []) -> String {
         let lead = "  \(position) \(probe.screenID)"
         switch probe.outcome {
         case .resolved:
-            return "\(lead) — resolved: \(probe.route.rendered)"
+            return "\(lead) — resolved: \(probe.route.summarized(after: earlier))"
         case let .drifted(index, reason, cause):
             let why = reason ?? "the step did not land, and the runner could say no more"
             let label = cause == .snapshotBlind ? "DRIFTED behind a system sheet the app's snapshot cannot see" : "DRIFTED"
-            return "\(lead) — \(label) at \(stop(index, of: probe)) — \(why)\(tail(of: probe))"
+            return "\(lead) — \(label) at \(stop(index, of: probe)) — \(why)\(tail(of: probe, after: earlier))"
         case let .unreadable(index, reason):
-            return "\(lead) — UNREADABLE at \(stop(index, of: probe)) — the hierarchy could not be read, so whether it landed is unknown: \(reason)\(tail(of: probe))"
+            return "\(lead) — UNREADABLE at \(stop(index, of: probe)) — the hierarchy could not be read, so whether it landed is unknown: \(reason)\(tail(of: probe, after: earlier))"
         }
     }
 
@@ -122,9 +128,9 @@ public struct RouteProbeSummary {
     }
 
     /// What landed before the step it stopped at, and what was never attempted after it.
-    private static func tail(of probe: RouteProbe) -> String {
-        let unreached = probe.unreachedSteps.isEmpty ? "" : "; not reached: \(probe.unreachedSteps.rendered)"
-        return "; resolved before it: \(probe.resolvedSteps.rendered)\(unreached)"
+    private static func tail(of probe: RouteProbe, after earlier: [(id: String, route: [Walkbook.RouteStep])]) -> String {
+        let unreached = probe.unreachedSteps.isEmpty ? "" : "; not reached: \(probe.unreachedSteps.summarized(after: []))"
+        return "; resolved before it: \(probe.resolvedSteps.summarized(after: earlier))\(unreached)"
     }
 }
 

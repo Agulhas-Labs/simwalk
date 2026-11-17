@@ -57,7 +57,7 @@ extension VisionTextReader: ScreenTextRecognizing {
 
 public extension VisionTextReader {
     /// Why a capture could not be read.
-    struct ReadError: Error, Equatable, CustomStringConvertible, Sendable {
+    struct ReadError: ScreenTextRecognitionFailure, Equatable, CustomStringConvertible, Sendable {
         /// The capture that was being read.
         public let file: URL
         /// What went wrong, in Vision's or the file system's words.

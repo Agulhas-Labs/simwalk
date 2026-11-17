@@ -104,11 +104,23 @@ struct ExpectedScreenCheckTests {
     /// Round 3: no chrome identifier counts toward an `expect`, and what the mismatch names is the screen's own identifier.
     ///
     /// Each of these sits on every screen, or names one element of it — the tab bar's symbol names, `BackButton`, `Toolbar`, SwiftUI's mangled hosting class, an image's symbol, a button's own identifier — so an `expect` matching one would pass everywhere.
-    @Test(arguments: ["person.fill", "BackButton", "Toolbar", "_TtGC7SwiftUI32NavigationStackHosting", "heart.fill", "share-button"])
+    @Test(arguments: ["person.fill", "BackButton", "Toolbar", "_TtGC7SwiftUI32NavigationStackHosting"])
     func chromeNeverSatisfiesAnExpectation(expect: String) {
         let outcome = ExpectedScreenCheck.outcome(for: [ScreenIdentifierRuleTests.pushedScreen(content: "workouts-list")], expect: expect, instead: .captured)
 
         #expect(outcome == .unexpectedScreen(expected: expect, found: ["workouts-list"]))
+    }
+
+    /// An element's own identifier inside the content never satisfies it either, but the refusal now names the element (SimWalk#284).
+    @Test(arguments: [("heart.fill", "an Image"), ("share-button", "a Button")])
+    func anElementIdentifierNeverSatisfiesAnExpectationAndIsNamed(expect: String, element: String) {
+        let outcome = ExpectedScreenCheck.outcome(for: [ScreenIdentifierRuleTests.pushedScreen(content: "workouts-list")], expect: expect, instead: .captured)
+
+        #expect(outcome == .unexpectedScreen(
+            expected: expect,
+            found: ["workouts-list"],
+            reason: "'\(expect)' is on \(element) inside 'workouts-list', not a screen container: expect 'workouts-list' and end the route with scrollTo '\(expect)' to require the element"
+        ))
     }
 
     /// Round 3, finding 3: a screen that filed a capture of the wrong screen and then failed mid-capture has both things wrong with it — the failure rides in the mismatch's `reason` rather than the mismatch being dropped for a bare `captureFailed` (whose captures `bundle audit` would read under the expected id), or the failure being dropped for a bare mismatch.
@@ -219,12 +231,61 @@ struct ExpectedScreenCheckTests {
         #expect(outcome == .captured)
     }
 
-    /// A mismatch against a hosted screen names the outermost identifier, the name the screen is known by.
+    /// A mismatch against a hosted screen names the path of identifiers to the deepest one, and says why the deepest matters (SimWalk#272).
     @Test
-    func aMismatchAgainstAHostedScreenNamesTheOutermostIdentifier() {
+    func aMismatchAgainstAHostedScreenNamesThePathToTheDeepestIdentifier() {
         let outcome = ExpectedScreenCheck.outcome(for: [Self.hostedScreen()], expect: "missing", instead: .captured)
 
-        #expect(outcome == .unexpectedScreen(expected: "missing", found: ["outer"]))
+        #expect(outcome == .unexpectedScreen(expected: "missing", found: ["outer > inner"], reason: Self.deepestClause("inner")))
+    }
+
+    /// SimWalk#272: `parent` > two `Other`s > `controls` > a `StaticText`, `pin-set` expected — `found` reads `parent > controls`, so the author sees the identifier that replaced theirs.
+    @Test
+    func aContainerIdentifierReplacingTheOneInsideItIsNamedAsTheDeepestInThePath() {
+        let tree = AXNode(type: "Application", frame: Self.screenFrame, children: [
+            AXNode(type: "Other", frame: Self.screenFrame, identifier: "parent", children: [
+                AXNode(type: "Other", frame: Self.screenFrame, children: [
+                    AXNode(type: "Other", frame: Self.screenFrame, children: [
+                        AXNode(type: "Other", frame: Self.screenFrame, identifier: "controls", children: [
+                            AXNode(type: "StaticText", frame: Self.screenFrame, label: "PIN", identifier: "pin-set"),
+                        ]),
+                    ]),
+                ]),
+            ]),
+        ])
+
+        let outcome = ExpectedScreenCheck.outcome(for: [tree], expect: "pin-set", instead: .captured)
+
+        #expect(outcome == .unexpectedScreen(
+            expected: "pin-set",
+            found: ["parent > controls"],
+            reason: "\(Self.deepestClause("controls")). 'pin-set' is on a StaticText inside 'controls', not a screen container: expect 'controls' and end the route with scrollTo 'pin-set' to require the element"
+        ))
+    }
+
+    /// With nothing nested every identifier is deepest and the first in tree order is the whole entry, with no clause.
+    @Test
+    func siblingIdentifiersThatDoNotNestGiveTheFirstAloneAndNoClause() {
+        let tree = AXNode(type: "Application", frame: Self.screenFrame, children: [
+            AXNode(type: "Other", frame: Self.screenFrame, identifier: "first"),
+            AXNode(type: "Other", frame: Self.screenFrame, identifier: "second"),
+        ])
+
+        let outcome = ExpectedScreenCheck.outcome(for: [tree], expect: "missing", instead: .captured)
+
+        #expect(outcome == .unexpectedScreen(expected: "missing", found: ["first"]))
+    }
+
+    /// The deepest-identifier clause follows a navigation-bar-title hint and precedes what `intended` already said.
+    @Test
+    func theDeepestClauseComposesWithAnExistingReason() {
+        let outcome = ExpectedScreenCheck.outcome(for: [Self.hostedScreen()], expect: "missing", instead: .stateNotApplied(reason: "no dark"))
+
+        #expect(outcome == .unexpectedScreen(expected: "missing", found: ["outer > inner"], reason: "\(Self.deepestClause("inner")). no dark"))
+    }
+
+    private static func deepestClause(_ identifier: String) -> String {
+        "the deepest identifier is '\(identifier)'; an identifier set on a container replaces those of the views inside it"
     }
 
     /// An element's identifier inside the content is never an anchor, nested or not.
@@ -232,7 +293,11 @@ struct ExpectedScreenCheckTests {
     func aNestedElementIdentifierIsNotAnAnchor() {
         let outcome = ExpectedScreenCheck.outcome(for: [Self.hostedScreen()], expect: "inner-button", instead: .captured)
 
-        #expect(outcome == .unexpectedScreen(expected: "inner-button", found: ["outer"]))
+        #expect(outcome == .unexpectedScreen(
+            expected: "inner-button",
+            found: ["outer > inner"],
+            reason: "\(Self.deepestClause("inner")). 'inner-button' is on a Button inside 'inner', not a screen container: expect 'inner' and end the route with scrollTo 'inner-button' to require the element"
+        ))
     }
 
     /// `outer` > `Other` `inner` > a `Button` `inner-button`.
@@ -252,6 +317,40 @@ struct ExpectedScreenCheckTests {
         let unreachable = ScreenOutcome.unreachable(routeTried: [.tab(label: "Activity")])
 
         #expect(ExpectedScreenCheck.outcome(for: [Self.screen(identifier: "workouts-list")], expect: "activity-detail", instead: unreachable) == unreachable)
+    }
+
+    /// SimWalk#284: an `expect` naming a text's identifier is refused for what it is — the refusal names the element and the screen identifier to write.
+    @Test
+    func anExpectationNamingAnElementInsideAContainerSaysSoAndNamesTheContainer() {
+        let outcome = ExpectedScreenCheck.outcome(for: [Self.screenWithText(identifier: "lesson.warmUp")], expect: "lesson.warmUp", instead: .captured)
+
+        #expect(outcome == .unexpectedScreen(
+            expected: "lesson.warmUp",
+            found: ["lesson-answer"],
+            reason: "'lesson.warmUp' is on a StaticText inside 'lesson-answer', not a screen container: expect 'lesson-answer' and end the route with scrollTo 'lesson.warmUp' to require the element"
+        ))
+    }
+
+    /// Chrome is no candidate: a toolbar button's identifier stays silent.
+    @Test
+    func anExpectationNamingAToolbarButtonGetsNoElementClause() {
+        let tree = AXNode(type: "Application", frame: Self.screenFrame, children: [
+            AXNode(type: "ScrollView", frame: Self.screenFrame, identifier: "lesson-answer"),
+            AXNode(type: "Toolbar", frame: Self.screenFrame, children: [
+                AXNode(type: "Button", frame: Self.screenFrame, identifier: "lesson.warmUp"),
+            ]),
+        ])
+        let outcome = ExpectedScreenCheck.outcome(for: [tree], expect: "lesson.warmUp", instead: .captured)
+
+        #expect(outcome == .unexpectedScreen(expected: "lesson.warmUp", found: ["lesson-answer"]))
+    }
+
+    static func screenWithText(identifier: String) -> AXNode {
+        AXNode(type: "Application", frame: screenFrame, children: [
+            AXNode(type: "ScrollView", frame: screenFrame, identifier: "lesson-answer", children: [
+                AXNode(type: "StaticText", frame: screenFrame, label: "Warm up", identifier: identifier),
+            ]),
+        ])
     }
 
     private static let screenFrame = AXNode.Frame(x: 0, y: 0, width: 402, height: 874)

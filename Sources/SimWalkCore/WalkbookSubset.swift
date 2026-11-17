@@ -13,9 +13,29 @@ public struct WalkbookSubset {
     /// The walkbook containing only `ids`, in the original's order.
     ///
     /// Order comes from the walkbook rather than from the argument, because a walk is a plan and the order screens are reached in is part of it — a subset that honoured the caller's ordering would execute a route the author never wrote.
+    ///
+    /// A comma separates screen ids, unless the walkbook has a screen whose id is the whole value: `a,b` is the two screens `a` and `b`, and `x,y` is the one screen `x,y` when the walkbook has it. Each part is trimmed and an empty part dropped; a part that is no screen is unknown, as is a value with no part at all (`,`), and the refusal names the part rather than the value it came from.
     public static func narrow(_ walkbook: Walkbook, to ids: [String]) throws -> Walkbook {
-        let wanted = Set(ids)
-        let unknown = ids.filter { id in !walkbook.screens.contains { $0.id == id } }
+        let known = Set(walkbook.screens.map(\.id))
+        var wanted = Set<String>()
+        var unknown = Set<String>()
+        for value in ids {
+            let parts = known.contains(value) || !value.contains(",") ? [value] : value
+                .split(separator: ",", omittingEmptySubsequences: true)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if parts.isEmpty {
+                // Only commas and blanks: it names no screen, and is refused as the value it was given.
+                unknown.insert(value)
+            }
+            for part in parts {
+                if known.contains(part) {
+                    wanted.insert(part)
+                } else {
+                    unknown.insert(part)
+                }
+            }
+        }
         guard unknown.isEmpty else {
             throw WalkbookSubsetError.unknownScreens(
                 requested: unknown.sorted(),

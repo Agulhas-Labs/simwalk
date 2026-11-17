@@ -19,7 +19,7 @@ public struct ExpectedMenuCheck {
 
     /// The outcome a screen must be recorded under given the trees its captures actually produced, or `intended` when the screen names no menu or every tree shows it.
     ///
-    /// `found` is each mismatched capture's first screen-level identifier exactly as `ExpectedScreenCheck` computes it (`nil` for none), distinct and in order — so `expected 'menu: …', found [menus-screen]` reads as "the menu did not open". The `reason` names the first listed label not found in order and the `Button` labels the first mismatched capture holds.
+    /// `found` is each mismatched capture's path of screen identifiers exactly as `ExpectedScreenCheck` computes it (`ScreenIdentifierRule.foundPath(of:)`) (`nil` for none), distinct and in order — so `expected 'menu: …', found [menus-screen]` reads as "the menu did not open". The `reason` names the first listed label not found in order and the `Button` labels the first mismatched capture holds.
     ///
     /// **Composition mirrors `ExpectedScreenCheck.outcome`** and is exhaustive for the same reason. An `intended` that is already an `.unexpectedScreen` (the `expect` check mismatched first) keeps its expected and found and gains the menu clause in its reason.
     public static func outcome(for trees: [AXNode], expectMenu: [String]?, instead intended: ScreenOutcome) -> ScreenOutcome {
@@ -28,7 +28,7 @@ public struct ExpectedMenuCheck {
         guard let first = misses.first else { return intended }
         let clause = reason(missing: first.label, buttons: buttonLabels(in: first.tree))
         let expected = "menu: \(expectMenu.joined(separator: ", "))"
-        let found = distinct(misses.map { ScreenIdentifierRule.screenIdentifier(of: $0.tree) })
+        let found = distinct(misses.map { ScreenIdentifierRule.foundPath(of: $0.tree) })
         return switch intended {
         case .captured:
             .unexpectedScreen(expected: expected, found: found, reason: clause)

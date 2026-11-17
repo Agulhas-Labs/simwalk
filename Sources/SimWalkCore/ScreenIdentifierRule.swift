@@ -44,11 +44,51 @@ public struct ScreenIdentifierRule {
         screenLevelIdentifiers(in: tree).first
     }
 
+    /// What a mismatch's `found` reports for `tree`: the screen-level identifiers on the path to the deepest one, outer to inner, joined by ` > ` (`parent > controls`), or `nil` when the tree carries none.
+    ///
+    /// **The deepest** is the screen-level identifier with the most ancestors, the first in tree order at a tie; the path is every screen-level identifier on its ancestor chain, itself included. When none nests inside another every one is deepest and the first wins, so the entry is the single identifier ``screenIdentifier(of:)`` names. It is what an author reading a missed `expect` needs: a view's identifier set on a container replaces those of the views inside it, so the identifier the app meant for the screen's content is often the nested one.
+    public static func foundPath(of tree: AXNode) -> String? {
+        deepestPath(of: tree).map { $0.joined(separator: pathSeparator) }
+    }
+
+    /// The sentence a mismatch's `reason` gains when ``foundPath(of:)`` holds more than one identifier — naming the deepest and why it may not be the one the author set — or `nil` when it holds one or none.
+    public static func deepestIdentifierClause(of tree: AXNode) -> String? {
+        guard let path = deepestPath(of: tree), path.count > 1 else { return nil }
+        return "the deepest identifier is '\(path[path.count - 1])'; an identifier set on a container replaces those of the views inside it"
+    }
+
     /// Whether `tree` is of the screen `expect` names: any of its ``screenLevelIdentifiers(in:)`` equals it.
     ///
-    /// **Any screen-level identifier, outermost or nested** (SimWalk#103). A screen hosted inside another's content carries both names (a screen's content view wraps the block, each with its own `_screen`), and so does an iPad split view, whose sidebar comes first; comparing only the first refused correct screens. It guards nothing the any-match lets through, because a wrong screen does not carry the expected identifier anywhere. A mismatch's `found` is still the first (outermost) identifier, the name the screen is known by (``screenIdentifier(of:)``). Chrome, element-level identifiers and mangled names never count, as in ``screenLevelIdentifiers(in:)``.
+    /// **Any screen-level identifier, outermost or nested** (SimWalk#103). A screen hosted inside another's content carries both names (a screen's content view wraps the block, each with its own `_screen`), and so does an iPad split view, whose sidebar comes first; comparing only the first refused correct screens. It guards nothing the any-match lets through, because a wrong screen does not carry the expected identifier anywhere. A mismatch's `found` names the path to the deepest one instead (``foundPath(of:)``). Chrome, element-level identifiers and mangled names never count, as in ``screenLevelIdentifiers(in:)``.
     public static func carries(_ expect: String, in tree: AXNode) -> Bool {
         screenLevelIdentifiers(in: tree).contains(expect)
+    }
+
+    /// The first node outside the bars (``ScreenContentCheck/chromeTypes``) that carries `identifier` and is not a container (``ScreenIdentifier/containerTypes``) — a text, a control, an image — with the nearest screen-level identifier enclosing it (`nil` when none does), or `nil` when no such node exists.
+    ///
+    /// Never evidence that a tree is of a screen (``carries(_:in:)`` still refuses it); read only so a mismatch can say the identifier sits on an element, not a screen container.
+    public static func elementCarrying(_ identifier: String, in tree: AXNode) -> (type: String, enclosing: String?)? {
+        func visit(_ node: AXNode, enclosing: String?, insideElement: Bool) -> (type: String, enclosing: String?)? {
+            guard !ScreenContentCheck.chromeTypes.contains(node.type) else { return nil }
+            let own = node.identifier.flatMap { isUsable($0) ? $0 : nil }
+            if own == identifier, !ScreenIdentifier.containerTypes.contains(ScreenIdentifier.canonicalType(node.type)) {
+                return (node.type, enclosing)
+            }
+            let inElement = insideElement || elementTypes.contains(node.type)
+            let next = (inElement ? nil : own) ?? enclosing
+            for child in node.children {
+                if let hit = visit(child, enclosing: next, insideElement: inElement) {
+                    return hit
+                }
+            }
+            return nil
+        }
+        for child in tree.children {
+            if let hit = visit(child, enclosing: nil, insideElement: false) {
+                return hit
+            }
+        }
+        return nil
     }
 
     /// The first navigation bar's usable identifier — its title — or `nil` when no bar carries one.
@@ -63,6 +103,32 @@ private extension ScreenIdentifierRule {
     /// How the Swift runtime begins a mangled class name.
     static var mangledPrefix: String {
         "_Tt"
+    }
+
+    static var pathSeparator: String {
+        " > "
+    }
+
+    /// The identifiers on the ancestor chain of the deepest screen-level identifier, outer to inner, itself last.
+    static func deepestPath(of tree: AXNode) -> [String]? {
+        var best: (depth: Int, path: [String])?
+        func visit(_ node: AXNode, depth: Int, path: [String]) {
+            guard !isChrome(node) else { return }
+            var path = path
+            if let own = node.identifier, isUsable(own) {
+                path.append(own)
+                if best.map({ depth > $0.depth }) ?? true {
+                    best = (depth, path)
+                }
+            }
+            for child in node.children {
+                visit(child, depth: depth + 1, path: path)
+            }
+        }
+        for child in tree.children {
+            visit(child, depth: 1, path: [])
+        }
+        return best?.path
     }
 
     static func identifiers(within node: AXNode) -> [String] {

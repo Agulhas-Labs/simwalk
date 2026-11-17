@@ -19,6 +19,9 @@ public enum BundleScreenError: Error, Equatable, CustomStringConvertible {
     /// The named state was planned and refused (`stateNotApplied`), not simply absent — a different fact from `stateNotFound`, and one the manifest can tell apart.
     case stateRefused(step: Int, screenID: String, requested: String, available: [String])
 
+    /// The named state is not a whole slug and is the leading component of more than one (`light` for `light-args_a` and `light-args_b`): picking one would be a guess.
+    case stateAmbiguous(step: Int, screenID: String, requested: String, matching: [String])
+
     public var description: String {
         switch self {
         case let .stepOutOfRange(step, screenCount):
@@ -33,6 +36,8 @@ public enum BundleScreenError: Error, Equatable, CustomStringConvertible {
             "step \(step) ('\(screenID)') holds no '\(requested)' capture — it holds \(available.joined(separator: ", "))"
         case let .stateRefused(step, screenID, requested, available):
             "step \(step) ('\(screenID)') asked for '\(requested)', which this walk refused rather than captured — it holds \(available.isEmpty ? "nothing" : available.joined(separator: ", "))"
+        case let .stateAmbiguous(step, screenID, requested, matching):
+            "step \(step) ('\(screenID)') holds \(matching.count) captures starting '\(requested)-' — say one slug: \(matching.joined(separator: ", "))"
         }
     }
 }

@@ -105,7 +105,7 @@ struct MCPToolCatalog {
                     "properties": [
                         "bundle": ["type": "string", "description": "Path to a capture bundle directory."],
                         "step": ["type": ["integer", "string"], "description": "Read one screen instead of the manifest: its 1-based position in the walk, or its own id."],
-                        "state": ["type": "string", "description": "With 'step': which captured state to read, by slug (e.g. 'light'). Default: the first, naming the others."],
+                        "state": ["type": "string", "description": "With 'step': state to read, by slug or leading component (light, dark). Default: the first, naming the others."],
                         "match": ["type": "string", "description": "With 'step': only elements whose label or value contains this (case-insensitive), on or off screen."],
                         "all": ["type": "boolean", "description": "With 'step': list the off-screen elements too, after the on-screen ones, each marked."],
                         "tree": ["type": "boolean", "description": "With 'step' and 'match': the matched nodes with identifier, frame, selected flag and ancestors, not the text."],

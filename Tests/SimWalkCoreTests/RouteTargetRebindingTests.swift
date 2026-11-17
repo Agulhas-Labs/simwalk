@@ -162,6 +162,39 @@ struct RouteTargetRebindingTests {
         #expect(RouteTarget.Rebinding.final.reason == nil)
     }
 
+    // MARK: - A moving element, read again until it holds steady
+
+    /// SimWalk#255: a literal match on a panel a spring is still sliding in is the same element at its new frame on the next read, and the wait follows it — where `rebinding` leaves a literal match's miss final.
+    @Test
+    func aliteralMatchStillMovingIsFollowedToItsNewFrame() {
+        let sliding = Self.screen([AXNode(type: "Button", frame: Self.frame(y: 820), label: "Continue")])
+        let later = Self.screen([AXNode(type: "Button", frame: Self.frame(y: 740), label: "Continue")])
+        let choice = RouteTarget.choose(labelled: "Continue", in: sliding)
+
+        guard case let .same(fresh) = choice.following(labelled: "Continue", in: later), case let .chosen(target, _) = fresh else {
+            Issue.record("expected the same button at its new frame")
+            return
+        }
+
+        #expect(target.node.frame == Self.frame(y: 740))
+        #expect(choice.rebinding(labelled: "Continue", in: later) == .final)
+    }
+
+    /// Following lets in the literal match for the same element only: one that is gone, or another element matching literally, leaves the miss final.
+    @Test
+    func followingAliteralMatchToAnotherElementOrNoneIsFinal() {
+        let sliding = Self.screen([AXNode(type: "Button", frame: Self.frame(y: 820), label: "Continue")])
+        let other = Self.screen([
+            AXNode(type: "Button", frame: Self.frame(y: 100), label: "Back"),
+            AXNode(type: "Button", frame: Self.frame(y: 740), label: "Continue"),
+        ])
+        let gone = Self.screen([AXNode(type: "Button", frame: Self.frame(y: 100), label: "Back")])
+        let choice = RouteTarget.choose(labelled: "Continue", in: sliding)
+
+        #expect(choice.following(labelled: "Continue", in: other) == .final)
+        #expect(choice.following(labelled: "Continue", in: gone) == .final)
+    }
+
     // MARK: - A bound element, read again while scrolling
 
     /// A scroll moves an element up or down the screen: the same label at the same width and height, anywhere vertically, is still the element chosen.
@@ -180,8 +213,16 @@ struct RouteTargetRebindingTests {
 
         #expect(!target.isStill(label: "Trend, 12 August", identifier: nil, frame: Self.frame(y: 700)))
         #expect(!target.isStill(label: nil, identifier: "Trend", frame: Self.frame(y: 700)))
-        #expect(!target.isStill(label: "Trend", identifier: nil, frame: AXNode.Frame(x: 0, y: 700, width: 380, height: 60)))
+        #expect(!target.isStill(label: "Trend", identifier: nil, frame: AXNode.Frame(x: 0, y: 700, width: 340, height: 60)))
         #expect(!target.isStill(label: "Trend", identifier: nil, frame: AXNode.Frame(x: 0, y: 700, width: 402, height: 44)))
+    }
+
+    /// SimWalk#258: a SwiftUI pulse scales the element about 6% on every read, and it is still the element chosen, so a `scrollTo` can arrive at it.
+    @Test
+    func anElementAPulseScaledIsStillTheOneChosen() throws {
+        let target = try #require(Self.candidate(labelled: "Trend", in: Self.screen([AXNode(type: "Button", frame: Self.frame(y: 1400), label: "Trend")])))
+
+        #expect(target.isStill(label: "Trend", identifier: nil, frame: AXNode.Frame(x: -12, y: 698, width: 426, height: 63.6)))
     }
 
     /// SimWalk#241: a row read before it was laid out, at a placeholder origin, is still the one chosen once a swipe brings it on screen.

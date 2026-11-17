@@ -157,6 +157,52 @@ public extension AXNode {
         func intersects(_ other: AXNode.Frame, tolerance: Double = 0) -> Bool {
             horizontalOverlap(with: other) > tolerance && verticalOverlap(with: other) > tolerance
         }
+
+        /// How far a steady frame may move on each axis, as a fraction of its size there (SimWalk#252, #255, #258).
+        ///
+        /// A walk turns UIKit's animations off but not SwiftUI's, so a `phaseAnimator` or `repeatForever` pulse keeps scaling an element for as long as it is on screen: about 6% at the pulses seen in real use, read at a different phase on every read. 8% holds those and still tells apart anything really moving: a spring sliding a panel in moves its centre by hundreds of points, and a recycled row of another width differs by more.
+        public static let steadyFraction = 0.08
+
+        /// The least movement allowed on an axis, in points, so a small element still survives rounding to whole points.
+        public static let steadyFloor = 2.0
+
+        /// Whether `other` is this frame read again while an endless animation scales it a little: centres and sizes within ``steadyFraction`` of the size on each axis (at least ``steadyFloor`` points).
+        public func isSteady(with other: AXNode.Frame) -> Bool {
+            hasSteadySize(with: other)
+                && abs((x + width / 2) - (other.x + other.width / 2)) <= Self.steadyAllowance(width, other.width)
+                && abs((y + height / 2) - (other.y + other.height / 2)) <= Self.steadyAllowance(height, other.height)
+        }
+
+        /// The size half of ``isSteady(with:)``, for a question that lets the frame sit anywhere, as a scroll moves it.
+        public func hasSteadySize(with other: AXNode.Frame) -> Bool {
+            abs(width - other.width) <= Self.steadyAllowance(width, other.width)
+                && abs(height - other.height) <= Self.steadyAllowance(height, other.height)
+        }
+
+        private static func steadyAllowance(_ size: Double, _ otherSize: Double) -> Double {
+            max(steadyFloor, steadyFraction * max(size, otherSize))
+        }
+    }
+
+    /// How far the largest element moved or resized, in points, when `other` is this same screen read again under an endless animation, or `nil` when it is not (SimWalk#252).
+    ///
+    /// The same screen means the same shape and, node for node, the same text, state and type, with every frame ``Frame/isSteady(with:)``: a SwiftUI pulse scales one button by a point or so between two reads, which the whole-point frames of ``ScreenHash`` read as a different screen, while a label that changed or an element that slid is still one.
+    func steadyShift(to other: AXNode) -> Double? {
+        guard type == other.type, label == other.label, identifier == other.identifier, value == other.value, placeholder == other.placeholder,
+              isSelected == other.isSelected, isEnabled == other.isEnabled, children.count == other.children.count,
+              frame.isSteady(with: other.frame)
+        else { return nil }
+        var largest = max(
+            abs((frame.x + frame.width / 2) - (other.frame.x + other.frame.width / 2)),
+            abs((frame.y + frame.height / 2) - (other.frame.y + other.frame.height / 2)),
+            abs(frame.width - other.frame.width),
+            abs(frame.height - other.frame.height)
+        )
+        for (mine, theirs) in zip(children, other.children) {
+            guard let shift = mine.steadyShift(to: theirs) else { return nil }
+            largest = max(largest, shift)
+        }
+        return largest
     }
 
     /// Every node in tree order, this one first — the flattening most questions about a screen start from.

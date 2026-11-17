@@ -71,6 +71,7 @@ struct StrictKeyDecoding {
     private static let misplaced: [String: String] = [
         "expect": "the screen, beside its 'route' and 'states'",
         "expectMenu": "the screen, beside its 'route' and 'states'",
+        "expectValues": "the screen, beside its 'route' and 'states'",
         "figures": "the screen, beside its 'route' and 'states'",
         "oracle": "the walkbook's top level, beside 'screens'",
     ]

@@ -25,8 +25,10 @@ public struct LiveSessionStepAnswer: Codable, Equatable, Sendable {
     ///
     /// On a step taken, the guard held across it; on `snapshotChanged`, it is what refused the guard. `nil` when no picture was compared.
     public let pixelsMoved: Double?
+    /// How far the largest element of a text screen moved or resized, in points, since the guard's hash was printed, when the guard held across it (SimWalk#252); `nil` otherwise.
+    public let pointsMoved: Double?
 
-    private init(outcome: Outcome, landed: Walkbook.RouteStep? = nil, bound: AXNode? = nil, reason: String? = nil, expectedHash: String? = nil, foundHash: String? = nil, delta: ScreenDelta? = nil, pixelsMoved: Double? = nil) {
+    private init(outcome: Outcome, landed: Walkbook.RouteStep? = nil, bound: AXNode? = nil, reason: String? = nil, expectedHash: String? = nil, foundHash: String? = nil, delta: ScreenDelta? = nil, pixelsMoved: Double? = nil, pointsMoved: Double? = nil) {
         self.outcome = outcome
         self.landed = landed
         self.reason = reason
@@ -35,18 +37,19 @@ public struct LiveSessionStepAnswer: Codable, Equatable, Sendable {
         self.delta = delta
         self.bound = bound
         self.pixelsMoved = pixelsMoved
+        self.pointsMoved = pointsMoved
     }
 
     /// The step landed, and a walk would record it as `recorded`.
     ///
-    /// `held` is the guard's hash and the fraction of the picture that moved, when the guard held across a text-less screen's movement (SimWalk#226).
-    public static func landed(_ recorded: Walkbook.RouteStep, bound: AXNode? = nil, delta: ScreenDelta, held: (expected: String, moved: Double)? = nil) -> LiveSessionStepAnswer {
-        LiveSessionStepAnswer(outcome: .landed, landed: recorded, bound: bound, expectedHash: held?.expected, delta: delta, pixelsMoved: held?.moved)
+    /// `held` is what the guard held across, when its hash was not the screen's exactly (SimWalk#226, SimWalk#252).
+    public static func landed(_ recorded: Walkbook.RouteStep, bound: AXNode? = nil, delta: ScreenDelta, held: Held? = nil) -> LiveSessionStepAnswer {
+        LiveSessionStepAnswer(outcome: .landed, landed: recorded, bound: bound, expectedHash: held?.expected, delta: delta, pixelsMoved: held?.pixels, pointsMoved: held?.points)
     }
 
     /// The step was taken and did not land.
-    public static func blocked(reason: String?, delta: ScreenDelta, held: (expected: String, moved: Double)? = nil) -> LiveSessionStepAnswer {
-        LiveSessionStepAnswer(outcome: .blocked, reason: reason, expectedHash: held?.expected, delta: delta, pixelsMoved: held?.moved)
+    public static func blocked(reason: String?, delta: ScreenDelta, held: Held? = nil) -> LiveSessionStepAnswer {
+        LiveSessionStepAnswer(outcome: .blocked, reason: reason, expectedHash: held?.expected, delta: delta, pixelsMoved: held?.pixels, pointsMoved: held?.points)
     }
 
     /// The step was not taken: the screen was no longer the one the guard names.
@@ -58,6 +61,25 @@ public struct LiveSessionStepAnswer: Codable, Equatable, Sendable {
 }
 
 public extension LiveSessionStepAnswer {
+    /// A guard that held although the screen's hash was not its own.
+    ///
+    /// Either a text-less screen's picture moved a little (SimWalk#226) or a text screen's elements did (SimWalk#252); exactly one of ``pixels`` and ``points`` is set.
+    struct Held: Equatable, Sendable {
+        public let expected: String
+        public let pixels: Double?
+        public let points: Double?
+
+        /// The fraction of a text-less screen's picture that moved.
+        public static func picture(expected: String, moved: Double) -> Held {
+            Held(expected: expected, pixels: moved, points: nil)
+        }
+
+        /// The largest move, in points, of any element of a text screen.
+        public static func frames(expected: String, points: Double) -> Held {
+            Held(expected: expected, pixels: nil, points: points)
+        }
+    }
+
     /// What a step request came to.
     enum Outcome: String, Codable, Equatable, Sendable {
         case landed

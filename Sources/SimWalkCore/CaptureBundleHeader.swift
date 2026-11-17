@@ -29,8 +29,15 @@ public struct CaptureBundleHeader {
             manifest.runnerCommit.map { "runner: \(ShortHash.of($0))\($0.contains("-dirty") ? "-dirty" : "")" },
             "device: \(manifest.device.name) (\(manifest.device.osVersion))",
             manifest.animations.map { "animations: \($0.rawValue)" },
+            textSize(manifest),
             "settled: \(settled(manifest))",
         ].compactMap(\.self).joined(separator: "  ")
+    }
+
+    /// `text size: <simctl name> (device)` when the walk recorded a device size other than the default `large`, so a walk left at a large size by accident is visible (SimWalk#288); absent otherwise.
+    private static func textSize(_ manifest: CaptureManifest) -> String? {
+        guard let size = manifest.device.contentSize, size != ContentSizeCategoryName.defaultName else { return nil }
+        return "text size: \(ContentSizeCategoryName.simctl(forCategory: size) ?? size) (device)"
     }
 
     /// How many of the bundle's captures were taken after the accessibility tree held still — a declared gap where a bundle never recorded it, never a guess either way.

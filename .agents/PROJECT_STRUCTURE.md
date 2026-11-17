@@ -191,7 +191,7 @@ A runner that fails without a bundle is refused with what its result bundle says
 `systemTap` asks the core whether to drag a sheet's list again, from one read of the step's label (SimWalk#59):
 `Sources/SimWalkCore/SystemTapScroll.swift`, tested by `Tests/SimWalkCoreTests/SystemTapScrollTests.swift`.
 
-`scrollTo` asks the core whether to swipe again, and why it stopped, while its label resolves to nothing and then until its element takes a tap (SimWalk#74):
+`scrollTo` asks the core whether to swipe again, and why it stopped, while its label resolves to nothing and then until its element takes a tap, and which way to swipe towards it (SimWalk#74, #280):
 `Sources/SimWalkCore/ScrollSearch.swift`, tested by `Tests/SimWalkCoreTests/ScrollSearchTests.swift`.
 
 `systemTap` reads the app's tree with a remote sheet's content put back where `app.snapshot()` stops (SimWalk#48):

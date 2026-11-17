@@ -11,7 +11,7 @@ struct TapLandingTests {
     /// **A selected, hittable element whose tap changed nothing, under a bar naming it, was already there.**
     @Test
     func aSelectedHittableTitledElementThatChangesNothingLands() {
-        let landing = TapLanding.decide(arrived: false, wasSelected: true, hittable: true, titled: true)
+        let landing = TapLanding.decide(arrived: false, tappedTraitChanged: false, wasSelected: true, hittable: true, titled: true)
 
         #expect(landing == .alreadySelected)
     }
@@ -19,7 +19,7 @@ struct TapLandingTests {
     /// **A selected, hittable element whose tap changed nothing did not land when no bar names it**: its detail may have been pushed deeper.
     @Test
     func aSelectedHittableElementWithoutItsTitleDoesNotLand() {
-        let landing = TapLanding.decide(arrived: false, wasSelected: true, hittable: true, titled: false)
+        let landing = TapLanding.decide(arrived: false, tappedTraitChanged: false, wasSelected: true, hittable: true, titled: false)
 
         #expect(landing == .notLanded)
     }
@@ -27,7 +27,7 @@ struct TapLandingTests {
     /// **An unselected element whose tap changed nothing did not land, hittable or not.**
     @Test
     func anUnselectedElementThatChangesNothingDoesNotLand() {
-        let landings = [true, false].map { TapLanding.decide(arrived: false, wasSelected: false, hittable: $0, titled: true) }
+        let landings = [true, false].map { TapLanding.decide(arrived: false, tappedTraitChanged: false, wasSelected: false, hittable: $0, titled: true) }
 
         #expect(landings == [.notLanded, .notLanded])
     }
@@ -35,7 +35,7 @@ struct TapLandingTests {
     /// **A selected element that cannot be hit is not landed on** (#95): a modal over the app leaves the selection true.
     @Test
     func aSelectedElementThatIsNotHittableDoesNotLand() {
-        let landing = TapLanding.decide(arrived: false, wasSelected: true, hittable: false, titled: true)
+        let landing = TapLanding.decide(arrived: false, tappedTraitChanged: false, wasSelected: true, hittable: false, titled: true)
 
         #expect(landing == .notLanded)
     }
@@ -46,7 +46,20 @@ struct TapLandingTests {
         let flags = [true, false]
         let landings = flags.flatMap { selected in
             flags.flatMap { hittable in
-                flags.map { titled in TapLanding.decide(arrived: true, wasSelected: selected, hittable: hittable, titled: titled) }
+                flags.map { titled in TapLanding.decide(arrived: true, tappedTraitChanged: false, wasSelected: selected, hittable: hittable, titled: titled) }
+            }
+        }
+
+        #expect(landings == Array(repeating: .landed, count: 8))
+    }
+
+    /// **A tap that left the screen in place but changed the tapped element's selection or enablement landed, whatever the rest** (SimWalk#251).
+    @Test
+    func aTapThatOnlyChangedTraitsLandsWhateverTheRest() {
+        let flags = [true, false]
+        let landings = flags.flatMap { selected in
+            flags.flatMap { hittable in
+                flags.map { titled in TapLanding.decide(arrived: false, tappedTraitChanged: true, wasSelected: selected, hittable: hittable, titled: titled) }
             }
         }
 

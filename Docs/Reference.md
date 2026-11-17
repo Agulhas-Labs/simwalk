@@ -81,6 +81,11 @@ walk stops at the first failure:
 
 A bundle that records no state prints `UNREACHABLE, route tried: …`.
 
+Where a route fails, the runner reads the tree and a screenshot as they are at that moment, with no settle, and files
+them at `screens/<screen>/unreached/` (`screen.png`, `ax-tree.json`); the line then ends
+`(last state captured: screens/<screen>/unreached)`. A bundle without that directory, or a read that failed, prints
+no such clause, and the screen's outcome is the same either way.
+
 The format is the one [SwiftSure](https://github.com/Agulhas-Labs/swift-sure) uses. Its
 [answer contract](https://github.com/Agulhas-Labs/swift-sure/blob/main/Docs/AnswerContract.md) is the
 specification both tools answer to, so a reader who has learned to skim one has learned to skim the other.
@@ -113,6 +118,8 @@ device, and how many of the bundle's captures were taken after the accessibility
 `1/3 (1 unrecorded)`, or `unrecorded` for a bundle that predates the runner recording it). What it does
 **not** name is the run's timestamps or the device UDID: dates and machine names stay out of an answer.
 Both are still in the manifest, which is the record.
+
+An element an endless SwiftUI animation scales a little (within 8% of its size) does not keep a screen from settling: the watch counts a read of the same screen, changed only by such a pulse, as still.
 
 A qualified answer names every qualification on the verdict line, before the counters:
 
@@ -154,12 +161,18 @@ rule.
 **Exit 2 means the call worked and the answer is qualified** — distinct from a refusal, because those
 want different responses from a pipeline. `walk` exits 2 when the bundle is missing a screen the
 walkbook asked for, holds a capture taken before the accessibility tree stopped changing, holds a
-capture of the app's chrome with nothing under it, or survived a runner failure; `bundle audit` exits
+capture of the app's chrome with nothing under it, holds a capture still showing a spinner when the
+content wait ran out, or survived a runner failure; `bundle audit` exits
 2 when it found an inconsistency, when the bundle does not hold every screen its walk set out to
 capture, or when what it does hold was captured before the accessibility tree stopped changing; and
 **`bundle inspect` exits 2 over any bundle its verdict calls qualified**, including a bundle's shortfall
 and its unsettled captures. The report is printed either way; the code is what a script gates on, and
 it is read off the verdict word rather than recomputed beside it, so the two cannot disagree.
+
+A runner whose test `xcodebuild` reported passed, and whose only failure was saving its result bundle (`Error saving
+invocation record to resultBundlePath`), is not a runner failure: a walk or dry run answers as it would have without
+it and adds one line, `result bundle not saved (<reason>); <k> of <n> screens captured` (`routes resolved` for a dry
+run). The same save failure beside a failed test, or without `xcodebuild`'s word that the test passed, still qualifies.
 
 A simulator walk's runner failure is excused when every failure XCTest recorded is `Critical process xctest
 crashed`, at least one crash report of a process named `xctest` on the Mac itself was captured from an hour
@@ -174,6 +187,10 @@ names the `xctest` reports it found, or says there were none. When it finds none
 log for crashes of a process named `xctest` while the runner ran and, when it records some, the answer says
 macOS saved no report for them (macOS keeps at most 25 of one process's crash reports) and that which
 process crashed cannot be told; the qualification stays.
+
+A walk whose failure text holds an XCTest timeout or crash signature (`Timed out while evaluating UI query`, `Timed out while fetching snapshot`, `Timed out while synthesizing event`, `Critical process xctest crashed`, `** TEST EXECUTE FAILED **`) while the Mac's one-minute load average is above four times its core count ends its answer with `host: load N on C cores — XCTest timed out under it, so this is likely load, not the route; walk again when it falls` (SimWalk#277).
+
+A simulator walk or dry run whose runner stops at a launch with XCUITest's `Failed to launch <app>: Timed out attempting to launch app.`, having written nothing to its output, runs the runner once more: a freshly booted device under load can time out XCUITest's first launches of an app that is fine. When the second runner writes the bundle, it is the answer, not qualified by the retry, and a line names the first runner's result bundle. When the walk refuses on that timeout again, or the first runner had already written to its output and so was not run again, the walk launches the app itself with `xcrun simctl launch`, after the device is handed back and with the walkbook's first launch arguments and environment, then terminates it, and says in one line what that showed: the app launches with simctl (the device was slow to answer XCUITest, not the app — walk again once it settles; with the device's boot age and the Mac's load average), the app did not launch with simctl either (the app or its install, with simctl's cause), simctl could not launch it on the device either (a device-side error such as a device shut down: the device), or simctl did not answer within 60 s (the device itself).
 
 ## What a walk checks before it files a capture
 
@@ -205,11 +222,33 @@ enforce it, none of them a timing assumption:
   pill, which has no bar naming it.
   A `tap` on a keyboard key (SimWalk#94) also lands if the keyboard-focused field's value changed, because
   a keystroke changes no structure; when it lands on neither, the refusal names both checks.
+  A `tap` (or `longPress`) that leaves the structure as it was also lands when, read once more after the
+  step's budget, the tapped element itself is lastingly selected or not, enabled or disabled, that was not before
+  (SimWalk#251): a tile picked in a grid is the tap's whole effect. A change elsewhere on the screen (a Submit
+  button a form's validation enables while the tap waits) does not land it, though a session step lists it.
+  A highlight under the finger has gone by then, so it does not count. A `tap` that lands on nothing and whose
+  element only moved on a screen that stayed (the touch scrolled it, rather than acting) is refused saying so,
+  `tapped a Button labelled 'Start', but the screen only scrolled: it moved from 165,296 to 164,205`, rather
+  than "the screen did not change" (#253); an element that merely pulses (within 8% of its size) did not move.
+  A `tap` that must change nothing, `{"tap":{"label":"For grown-ups","unchanged":true}}` (SimWalk#268), is found,
+  swiped towards, refused and delivered exactly as a `tap` is, then watched for the whole step budget (a gate
+  may open after a delay) and judged the other way round: it lands when no element appeared or went (by type,
+  label and nesting; an identifier filling in, as a tab bar's do just after a tab switch, is not a change) and the
+  tapped element's own selection and enablement did not change, and is refused otherwise, naming what changed:
+  `tapped a Button labelled 'For grown-ups' expecting nothing to change, but the screen changed: 'Open details'
+  appeared` (or `'Press row' and 3 more went`, or `but it became selected`, `enabled`,
+  `deselected`, `disabled`). `unchanged: false` is a plain `tap`; a `longPress` has no such key. It prints as
+  `tap 'For grown-ups' (no change)`, and a session's `step` takes it too. A keyboard key is refused before it is
+  tapped, `'6' is a keyboard key: a key is tapped to type, so a tap on one cannot be held to changing nothing — use a
+  plain tap`.
 - **A screenshot is bracketed.** The picture is taken between two reads of the hierarchy and kept only
   if they agree, so a settled capture's screenshot and tree cannot be of different screens.
 - **A spinner is not a screen.** A capture whose tree holds only the tab bar, navigation bar or
   toolbar — the app's frame and nothing of its own — is flagged rather than passed. That is a content
   check, so no machine is slow enough to defeat it.
+  A capture also waits while its tree shows an activity indicator anywhere, labelled or not (a
+  determinate progress bar does not count), up to the same 15 s content wait; one still spinning then is
+  captured, flagged and named in its own line. A screen that spins by design pays that wait on every state.
 - **A screen can state what it expects to find, and be held to it.** A route can complete, settle, and
   hold real content, and still not be the screen a walkbook believes it reached — the standing caveat
   below, one level up: `ScreenIdentity` catches a step that never left the screen it was taken on, not
@@ -269,7 +308,8 @@ worked example. A walk names an app and lists screens; each screen carries an `i
 app's launch state, and the `states` to capture on arrival — plus an optional `settle` in
 milliseconds, for a screen whose content streams in after the screen itself does, and an optional
 `expect` naming an accessibility identifier the reached screen carries (not the tab bar, toolbar or
-navigation bar) — or an `expectMenu` for a screen ending in an open menu:
+navigation bar) — or an `expectMenu` for a screen ending in an open menu, or `expectValues` for the values
+its elements must read:
 
 ```json
 { "id": "browse", "route": [{ "tab": { "label": "Browse" } }], "states": [{ "theme": "light" }], "settle": 6000, "expect": "browse-root" }
@@ -401,7 +441,9 @@ passed. A session has no motion recording, so only that flag keeps them. A physi
 The bundle records which applied: the manifest's `animations` (`on` or `off`, written by the runner; absent in a
 bundle written before SimWalk recorded it, which ran with animations on, and a device walk records `on`). The
 header of every bundle answer shows it between `device:` and `settled:` as `animations: off`, and shows nothing
-for a bundle that does not record it. `bundle diff` refuses a reference and a run captured in different states,
+for a bundle that does not record it. A bundle whose manifest records the simulator at a text size other than the
+default `large` (`device.contentSize`, read at walk start) adds `text size: accessibility-extra-large (device)` to
+that header, so a walk left at a large size by accident is visible. `bundle diff` refuses a reference and a run captured in different states,
 because their motion and settle figures differ for that reason alone: `bundle diff refused: the reference was
 captured with animations on and the run with animations off, …; capture both in one state (--animations keeps
 animations on, and a walk that records motion or runs on a device keeps them on regardless)`. An unrecorded bundle counts as on, and the refusal says so. The field sits inside format 8:
@@ -415,7 +457,7 @@ The walk's answer carries one line: `device: slim: 94 of 338 services off (iOS 2
 
 `--stock` (the MCP `walk` tool's `stock`) boots such a device with every service on, shutting it down first if it is booted with services off. On a device SimWalk did not create that has services off it is refused, because only its creator can switch them back on; with none off it changes nothing. It is refused for a physical device. Releasing a device SimWalk created removes its override along with the device.
 
-### Checking the screen with `expect` and `expectMenu`
+### Checking the screen with `expect`, `expectMenu` and `expectValues`
 
 Use `expect` when a route could finish on the wrong screen. It names an identifier the right screen carries.
 
@@ -429,11 +471,21 @@ name, `BackButton`, `Toolbar`, **and the navigation bar's own title**), an eleme
 image's symbol, a button's), and SwiftUI's mangled `_Tt…` class names. A title is localised and not
 unique, so an `expect` naming one would pass under `light`, fail under a `loc_fr_fr` state, and pass on
 any other screen with the same title; when a mismatch's `expect` is the screen's title, the walk says so
-and asks for an identifier on the content instead. `validate` refuses an `expect` stated as an empty
+and asks for an identifier on the content instead. When the mismatched capture holds `expect`'s identifier on an element
+inside a screen (a text, a control; not in a bar), the refusal names that element's type and the screen
+identifier it is inside, and says to `expect` that one and end the route with `scrollTo` on the element's
+identifier, which still requires it (SimWalk#284). `validate` refuses an `expect` stated as an empty
 string, padded, or spelled like a mangled Swift name — none of them could ever pass. A capture carrying
 no screen identifier at all counts as a mismatch rather than a pass: the check is opt-in exactly where an
 app has adopted the convention of setting one, and passing silently when it finds nothing would be the
 same discard this key exists to end.
+
+A mismatch's `found` names, per mismatched capture, the screen identifiers on the path to the deepest one, outer to
+inner, joined by ` > ` (`found [parent > controls]`); a capture carrying none reads `no identifier`. The deepest is
+the screen-level identifier with the most ancestors, the first in tree order at a tie, so when none nests inside
+another `found` is the single first identifier. When a path holds more than one identifier the reason adds `the deepest
+identifier is 'controls'; an identifier set on a container replaces those of the views inside it` — the usual cause of
+an `expect` that names a view whose identifier an enclosing view's replaced.
 
 `expectMenu` (SimWalk#111) checks a route that ends by opening a SwiftUI system `Menu`, which `expect`
 cannot: the open menu hides the screen's identifier and has none of its own. It lists the labels the open
@@ -449,19 +501,40 @@ exactly, other buttons allowed between:
 ```
 
 A mismatch is the screen's `unexpectedScreen` outcome: `expected 'menu: Endurance, Walking, Strength (usual)'`,
-`found` the capture's first screen identifier (so `found [goals-screen]` reads as "the menu did not open"),
+`found` the capture's path of screen identifiers (so `found [goals-screen]` reads as "the menu did not open"),
 and a reason naming the first label not found in order and the Buttons the capture holds (the first 8).
 `expect` is unchanged and checked on its own; since an open menu hides the screen's identifier, `expect`
 beside `expectMenu` normally fails, so state one or the other. When both mismatch, `expect`'s expected and
 found lead and the menu clause rides in the reason. `validate` refuses an `expectMenu` that is empty or
 holds a blank or padded label.
 
+`expectValues` (SimWalk#259) proves a state a route cannot read: that an element reads the value the walkbook
+expects, such as a lesson's button going from `Start` to `Done` once the lesson is saved. Each entry names an
+element by `label` and the `value` its accessibility value must read; every capture the screen takes must hold,
+for each entry, some node whose `label` or `identifier` equals the entry's `label` and whose `value` equals the
+entry's `value`, both matched exactly (no leading component, no `{n}`). A node with no value reads as none, so it
+never matches. A value is text the app gives VoiceOver, so it is localised: walk such a screen in one locale, or
+state the value each locale shows.
+
+```json
+{ "id": "values-after", "route": [{ "tab": { "label": "Home" } }, { "tap": { "label": "Choosing a strategy" } }, { "tap": { "label": "Save" } }], "states": [{ "theme": "light" }], "expectValues": [{ "label": "Choosing a strategy", "value": "Done" }] }
+```
+
+A mismatch is the screen's `unexpectedScreen` outcome: `expected 'values: Choosing a strategy = Done'`, `found`
+the mismatched captures' paths of screen identifiers, and a reason naming each entry the first mismatched capture fails:
+`'Choosing a strategy' reads 'Start', not 'Done'` (several so-named nodes list their distinct values, a node with
+none reads `has no value`), or, when no node is so named, that nothing labelled or identified so is in the
+capture; a lazy list holds only the rows on screen, so end the route by scrolling to it. The checks run in the
+order `expect`, `expectMenu`, `expectValues`; an earlier mismatch keeps its expected and found and the value
+clause rides in its reason. `validate` refuses an `expectValues` that is empty, an entry with a blank or padded
+`label`, or an entry with a blank `value` (a capture records an empty value as none, so it could never pass).
+
 ### States
 
 A state is one way to capture a screen: a theme, a text size, a locale and so on.
 
 A state is a `theme` (`light` or `dark`) plus any of eight optional conditions:
-`dynamicTypeSize` (a `UIContentSizeCategory` name), `locale`, `layoutDirection`, `location`,
+`dynamicTypeSize` (a `UIContentSizeCategory` name; a simulator's own size, read with `simctl ui content_size`, is recorded in the manifest as `device.contentSize` and used for a capture whose state sets none, so `bundle audit` judges a walk run on a device left at an accessibility size), `locale`, `layoutDirection`, `location`,
 `resetPermissions` and `orientation` (below), and — for a screen an app shows only under
 a launch argument (SimWalk#44) — `arguments`, a list of strings the app is launched with after the ones
 the other axes become, verbatim and in order, and `environment`, an object of variables laid over the
@@ -594,6 +667,13 @@ A route is the list of steps that takes the app from its launch state to a scree
 
 Route steps — every label is the **accessibility label**, the thing an author can see on screen, and a
 leading comma-separated component counts as a match so a row's live trailing count cannot rot a route.
+**A step's label matches, in this order, each tier consulted only when nothing matched in the one before:** the
+whole label or the identifier; the start of a label up to a comma or a sentence's end (`'Reset asked for'` reaches
+`Reset asked for. The PIN clears at 18:02`: the text, then `. `, `? ` or `! `); the same with no-break spaces read as
+spaces; a `{n}` pattern; the start followed by a space and a number. An arbitrary prefix matches in none of them:
+`'Reset'` does not reach `Reset all settings`. A step that finds nothing lists, after `nothing on screen is labelled or
+identified '…'`, up to three labels that contain its text (ignoring case and no-break spaces) and how each compared
+(`; nearest: 'Reset asked for. …' (starts with it, but …)`), from the last screen it read.
 Where a label carries data with no comma before it, write **`{n}`** where the number goes: `'Sailing {n}'`
 reaches the filter chip `Sailing 22` whatever its count reads, and matches the whole label — the rest must
 match to the letter, and `{n}` stands for one number (`22`, `1,234`, `3.43`, `3,43`, `+0.62`, `−0.62`) —
@@ -612,11 +692,12 @@ screen has held still for the quiet period.) `tab` looks tabs up by name and doe
 | --- | --- | --- |
 | tab | `{"tab":{"label":"Progress"}}` | select that tab |
 | tap | `{"tap":{"label":"Heart"}}` | tap that element; a label nothing on screen carries yet is swiped towards first, as `scrollTo` does (SimWalk#104) |
+| tap | `{"tap":{"label":"For grown-ups","unchanged":true}}` | the same tap, expected to change nothing: it waits the whole step budget and lands only if no element appeared or went and the element's own selection and enablement did not change; otherwise it is refused saying what changed (SimWalk#268) |
 | type | `{"type":{"label":"Search","text":"resting"}}` | tap that field and type into it; a field with no label is found by its placeholder when nothing carries the label (SimWalk#212) |
 | type, replacing | `{"type":{"label":"Nickname","text":"Robin","replace":true}}` | tap that field's trailing edge, delete what it holds (retrying from the leading edge), type `text`, and read the value back (SimWalk#198); `replace` is written only when true, and `validate` allows an empty `text` only with it, which clears the field. Written `type 'Robin' into 'Nickname', replacing its text` |
 | longPress | `{"longPress":{"label":"Row","seconds":2}}` | press and hold that element for `seconds` (0.5 to 5, default 1, written only when it is not 1; `validate` refuses another and names it) to raise a context menu; found, swiped towards, refused and landed exactly as `tap` does (SimWalk#198). Written `longPress 'Row'`, or `longPress 'Row' for 2 s` |
 | swipe | `{"swipe":{"label":"Row","direction":"left"}}` | swipe once in `direction` (`up`, `down`, `left` or `right`; `validate` refuses another and names it) on that element, found as `tap` finds it, or on the app when `label` is left out. Never a search, unlike `scrollTo`. Lands one quiet period after the gesture, unconditionally, as `tapPoint` does, so state `expect` on a screen whose route ends in one (SimWalk#198). Written `swipe left on 'Row'`, or `swipe up` |
-| scrollTo | `{"scrollTo":{"label":"Rows"}}` | swipe until that element is on screen, then nudge it clear of any tab bar, toolbar or navigation bar in front of it (SimWalk#108) |
+| scrollTo | `{"scrollTo":{"label":"Rows"}}` | swipe until that element is on screen (up, or down once the element is in the tree above the middle of its list's visible part, SimWalk#280), then nudge it clear of any tab bar, toolbar or navigation bar in front of it (SimWalk#108). `{"scrollTo":{"label":"Recurring mistakes","position":"top"}}` then drags it to the top of its scroll container (SimWalk#270); `top` is the only position. Written `scrollTo 'Recurring mistakes' (top)` |
 | tapPoint | `{"tapPoint":{"label":"Steps chart","at":[0.8,0.5]}}` | tap a point within that element's frame, as fractions of it |
 | tapPoint | `{"tapPoint":{"at":[201,610]}}` | tap a point on the screen, in device points, in the app's frame (interface orientation, origin top-left) |
 | drag | `{"drag":{"label":"Volume","from":[0.1,0.5],"to":[0.9,0.5],"hold":0.3,"seconds":0.5}}` | press at `from`, rest `hold` s (default 0.1), move to `to` over `seconds` (default 0.5), lift; both are fractions of that element's frame (SimWalk#148); each of `hold`, `seconds` is written only when not the default |
@@ -652,7 +733,9 @@ swiped is nudged clear of the bars in front of it as a `scrollTo` is before it t
 where it cannot be (SimWalk#104, #108); a `tap` that did not swipe is unchanged.
 A screen titled `Sleep` no longer hands `tap 'Sleep'` to its navigation bar: the row labelled
 `Sleep, Nothing earlier to compare with` is the answer, whatever its note reads on a given store. A tap
-that still does not land comes back UNREACHABLE saying what it tapped and what else its label matched.
+that still does not land comes back UNREACHABLE saying what it tapped and what else its label matched, or that
+the screen only scrolled under it, from where to where. A `tap` with `unchanged: true` inverts this: it is refused
+when the screen changed or the element became selected or enabled.
 
 **Only when nothing matches in any of those ways** — literally or by a `{n}` pattern, as a control, as
 content, or even as chrome — is a label that merely *starts* with the step's text considered, and only if
@@ -678,6 +761,8 @@ taken after the quiet period, so a row that arrives after that loses to it.
 
 **Which states turned the device** (SimWalk#222): a screen record's `deviceTurns` lists the slugs of the states whose launch left the app landscape on a device held portrait, so the runner turned the device to landscape-left to match; the walk's summary names them in a `⚠ device turned` line. Absent means no state turned it, never `[]`; a bundle written before the key reads the same. It is a sibling key inside format 11, so an older reader ignores it and loses only the disclosure.
 
+**How long a screen took** (SimWalk#274): a screen record's `wallMilliseconds` is its wall time on the runner's monotonic clock, from the start of its first state's launch to its last capture filed. Absent in a bundle written before the key and for a screen that was never started; a sibling key inside format 11, ignored by an older reader. The walk's line for a screen ends `, took 4 min 12 s` (`M min S s`, `took 2 min` when the seconds are zero) only when the screen took a minute or more; every other line prints as it always did.
+
 ### Waiting and scrolling
 
 A tap whose best match is a control inside a bar (a toolbar's `Edit`) is taken once the tree has held still
@@ -702,11 +787,31 @@ sits. Each nudge is a slow drag at the element's own x; a drag that moved nothin
 and every later nudge of the step is doubled too, so the step is UNREACHABLE, naming the bar, only where a doubled drag
 moved nothing or three nudges were not enough. An element taller than the room between the bars is accepted, and so is one that is a bar or sits in
 one — a tab item, a navigation bar's button — which no scroll moves out from under its own bar. After every swipe it checks
-that what it bound still carries the label it chose, at the same size, before it counts as arrived. A `type`
+that what it bound still carries the label it chose, at a steady size (within 8%, as a SwiftUI pulse scales it), before it counts as arrived.
+**`position: "top"` puts the element at the top of its scroll container** (SimWalk#270), once it is clear of the bars:
+the content is dragged until the element's top edge is 16 pt below the top of the visible part of the nearest
+scroll container above it in the tree (`Table`, `CollectionView`, `ScrollView` or `WebView`; the screen where there
+is none), under any navigation bar in front of that top. Each drag is slow, along the container's middle, and
+at most four are taken; the step is done within 8 pt of the target, and it stops early, still landed, where a drag
+moved the element by less than 1 pt (the end of the list, so a short list leaves it lower). `top` is the only
+position; `validate` refuses another and names `top`. A `type`
 considers only fields that take text, and refuses, naming both, when its label names fields of two types (a
 search field and a text field), and refuses two fields with the same placeholder as any tie. A `{n}` or lead-in element whose label ticks between the read and the tap is
 chosen again: the same element at its new label is acted on, and a different one never silently — the step
 reads the screen until it settles once more, and refuses, naming both, if it still finds a different one.
+An element a step chose that is no longer where the read found it when the step binds it (a panel SwiftUI is
+still springing in: a walk turns UIKit's animations off, not SwiftUI's) is waited for until it holds steady for
+the screen's quiet period, up to the 10 s lookup, and then bound where it came to rest; one still moving after
+that is UNREACHABLE, `… kept moving for N s before it could be tapped`. One the tree held still but XCUITest
+found no element at (its frame went on changing between the two reads) is read again the same way, and refused as
+`… could not be tapped in N s: the tree held it still, but XCUITest found no element at its frame` (SimWalk#276). This applies to `tap`, `longPress`,
+`tapPoint` and `drag` within a label, `scrollTo`, and `type` with `replace`.
+A `tap`, `longPress`, `drag` or scroll that XCTest times out synthesizing (`Timed out while synthesizing event`, with
+the app already idle) is made once more, except that a `tap` or `longPress` is not repeated when the tree read after the
+timeout shows the screen left or the tapped element's own `selected`/`enabled` changed: the press landed and only its
+confirmation timed out. A second timeout is UNREACHABLE, `the runner could not synthesize the
+long press on 'Row' (XCTest timed out synthesizing the event twice); the app had gone idle, so this is the runner or
+the device, not the app — walk again`, where a runner that still stops on one has its diagnosis say the same (SimWalk#274).
 
 ### Typing
 
@@ -905,7 +1010,7 @@ simwalk install-hook               # install the walk runner; with Claude Code, 
 More options, for the verbs that have many:
 
 ```sh
-simwalk walk <walkbook.json> --output <dir.simwalk> [--screens <id>] [--dry-run] [--motion] [--apple-audit] [--animations] [--stock] [--device <udid|name>] [--app-path <x.app>] [--lease <token>] [--parallel <N>] [--team <TEAM> --runner-bundle-id <id>  (physical device only)]
+simwalk walk <walkbook.json> --output <dir.simwalk> [--screens <id[,id…]>] [--dry-run] [--motion] [--apple-audit] [--animations] [--stock] [--device <udid|name>] [--app-path <x.app>] [--lease <token>] [--parallel <N>] [--team <TEAM> --runner-bundle-id <id>  (physical device only)]
 simwalk bundle audit <dir.simwalk> [--only <rule>]... [--walkbook <walkbook.json>]
 simwalk bundle labels <dir.simwalk> [--claim <names>]    # what a bundle holds, fails and lacks for each Accessibility Nutrition Label claim; exit 2 on anything failing or missing
 simwalk bundle coverage <dir.simwalk>                  # controls no route step reaches, as the steps to add; exit 2
@@ -941,7 +1046,9 @@ accessibility: the XCUITest session switched com.apple.Accessibility Accessibili
 ~64k tokens saved — 9 screenshots (~4.1k each at the 2576 px cap) and 114 kB of accessibility trees at 4 bytes a token, against 1.4 kB served. A floor: only what this answer stood in for is counted.
 ```
 
-`--apple-audit` records Apple's accessibility audit on every state (see "Apple's accessibility audit"). `--animations` keeps UIKit animations on in the app under walk (see "Animations"). `--screens <id>` walks only the screens you name, in walkbook order. The bundle records the subset as the plan it ran, so it does not stand in for a full walk. `--settle <ms>` sets how long a screen must hold still before each capture (250 ms by default, and a screen's own `settle` wins). `--motion` records motion on every screen.
+A route over four steps prints short on an answer line: `N steps: first … last`, or, when it extends an earlier screen's route, that screen's id and the rest (`complete + tap 'Done' → scrollTo '1-day streak'`; `complete's route` when it is the same), or, when it shares more than four leading steps with an earlier screen's route and then turns off it, that run and the rest (`complete's first 117 steps + tap 'Done' → scrollTo '1-day streak'`); the earlier screen sharing the longest run is the one named. An unreachable screen is never named that way. The full route is in the bundle's manifest (`routeTaken`) and in `result.json` under `--verbose`.
+
+`--apple-audit` records Apple's accessibility audit on every state (see "Apple's accessibility audit"). `--animations` keeps UIKit animations on in the app under walk (see "Animations"). `--screens <id>` walks only the screens you name, in walkbook order: a comma-separated list (`--screens a,b`), or the option repeated; a screen whose id itself holds a comma is taken whole. The bundle records the subset as the plan it ran, so it does not stand in for a full walk. `--settle <ms>` sets how long a screen must hold still before each capture (250 ms by default, and a screen's own `settle` wins). `--motion` records motion on every screen.
 
 `--junit <file>` also writes the result as JUnit XML for a CI test reporter: one test case per screen × state (classname the screen id, name the state's slug). A captured state passes; a refused state, and a screen that was not captured (as one `(screen)` case when its record names no refused state), fail with the line the answer prints for the screen. A screen whose outcome is `unexpectedScreen` or `buildMismatch` was the wrong screen or build, so every case of it fails, filed captures included. See "JUnit output" below.
 
@@ -971,6 +1078,8 @@ each route followed once from a fresh launch, under its screen's first state's l
 
 accessibility: the XCUITest session switched com.apple.Accessibility AccessibilityEnabled off as it ended, and this walk switched it back on for <udid> and saw it hold — in-process accessibility suites on this device build their trees as before
 ```
+
+A dry run prints a route over four steps the same way (`N steps: first … last`, or an earlier resolved screen's id, or the run of steps it shares with one, `+` the rest), lists the routes that did not resolve first, in walkbook order, each keeping its walkbook position, so the top of the answer shows what drifted, and keeps every full route in its report (`probes[].route`).
 
 ### When Xcode's `simctl` is not ready
 
@@ -1111,10 +1220,16 @@ absent and that exists (`(read <name>.simwalk: suffix added)`). A path that exis
 `bundle inspect`'s listing, or the screen's id; it is how to read a bundle another walk wrote, or one written before the current change, without walking again. It gives the **screen identifier** (the first identifier
 the app set on a container; never a bar's, an image's, a control's or a framework's; when a sheet, alert or
 popover covers the screen, the presentation's) and **the text on screen** with value, type and frame, in
-accessibility order. `--state <slug>` picks a state; with none, a multi-state screen answers for the first
+accessibility order. `--state <slug>` picks a state by its slug or its leading component (`light`, `dark` for `light-args_<h>`; two slugs sharing the component are refused as ambiguous, naming both; a slug that matches exactly always wins); with none, a multi-state screen answers for the first
 and the verdict names the others (SimWalk#101). Off-screen elements are counted, not listed; `--all` lists
 them after the on-screen ones, each marked `(off screen)`. `--match <text>` narrows the listing and searches
-on screen and off, on-screen hits first. `--tree --match <q>` lists the nodes `q` names (a substring of label,
+on screen and off, on-screen hits first. A labelled element that is not a control and holds no enabled control,
+whose every labelled or valued descendant is an `Image` or text its own label contains, is one row with its
+insides counted, not listed: `8 stars · Other (8 images inside) · …`, `Step 3 of 4, Setup · Other (2 texts
+inside) · …`, `(1 image, 2 texts inside)` (SimWalk#264). The row says what is inside, not what VoiceOver does,
+and the capture cannot say whether an image is hidden from it. An element holding any other text is listed child
+by child. `--match` reaches inside: a folded descendant that matches is listed on its own line ending
+`(inside '8 stars')`. `--tree --match <q>` lists the nodes `q` names (a substring of label,
 value or identifier, or a whole type) as `Type 'label' [id] x,y w×h [= 'value'] [selected] [disabled]` with an
 `in:` ancestor chain (anonymous runs fold to `Other×7`); `--bars` lists every TabBar, Toolbar and NavigationBar,
 alone or with `--tree --match` for the union; `--all` lists off-screen nodes (SimWalk#121). Use these, not a
@@ -1129,7 +1244,7 @@ script over `ax-tree.json`. Overlays with no presentation type
 `[rule]` heading per rule. **A rule that found nothing keeps its heading and its arithmetic**
 (`[unlabelledControl] clean — 22 controls examined across 2 captures`), so a rule that ran clean is not
 mistaken for one that was never asked for. `--only <rule>` (repeatable; the MCP tool's `only` array) runs
-just the named rules: `disclosureAffordance`, `unlabelledControl`, `symbolNameLabel`, `duplicateLabel`, `smallTarget` (enabled control under 44×44 pt; a link inside a web view is inline text, which target-size guidance exempts, so it is not judged), `readingOrder` (tree order against the layout; a labelled table cell without a control is one stop, and left-of order is judged only between elements that share a row (they overlap by half the taller one's height, or the taller is under three times the shorter, so a picture beside a paragraph is not a row)), `largeTypeOverflow` (text past the screen or over a sibling, at accessibility Dynamic Type sizes only: runs inside a web view are checked against the screen's width but not against each other, a combined label is not compared with its own part, and an overlap shallower than a third of the shorter run, at most 12 pt, is not reported) and `truncatedText` (text drawn cut short with an ellipsis); an
+just the named rules: `disclosureAffordance`, `unlabelledControl`, `symbolNameLabel`, `duplicateLabel`, `smallTarget` (enabled control under 44×44 pt; a link inside a web view is inline text, which target-size guidance exempts, so it is not judged), `readingOrder` (tree order against the layout; a labelled table cell without a control is one stop, and left-of order is judged only between elements that share a row (they overlap by half the taller one's height, or the taller is under three times the shorter, so a picture beside a paragraph is not a row)), `largeTypeOverflow` (text past the screen or over a sibling, at accessibility Dynamic Type sizes only: runs inside a web view are checked against the screen's width but not against each other, a combined label is not compared with its own part, and an overlap shallower than a third of the shorter run, at most 12 pt, is not reported, and a run inside a horizontal scroller (a `ScrollView` wider than tall and under half the screen's height, whose own frame extends past the screen's width or that holds a run starting at or beyond its right edge) is not checked against the screen's width, the heading counting those it passed over) and `truncatedText` (text drawn cut short with an ellipsis); an
 unknown name is refused, listing every rule (the tree rules above, the seven `apple*` rules and the two budget rules).
 
 `disclosureAffordance` reads a labelled element with a trailing glyph as a disclosure row. A scroll indicator is not a row, and the trailing glyph must sit at the row's vertical centre (within a quarter of the row's height), so a scroll bar's thumb, which rides wherever the scroll position puts it, is never read as a chevron.
@@ -1138,7 +1253,7 @@ unknown name is refused, listing every rule (the tree rules above, the seven `ap
 
 `unlabelledControl` reads the tree with VoiceOver off, as every capture is taken, so an element an app labels only while VoiceOver runs reads as unlabelled here: a finding means unlabelled with VoiceOver off, and the verdict says so (`N controls with neither a label nor an identifier with VoiceOver off`). A text field with no value is named by its placeholder, as VoiceOver speaks it; one holding a value is judged on its label and identifier alone.
 
-**`truncatedText`** reads the screenshot, which the tree cannot say (a label is the full string whatever is drawn). One text recognition per capture, never per element; each `StaticText` with a label that lies wholly on screen is given the recognised lines centred inside its frame, joined in reading order. It is a finding only when that text ends in `…` or `...` and what precedes the ellipsis is a strict prefix of the label (whitespace collapsed and typographic quotes and apostrophes folded to straight ones on both sides, case-sensitive; a label that ends in an ellipsis of its own is compared without it), as `StaticText 'Notifications' reads "Notific…" [state]`. Recognition noise cannot fake a prefix followed by an ellipsis, so text that was merely misread is not a finding. A leading `•` the label does not start with is dropped from the read, since a row's unread dot is read into its title's first line; any other mark read into the line, or a letter the recogniser misreads, makes the read no prefix, so that title is not reported. What it cannot tell: a label deliberately fuller than the text drawn (a `Loading…` placeholder over the label `Loading your library`, a message preview cut by design) reads as truncation at every size, and text drawn in a different case from its label (uppercased section headers) is not matched. It judges every state, not only accessibility sizes. It is not run without a recognizer (`[truncatedText] not applicable — no text recognizer on this face, so the rule did not run`, never `clean`). A capture whose screenshot cannot be read (missing, or recognition failed) is counted in the heading (`; 1 capture not checked (no screenshot read)`, kept on a `not applicable` heading too), qualifies the verdict (`1 capture not checked by truncatedText (no screenshot read)`), and in JUnit is one skipped case, `truncatedText not checked`; the passing case needs at least one capture checked. When every capture is unchecked the heading is `not applicable — no capture's screenshot could be read`.
+**`truncatedText`** reads the screenshot, which the tree cannot say (a label is the full string whatever is drawn). One text recognition per capture, never per element; each `StaticText` with a label that lies wholly on screen is given the recognised lines centred inside its frame, joined in reading order. It is a finding only when that text ends in `…` or `...` and what precedes the ellipsis is a strict prefix of the label (whitespace collapsed and typographic quotes and apostrophes folded to straight ones on both sides, case-sensitive; a label that ends in an ellipsis of its own is compared without it), as `StaticText 'Notifications' reads "Notific…" [state]`. Recognition noise cannot fake a prefix followed by an ellipsis, so text that was merely misread is not a finding. A leading `•` the label does not start with is dropped from the read, since a row's unread dot is read into its title's first line; any other mark read into the line, or a letter the recogniser misreads, makes the read no prefix, so that title is not reported. What it cannot tell: a label deliberately fuller than the text drawn (a `Loading…` placeholder over the label `Loading your library`, a message preview cut by design) reads as truncation at every size, and text drawn in a different case from its label (uppercased section headers) is not matched. It judges every state, not only accessibility sizes. It is not run without a recognizer (`[truncatedText] not applicable — no text recognizer on this face, so the rule did not run`, never `clean`). A capture the rule could not check is counted in the heading (`; 1 capture not checked (no screenshot read)`, kept on a `not applicable` heading too), qualifies the verdict (`1 capture not checked by truncatedText (no screenshot read)`), and in JUnit is one skipped case, `truncatedText not checked`; the passing case needs at least one capture checked. The count says why: `no screenshot read` when the file is missing or unreadable, `recognition failed` when the file is there and text recognition threw on it, with the first failure's cause (`2 captures not checked by truncatedText (recognition failed: <cause>)`), and a mix splits the count (`3 captures not checked (1 no screenshot read, 2 recognition failed: <cause>)`; JUnit: `3 of 5 captures not checked — 1 no screenshot read, 2 recognition failed: <cause>`). When every capture is unchecked the heading is `not applicable — no capture's screenshot could be read`, or, when recognition failed on every one, `not applicable — text recognition failed on every capture (<cause>); the screenshots are there, so run the audit again rather than the walk; 24 captures not checked (recognition failed)`. Recognition is not retried.
 
 **Apple's own findings.** Seven more rules read the per-state `apple-audit.json` a walk records with `"appleAudit": true` (or `walk --apple-audit`), one per issue type of Apple's audit: `appleContrast` (`contrast`), `appleTextClipped` (`textClipped`), `appleDynamicType` (`dynamicType`), `appleHitRegion` (`hitRegion`), `appleElementDetection` (`elementDetection`), `appleTrait` (`trait`) and `appleDescription` (`sufficientElementDescription`). `--only` accepts them. They report Apple's judgement, not SimWalk's: a finding is `Type 'label' — Apple's description [states]` (`#identifier` when the label is empty, `Apple named no element` when Apple names none, `the element could not be read after the audit (<error, cut at 80 characters>)` when the record says its element could not be read), one row per element across states, identified by screen, issue type, element type and identifier (else label, else Apple's description) and never by frame. They overlap three tree rules on purpose (`smallTarget`/`appleHitRegion`, `largeTypeOverflow`/`appleTextClipped`, `unlabelledControl`/`appleDescription`) and run independently of them. A capture whose audit threw (`; 1 audit failed, not checked there`) or whose record is missing or malformed (`; 1 unreadable, not checked there`, the path listed) is never read as clean, and qualifies the verdict; `k of n captures audited` says when only some states were recorded. A bundle with no record at all prints one line, `[appleContrast, …] not recorded — the walk did not run Apple's accessibility audit …`, the rules are not counted among those run (JUnit: skipped as `not recorded`), and `--only` naming one is refused (`appleContrast has no record to read: …`). Issues of a type no rule reads are never dropped: `apple audit: 2 issues of a type no rule reads — unknown(4294967296) ×2`.
 
@@ -1179,7 +1294,7 @@ Each claim prints up to four parts, each only when it has something in it: **evi
 
 A claim's heading is its status: **`fails`** (something fails it, whether or not anything is also missing), **`incomplete`** (nothing fails, but the bundle lacks something to say either way), **`holds`** (neither) or **`manual only`**. The headline counts each, as `0 hold, 1 fail, 2 incomplete, 1 manual only`. Identical lines under `fails` (two findings with no element on one screen and state) print once with `×N`; the headline still counts every finding.
 
-- **`larger-text`** needs a capture at `UICTContentSizeCategoryAccessibilityXL` (AX3) or larger, the smallest size that reaches Apple's 200% (Body is 17 pt at the default size, 40 pt at AX3, 33 pt at AX2). Each screen without one is missing, as the state to add; a capture at a smaller size is named as below 200% and not counted. It fails on `largeTypeOverflow` (runs inside a web view are checked against the screen's width but not against each other, a combined label is not compared with its own part, and an overlap shallower than a third of the shorter run, at most 12 pt, is not reported), on `truncatedText` (text drawn cut short with an ellipsis, read from the screenshot) and on Apple's `dynamicType` findings, in the accessibility-size captures. Apple's `textClipped` does not fail it: the check proved unreliable in both directions, so its findings at accessibility sizes are one manual line with a count (`Apple's audit reports 2 textClipped findings at accessibility sizes on root, general; its textClipped check proved unreliable, so check them by hand`). Text recognition runs on the accessibility-size captures, and on a default-size capture (no `dynamicTypeSize`) only of a screen with a truncation finding at an accessibility size. A label that also reads truncated at the default size was not cut by the larger type, so it does not fail: it is one manual line per screen (`root: 'Notifications' reads truncated at the default size too, so larger type did not cause it; check whether that is by design`). Truncation that was not checked (no text recognizer on the face, or no readable screenshot on an accessibility-size capture) is a manual line too, never silence.
+- **`larger-text`** needs a capture at `UICTContentSizeCategoryAccessibilityXL` (AX3) or larger, the smallest size that reaches Apple's 200% (Body is 17 pt at the default size, 40 pt at AX3, 33 pt at AX2). Each screen without one is missing, as the state to add; a capture at a smaller size is named as below 200% and not counted. It fails on `largeTypeOverflow` (runs inside a web view are checked against the screen's width but not against each other, a combined label is not compared with its own part, and an overlap shallower than a third of the shorter run, at most 12 pt, is not reported, and a run inside a horizontal scroller (a `ScrollView` wider than tall and under half the screen's height, whose own frame extends past the screen's width or that holds a run starting at or beyond its right edge) is not checked against the screen's width, the heading counting those it passed over), on `truncatedText` (text drawn cut short with an ellipsis, read from the screenshot) and on Apple's `dynamicType` findings, in the accessibility-size captures. Apple's `textClipped` does not fail it: the check proved unreliable in both directions, so its findings at accessibility sizes are one manual line with a count (`Apple's audit reports 2 textClipped findings at accessibility sizes on root, general; its textClipped check proved unreliable, so check them by hand`). Runs passed over inside a horizontal scroller are one manual line naming the count and screens (`1 text run inside a horizontal scroller on home was not checked against the screen's width; check it scrolls into view`), and a skipped JUnit case. Text recognition runs on the accessibility-size captures, and on a default-size capture (no `dynamicTypeSize`) only of a screen with a truncation finding at an accessibility size. A label that also reads truncated at the default size was not cut by the larger type, so it does not fail: it is one manual line per screen (`root: 'Notifications' reads truncated at the default size too, so larger type did not cause it; check whether that is by design`). Truncation that was not checked (no text recognizer on the face, no readable screenshot on an accessibility-size capture, or text recognition failing on it) is a manual line too, never silence: it counts the captures and says why, `no screenshot read` or `recognition failed: <cause>` (both, split, when both happened).
 - **`dark-interface`** needs a `"theme": "dark"` capture of each screen and measures each one's screenshot: brighter than mid-grey fails, and a screenshot that will not decode is not measured and so missing.
 - **`sufficient-contrast`** needs each screen's light and dark captures audited by Apple (`walk --apple-audit`); it fails on `appleContrast` findings. An audit that threw or whose record is unreadable is listed as not checked. Apple's criteria ask for the ratios **by default** and suggest testing with Increase Contrast on as well, so a bundle walked without it can hold the claim, and the walk with it is listed as a manual check (`"setup": {"increaseContrast": true}`, then `labels` on that bundle). The report reads Increase Contrast from the manifest's `deviceSetup` (set and unverified, as under `setup`). **A bundle walked with `increaseContrast` has every audit taken with it on**, so it says nothing about the default appearance: the evidence says so and the default appearance is missing (walk again without it and run `labels` on that bundle too). Bold Text and Reduce Transparency are manual: a walk cannot set either.
 - **`differentiate-without-color`** is manual only: a simulator cannot be put in Grayscale from the host.
@@ -1299,7 +1414,7 @@ reboots the device into it before the runner starts, which is the one cure measu
 reports an appearance it does not draw. A session ends itself after 900 s without a request
 (`SIMWALK_SESSION_IDLE_SECONDS` overrides it). Sessions are for exploring; a walk remains the reproducible
 record. `step <id> '<route step JSON>' [--guard <hash>]` performs one step with the walk's own code and
-answers the step as a walkbook writes it, then (for a `tap`, `scrollTo`, `type` or `longPress`) a `bound: label · Type · x,y w×h` line naming the element the label resolved to (SimWalk#93; ` = value` follows the label where the element has one — for a `type` step, the field's value or placeholder before typing), the new screen hash and what appeared and disappeared; a guard whose
+answers the step as a walkbook writes it, then (for a `tap`, `scrollTo`, `type` or `longPress`) a `bound: label · Type · x,y w×h` line naming the element the label resolved to (SimWalk#93; ` = value` follows the label where the element has one — for a `type` step, the field's value or placeholder before typing), the new screen hash and what appeared and disappeared (an element read again a pulse apart, the same label, value and type within 8% of its frame, is neither); on a screen the step did not leave, an element whose selection or enablement changed is a `~` line ending in what changed (`~ 6 · Button · 16,300 80×80 · selected`, or `not selected`, `enabled`, `disabled`), counted in the `delta:` line as `, N changed` when there are any, and a tap whose lasting effect is such a change on the tapped element itself lands (SimWalk#251); a guard whose
 hash is stale is refused before anything acts. On a screen whose tree lists no text (an app drawn into one
 Metal view) the hash also covers a coarse picture of the screen (16 columns, four brightness levels: identical pixels hash alike, and a small change moves the hash only when a
 cell's mean crosses a level boundary), taken from the screen's screenshot (turned upright in landscape), by the one function a read and a step
@@ -1309,7 +1424,7 @@ animating canvas therefore changes its hash between reads, so a guard on one is 
 remembers the picture behind each text-less hash it printed (the last 32), and a guard whose hash it remembers holds
 when the tree is the same and no more than 10% of the screen moved since (an idle animation moves a few cells, a
 different screen most). The step then says `guard: held, N% of the screen moved since <hash>`; above 10% it is refused
-`snapshotChanged`, naming the percent. A hash the session never printed, and a screen with text, still need the exact hash. `save <id> --screen <id> --into <walkbook.json>` writes the
+`snapshotChanged`, naming the percent. A screen with text holds a guard the same way across an animation that moves its elements a little (SimWalk#252): the session remembers the tree of each hash it printed, and a guard whose hash it remembers holds when the tree has the same elements, with the same text and state, and every frame within 8% of its size (2 pt at least) of where it was. The step then says `guard: held, elements moved up to N pt since <hash>`; a changed label or an element that moved further is refused `snapshotChanged`. A hash the session never printed still needs the exact hash. `save <id> --screen <id> --into <walkbook.json>` writes the
 steps that landed as a validated walkbook screen, to walk from then on (into an existing walkbook, the whole file is re-encoded, so its own layout and key order are not kept); save before `end`, which deletes the
 session.
 
@@ -1358,6 +1473,10 @@ the log holds overall.
 **`SIMWALK_USAGE_LOG` moves the log** to the file it names, and the state kept beside the log — the
 status line's scan cache, the redaction salt — moves with it. Anything that drives the binary and is not
 a real use of it (a test, a review, a mutation run) sets it, so the report stays a record of real use.
+
+A live session step's line also carries `step`, the route step as sent, and `verdict`, the answer's first line
+(absent when the step was refused: `err` holds the reason), each cut to one line of 200 characters, so a step
+whose answer was lost to a pipe can be reconstructed from the log. No other tool's line has either.
 `HOME` moves the directory the log lives in, so it does not do that job.
 
 **A `walk --parallel` also writes a `walk.parallel` line** beside the `walk` one, however the walk ends, and the
@@ -1417,7 +1536,7 @@ about route steps, states, `setup`, `expect` and the oracle.
 - **Sessions.** A step that does not land is qualified and `save` names it. `save` also takes
   `[--expect <identifier>]` and `[--since <n>]`. A screen with a changing value (a clock) changes its hash
   every read; step it unguarded. A screen with no text whose picture animates (the pixel hash
-  moves) holds a `--guard` while no more than 10% of the screen moved since the hash was printed.
+  moves) holds a `--guard` while no more than 10% of the screen moved since the hash was printed; a screen with text holds one while its elements are the same and each frame moved within 8% of its size (2 pt at least).
 
 ## Driving a real iPhone with `simwalk mirror`
 
@@ -1546,8 +1665,7 @@ as a call, whether it arrived as `dryRun: true` here or as `simwalk walk --dry-r
 
 A walk over MCP or the CLI writes its progress to `~/.simwalk/progress/<session>.json` while it runs (the
 session is `CLAUDE_CODE_SESSION_ID`, `default` without one; the directory is the usage log's, so
-`SIMWALK_USAGE_LOG` moves it), and ends by writing a compact `<session>.result.json` — capped at 16 KiB —
-named on the answer's last residue line, `result: <path>`; an answer with no result file is unchanged.
+`SIMWALK_USAGE_LOG` moves it), and ends by writing a compact result file — capped at 16 KiB — of its own, `<handle>.result.json` (the walk's handle, `<stem>@<pid>-<startedAtMs>`, so a later walk of the session never overwrites it; files over 7 days old are removed), named on the answer's last residue line, `result: <path>`; an answer with no result file is unchanged.
 `verbose` (`--verbose`) lifts the cap and adds each step's states and route taken; it is refused beside
 `dryRun`, which writes progress but no result. The schemas are in `Docs/SIMWALK-PROGRESS.md`.
 
@@ -1597,7 +1715,8 @@ wins:
 | 1 | handle does not match the regex | `refused — <value> is not a walk handle` | true |
 | 2 | no progress file | `refused — no walk <handle>` | true |
 | 3 | unreadable, or not schema 1 | `refused — the progress file for <handle> is unreadable` / `… is schema <n>, and this server reads 1` | true |
-| 4 | file `pid` or `startedAt` differs from the handle | `refused — the walk <handle> was replaced by a later run under <stem>` | true |
+| 4a | file `pid` or `startedAt` differs from the handle, and `<handle>.result.json` exists | the answer of row 8, read from that file | per verdict |
+| 4 | file `pid` or `startedAt` differs from the handle, and `<handle>.result.json` does not exist | `refused — the walk <handle> was replaced by a later run under <stem>` | true |
 | 5 | `tool` is `session` | `refused — <handle> is a live session, not a walk` | true |
 | 6 | phase not final, process gone | `refused — the walk <handle> ended without finishing: the process running it exited` | true |
 | 7 | phase not final, process alive | wait up to the budget, reading the file once a second; each read re-applies rows 2–12 and the first row other than 7 that matches answers at once; at the budget, the `running` line | false |

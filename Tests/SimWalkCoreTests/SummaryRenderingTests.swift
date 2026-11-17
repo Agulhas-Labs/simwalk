@@ -132,6 +132,51 @@ struct SummaryRenderingTests {
         #expect(!rendered.contains("UNREACHABLE"))
     }
 
+    /// SimWalk#284: the element clause reaches the refusal line.
+    @Test
+    func aWrongScreenLineNamesTheElementAnExpectationLandedOn() {
+        var manifest = CaptureBundleTests.manifest()
+        manifest.screens = [
+            CaptureManifest.ScreenRecord(
+                id: "lesson",
+                outcome: ExpectedScreenCheck.outcome(for: [ExpectedScreenCheckTests.screenWithText(identifier: "lesson.warmUp")], expect: "lesson.warmUp", instead: .captured),
+                routeTaken: [.tab(label: "Lesson")],
+                captures: [CaptureManifest.StateCapture(screenID: "lesson", state: Walkbook.CaptureState(theme: .light))]
+            ),
+        ]
+        let rendered = CaptureBundleSummary(CaptureBundle(url: URL(fileURLWithPath: "/tmp/example.simwalk"), manifest: manifest)).render()
+
+        #expect(rendered.contains("— 'lesson.warmUp' is on a StaticText inside 'lesson-answer', not a screen container: expect 'lesson-answer' and end the route with scrollTo 'lesson.warmUp' to require the element"))
+    }
+
+    /// SimWalk#272: a path in `found` and the deepest-identifier clause render on the refusal line, the clause last.
+    @Test
+    func aWrongScreenLineCarriesThePathAndTheDeepestIdentifierClause() {
+        let frame = AXNode.Frame(x: 0, y: 0, width: 1, height: 1)
+        var manifest = CaptureBundleTests.manifest()
+        manifest.screens = [
+            CaptureManifest.ScreenRecord(
+                id: "pin",
+                outcome: ExpectedScreenCheck.outcome(
+                    for: [AXNode(type: "Application", frame: frame, children: [
+                        AXNode(type: "Other", frame: frame, identifier: "parent", children: [
+                            AXNode(type: "Other", frame: frame, identifier: "controls"),
+                        ]),
+                    ])],
+                    expect: "pin-set",
+                    instead: .captured
+                ),
+                routeTaken: [.tab(label: "Activity")],
+                captures: [CaptureManifest.StateCapture(screenID: "pin", state: Walkbook.CaptureState(theme: .light))]
+            ),
+        ]
+        let rendered = CaptureBundleSummary(CaptureBundle(url: URL(fileURLWithPath: "/tmp/example.simwalk"), manifest: manifest)).render()
+
+        #expect(rendered.contains(
+            "found [parent > controls] among the states it took (captured [light]), via tab 'Activity' — the deepest identifier is 'controls'; an identifier set on a container replaces those of the views inside it"
+        ))
+    }
+
     /// Round 3, finding 5: `found` covers every state the screen took, refused ones included, so the line names that same set — naming only the kept `light` pinned a refused `dark` state's identifier on it.
     @Test
     func aWrongScreenLineNamesTheRefusedStatesItsFoundListCovers() {
@@ -261,6 +306,43 @@ struct SummaryRenderingTests {
         #expect(!rendered.contains("1 capture taken before the tree settled"))
         #expect(rendered.contains("15 s content wait"))
         #expect(!rendered.contains("raise that screen's"))
+    }
+
+    /// A capture that ran out of content wait still spinning is named once in the verdict and in its own line, labelled or not (SimWalk#267).
+    @Test
+    func aCaptureStillShowingASpinnerIsNamedOnceAndItsLabelPrinted() {
+        var manifest = CaptureBundleTests.manifest()
+        manifest.screens = [
+            CaptureManifest.ScreenRecord(
+                id: "stalled",
+                outcome: .captured,
+                routeTaken: [.tab(label: "Browse")],
+                captures: [
+                    CaptureManifest.StateCapture(screenID: "stalled", state: Walkbook.CaptureState(theme: .light), axTreeSettled: false, axTreeHasContent: true, axTreeSpinner: CaptureManifest.Spinner(label: "Loading the answer…")),
+                    CaptureManifest.StateCapture(screenID: "stalled", state: Walkbook.CaptureState(theme: .dark), axTreeSettled: true, axTreeHasContent: true),
+                ]
+            ),
+        ]
+        let rendered = CaptureBundleSummary(CaptureBundle(url: URL(fileURLWithPath: "/tmp/example.simwalk"), manifest: manifest)).render()
+
+        #expect(rendered.contains("1 capture still showing a spinner"))
+        #expect(!rendered.contains("taken before the tree settled"))
+        #expect(rendered.contains("⚠ 1 capture still showed a spinner when the 15 s content wait ran out — the screen was still loading; only a `settle` above 3.75 s extends the wait:"))
+        #expect(rendered.contains("    stalled [light]: 'Loading the answer…'"))
+        #expect(rendered.contains("or while it held only the app's chrome or a spinner — read them knowing that:"))
+        #expect(!rendered.contains("stalled [dark]"))
+
+        manifest.screens = [
+            CaptureManifest.ScreenRecord(
+                id: "stalled",
+                outcome: .captured,
+                routeTaken: [.tab(label: "Browse")],
+                captures: [CaptureManifest.StateCapture(screenID: "stalled", state: Walkbook.CaptureState(theme: .light), axTreeSettled: false, axTreeHasContent: true, axTreeSpinner: CaptureManifest.Spinner(label: nil))]
+            ),
+        ]
+        let unlabelled = CaptureBundleSummary(CaptureBundle(url: URL(fileURLWithPath: "/tmp/example.simwalk"), manifest: manifest)).render()
+
+        #expect(unlabelled.contains("    stalled [light]: an unlabelled spinner"))
     }
 
     /// A bundle written before the runner recorded the content check says nothing about it, exactly as it says nothing about settling.
@@ -404,6 +486,21 @@ struct SummaryRenderingTests {
         #expect(rendered.contains("without — UNREACHABLE, route tried: "))
     }
 
+    /// The UNREACHABLE line says where the state the route stopped in was filed, only when it was (SimWalk#281).
+    @Test
+    func anUnreachableLineNamesTheDirectoryItStoppedIn() {
+        var manifest = CaptureBundleTests.manifest()
+        manifest.screens = [
+            CaptureManifest.ScreenRecord(id: "with", outcome: .unreachable(routeTried: [.tab(label: "Photos")], stopped: "screens/with/unreached"), routeTaken: []),
+            CaptureManifest.ScreenRecord(id: "without", outcome: .unreachable(routeTried: [.tab(label: "Photos")]), routeTaken: []),
+        ]
+        let rendered = CaptureBundleSummary(CaptureBundle(url: URL(fileURLWithPath: "/tmp/example.simwalk"), manifest: manifest)).render()
+        let lines = rendered.split(separator: "\n").map(String.init)
+
+        #expect(lines.first { $0.contains("with — UNREACHABLE") }?.hasSuffix(" (last state captured: screens/with/unreached)") == true)
+        #expect(lines.first { $0.contains("without — UNREACHABLE") }?.contains("last state captured") == false)
+    }
+
     /// A state whose reset ran but whose screen filed no capture is still named, because the runner records the reset itself (SimWalk#62 item 2).
     @Test
     func anUnreachableScreenWhoseStateResetLocationNamesItInTheLine() {
@@ -499,5 +596,33 @@ struct SummaryRenderingTests {
         let bundle = CaptureBundle(url: URL(fileURLWithPath: "/tmp/example.simwalk"), manifest: CaptureBundleTests.manifest())
 
         #expect(!CaptureBundleSummary(bundle).render().contains("permissions reset"))
+    }
+
+    /// A screen that took a minute or more says so on its line (SimWalk#274); one that took less prints as a record without the field does.
+    @Test
+    func aScreenThatTookOverAMinuteSaysHowLong() {
+        func line(_ milliseconds: Int?) -> String {
+            let record = CaptureManifest.ScreenRecord(id: "today", outcome: .captured, routeTaken: [], wallMilliseconds: milliseconds)
+            return CaptureBundleSummary.screenLine(record, position: 1)
+        }
+
+        #expect(line(252_000).hasSuffix(", took 4 min 12 s"))
+        #expect(line(120_000).hasSuffix(", took 2 min"))
+        #expect(line(59000) == line(nil))
+        #expect(!line(59000).contains("took"))
+    }
+
+    /// The field is optional and lenient: absent in an older manifest, kept by a round trip.
+    @Test
+    func theWallTimeDecodesAbsentAndRoundTrips() throws {
+        let plain = try CaptureBundle.encoder().encode(CaptureBundleTests.manifest())
+        #expect(!String(decoding: plain, as: UTF8.self).contains("wallMilliseconds"))
+        #expect(try CaptureBundle.decoder().decode(CaptureManifest.self, from: plain).screens.allSatisfy { $0.wallMilliseconds == nil })
+
+        var manifest = CaptureBundleTests.manifest()
+        manifest.screens[0].wallMilliseconds = 252_000
+        let data = try CaptureBundle.encoder().encode(manifest)
+
+        #expect(try CaptureBundle.decoder().decode(CaptureManifest.self, from: data).screens[0].wallMilliseconds == 252_000)
     }
 }

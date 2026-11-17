@@ -39,8 +39,13 @@ whose container carries an accessibility identifier**, or a route that left the 
 `output` must be a new or empty directory. **`dryRun: true` checks every screen's route still resolves, in
 seconds per screen, capturing nothing**: run it after app changes, before a full walk.
 
+**Text size: give a state `"dynamicTypeSize": "UICTContentSizeCategoryAccessibilityXL"`** (AX3) and the walk
+captures its screens at that size; `bundle audit --only largeTypeOverflow --only truncatedText` then checks
+the bundle for text past the screen's edge, overlapping or cut short. Use the state, not a wrapper around
+`simctl ui … content_size`: a state is part of the walkbook, so the next walk reproduces it.
+
 While it runs, a walk writes `~/.simwalk/progress/<session>.json` (phase, step, timings); at the end, a
-compact `<session>.result.json`, named on the answer's last residue line `result: <path>`. `verbose: true`
+compact `<handle>.result.json` (one per walk, named by the walk's handle), named on the answer's last residue line `result: <path>`. `verbose: true`
 (`--verbose`) writes it whole: every state and route. Schema: SimWalk's `Docs/SIMWALK-PROGRESS.md`.
 
 **Don't reboot the simulator yourself when a dark state draws light.** The walk refuses that state, settles
@@ -51,7 +56,9 @@ refusals stand, the verdict is qualified, and the answer and the manifest's `app
 settle to run. A settle reboots the device: anything attached (another session, a `log stream`, a debugger)
 is cut off. **Beside other sessions, take a lease:**
 `simwalk lease acquire [--clone-from <udid> | --physical <udid>] [--holder-pid <pid>]` hands back a device and a token, then
-`walk --lease <token>` (`lease list|renew|release`, `--help`).
+`walk --lease <token>` (`lease list|renew|release`, `--help`). The lease lasts as long as your agent's own
+process (not the shell that ran the acquire) or `--ttl` (30m), whichever ends first, so acquire and walk may be separate calls;
+`lease list` names that process, which for Claude Code is its version number (`pid 61881 (2.1.311)`).
 
 **Driving the binary for anything but real use (a test, a review, a probe of a refusal): set
 `SIMWALK_USAGE_LOG=<scratch>/usage.jsonl`**, so the calls land in a log you own. **In a repo with
@@ -75,6 +82,9 @@ app's screen identifier and text, launching and booting nothing.
   `screen.png` or `ax-tree.json`.** Text only: visual form needs the screenshot. `--tree --match <q>` answers a
   node's identifier, frame, selected flag and ancestors, and `--bars` the bars' frames, instead of reading `ax-tree.json`.
 - `diff`: open only the crops a flag names, not the screenshots.
+- **A route step's label** matches, in order: the whole label or the identifier; the start up to a comma or a
+  sentence's end; the same with no-break spaces read as spaces; a `{n}` pattern; the start followed by a space and a
+  number. Not an arbitrary start. A miss lists `nearest:` labels and how each compared.
 - `settled: unrecorded` means the bundle predates settle recording — a declared gap, not a pass.
 - It captures and reports; adjudication is yours.
 

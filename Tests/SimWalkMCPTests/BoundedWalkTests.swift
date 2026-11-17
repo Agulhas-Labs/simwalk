@@ -518,7 +518,7 @@ private extension BoundedWalkTests {
             failures: [],
             truncated: WalkResult.Truncated(omittedSteps: 0)
         )
-        let url = ProgressLocation.resultURL(session: "other", in: rig.directory.url)
+        let url = ProgressLocation.resultURL(session: "other", pid: 1, startedAt: Date(timeIntervalSince1970: 0), in: rig.directory.url)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try WalkResult.encoder().encode(result).write(to: url)
         return url.path

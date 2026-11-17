@@ -88,6 +88,13 @@ public struct CaptureBundleLayout {
         "screens"
     }
 
+    /// The directory name, inside a screen's directory, holding what an unreachable screen's route stopped in (SimWalk#281).
+    ///
+    /// Never a state slug: every slug starts with a theme.
+    private static var unreachedDirectoryName: String {
+        "unreached"
+    }
+
     /// Where an appearance retry's second pass writes its scratch bundle: inside the first attempt's own bundle, named as a bundle so the second runner's writer takes it (SimWalk#26).
     ///
     /// **Inside, so every move a fold makes is a rename** (the round-3 review). A fold moves the first attempt's manifest and screen directories aside and the second attempt's in. Between two volumes a move is a copy and then a delete, and one that fails between the two leaves a directory half in each place — which a scratch bundle under `$TMPDIR` and an `--output` on another volume made possible. A bundle's own folder is on the bundle's volume, and it is where a person looks: a fold stopped by force leaves the first attempt set aside inside the bundle it came from, not in a temporary directory the system purges on a timer.
@@ -152,12 +159,27 @@ public struct CaptureBundleLayout {
         "\(screenDirectory(screenID: screenID))/\(stateSlug)"
     }
 
+    /// The bundle-relative directory an unreachable screen's last-read state is filed under (SimWalk#281).
+    public static func unreachedDirectory(screenID: String) -> String {
+        "\(screenDirectory(screenID: screenID))/\(unreachedDirectoryName)"
+    }
+
+    /// The bundle-relative path of the screenshot taken where an unreachable screen's route stopped.
+    public static func unreachedScreenshotPath(screenID: String) -> String {
+        "\(unreachedDirectory(screenID: screenID))/\(screenshotFileName)"
+    }
+
+    /// The bundle-relative path of the accessibility tree read where an unreachable screen's route stopped.
+    public static func unreachedAXTreePath(screenID: String) -> String {
+        "\(unreachedDirectory(screenID: screenID))/\(axTreeFileName)"
+    }
+
     /// The screen and state whose directory `path` is: the exact inverse of `stateDirectory(screenID:stateSlug:)`, so `nil` for any path that function cannot derive.
     ///
     /// The screen comes back as its slug, the only form of its id on disk. It is how a bundle whose manifest was never finalised names its captures: by their directories alone (SimWalk#190).
     public static func state(atStateDirectory path: String) -> (screenSlug: String, stateSlug: String)? {
         let components = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
-        guard components.count == 3, components[0] == screensDirectoryName, !components[2].isEmpty else { return nil }
+        guard components.count == 3, components[0] == screensDirectoryName, !components[2].isEmpty, components[2] != unreachedDirectoryName else { return nil }
         let state = (screenSlug: components[1], stateSlug: components[2])
         return stateDirectory(screenID: state.screenSlug, stateSlug: state.stateSlug) == path ? state : nil
     }

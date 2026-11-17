@@ -73,11 +73,13 @@ public final class ProgressWriter: @unchecked Sendable {
     }
 
     /// Starts a run: a fresh state in `phase`, naming the usage log (`logPath`) from this first write when the host knows it, replacing whatever the file held — a new run overwrites, nothing accumulates (§3).
-    public func begin(tool: String, phase: WalkProgress.Phase = .booting, logPath: String? = nil) {
+    ///
+    /// `startedAt` is the run's start time when something named it before it began (``ProgressClaim/startedAt``, in its result file's name); `nil` reads the clock.
+    public func begin(tool: String, phase: WalkProgress.Phase = .booting, logPath: String? = nil, startedAt: Date? = nil) {
         lock.withLock {
             began = true
             try? FileManager.default.removeItem(at: cancelMarker)
-            progress = WalkProgress(tool: tool, phase: phase, pid: progress.pid, startedAt: clock())
+            progress = WalkProgress(tool: tool, phase: phase, pid: progress.pid, startedAt: startedAt ?? clock())
             progress.logPath = logPath
             write(at: clock())
         }

@@ -17,6 +17,30 @@ struct ScreenOutcomeTests {
         #expect(decoded == .unreachable(routeTried: [.tab(label: "Health"), .tap(label: "Heart")]))
     }
 
+    /// SimWalk#281: the directory the route stopped in survives the wire, and a bundle written before it decodes with none.
+    @Test
+    func unreachableCarriesTheDirectoryItStoppedIn() throws {
+        let outcome = ScreenOutcome.unreachable(routeTried: [.tab(label: "Health")], stopped: "screens/health/unreached")
+        let decoded = try JSONDecoder().decode(ScreenOutcome.self, from: JSONEncoder().encode(outcome))
+        #expect(decoded == outcome)
+
+        let withoutKey = ScreenOutcome.unreachable(routeTried: [.tab(label: "Health")])
+        var json = try #require(String(data: JSONEncoder().encode(withoutKey), encoding: .utf8))
+        #expect(!json.contains("stopped"))
+        json = json.replacingOccurrences(of: "\"stopped\":null,", with: "")
+        let legacy = try JSONDecoder().decode(ScreenOutcome.self, from: Data(json.utf8))
+        #expect(legacy == withoutKey)
+    }
+
+    /// SimWalk#281: the unreached directory is never read as a state.
+    @Test
+    func theUnreachedDirectoryIsNotAState() {
+        #expect(CaptureBundleLayout.state(atStateDirectory: "screens/x/unreached") == nil)
+        #expect(CaptureBundleLayout.unreachedDirectory(screenID: "X") == "screens/x/unreached")
+        #expect(CaptureBundleLayout.unreachedScreenshotPath(screenID: "X") == "screens/x/unreached/screen.png")
+        #expect(CaptureBundleLayout.unreachedAXTreePath(screenID: "X") == "screens/x/unreached/ax-tree.json")
+    }
+
     @Test
     func buildMismatchNamesBothHashes() throws {
         let outcome = ScreenOutcome.buildMismatch(expected: "aeb0ca6f", found: "58ebbd24")

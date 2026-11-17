@@ -177,6 +177,7 @@ private extension SimWalkMCPServer {
         // `nil` until an invocation resolves one — a call that never gets that far (an unknown tool, a bad
         // argument) is `MCPToolInvocation` refusing, which states `.inputRefused` on every error it throws.
         var resolvedTool: SimWalkTool?
+        var sessionStep: String?
         let cancellation = inFlight.start(id: id)
         defer { inFlight.finish(id: id) }
         // Cancelled while still queued behind another call (SimWalk#85): the tool never runs, nothing is answered, and
@@ -187,13 +188,14 @@ private extension SimWalkMCPServer {
             tool = invocation.logName
             target = invocation.target.isEmpty ? nil : invocation.target
             resolvedTool = invocation.tool
+            sessionStep = invocation.sessionStep
             let answer = try answering(invocation.tool, invocation.argumentVector, cancellation) { _, _ in }
-            record(tool: tool, target: target, since: started, err: nil, saving: answer.saving)
+            record(tool: tool, target: target, since: started, err: nil, saving: answer.saving, step: sessionStep, verdict: sessionStep == nil ? nil : answer.verdict.line.components(separatedBy: "\n").first)
             guard !cancellation.isCancelled else { return }
             emit(resultID: id, text: answer.text, isError: false)
         } catch {
             let reason = String(describing: error)
-            record(tool: tool, target: target, since: started, err: reason, saving: nil, kind: .of(error) ?? Self.defaultFailureKind(for: resolvedTool))
+            record(tool: tool, target: target, since: started, err: reason, saving: nil, kind: .of(error) ?? Self.defaultFailureKind(for: resolvedTool), step: sessionStep)
             guard !cancellation.isCancelled else { return }
             emit(resultID: id, text: AnswerVerdict.refused(reason).line, isError: true)
         }
@@ -315,7 +317,7 @@ private extension SimWalkMCPServer {
     /// One log line per call, written before the response is emitted.
     ///
     /// The ordering matters one way only: a slow or failing log write can delay a response but can never corrupt one, and what is recorded is what happened rather than what was about to.
-    nonisolated func record(tool: String, target: String?, since started: ContinuousClock.Instant, err: String?, saving: ContextSaving?, kind: UsageFailureKind? = nil) {
+    nonisolated func record(tool: String, target: String?, since started: ContinuousClock.Instant, err: String?, saving: ContextSaving?, kind: UsageFailureKind? = nil, step: String? = nil, verdict: String? = nil) {
         guard let usage else { return }
         let elapsed = ContinuousClock.now - started
         usage.record(
@@ -326,7 +328,9 @@ private extension SimWalkMCPServer {
             err: err,
             saving: saving,
             session: session,
-            kind: kind
+            kind: kind,
+            step: step,
+            verdict: verdict
         )
     }
 

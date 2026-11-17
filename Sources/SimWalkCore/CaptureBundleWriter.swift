@@ -66,6 +66,22 @@ public struct CaptureBundleWriter {
         }
     }
 
+    /// Files the screenshot and encoded accessibility tree read where an unreachable screen's route stopped, and returns the bundle-relative directory to name in the outcome (SimWalk#281).
+    ///
+    /// Written only for a refusal, so the directory is created here and not up front; a throw leaves the caller to record no directory at all.
+    public func writeUnreached(screenID: String, screenshot: Data, axTree: Data) throws -> String {
+        let relative = CaptureBundleLayout.unreachedDirectory(screenID: screenID)
+        let directory = CaptureBundleLayout.url(forRelativePath: relative, in: url)
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            try screenshot.write(to: CaptureBundleLayout.url(forRelativePath: CaptureBundleLayout.unreachedScreenshotPath(screenID: screenID), in: url))
+            try axTree.write(to: CaptureBundleLayout.url(forRelativePath: CaptureBundleLayout.unreachedAXTreePath(screenID: screenID), in: url))
+        } catch {
+            throw CaptureBundleError.notWritable(path: directory.path, reason: error.localizedDescription)
+        }
+        return relative
+    }
+
     /// Creates and returns the directory one state's artefacts belong in.
     ///
     /// Called per state as its artefacts are about to be filed — never up front for the whole walkbook, so a screen that turned out to be unreachable, or whose states cannot all have applied, leaves no directory behind. An absent directory beside a stated refusal is a fact; an empty one would read as a capture that produced nothing.

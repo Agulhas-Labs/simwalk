@@ -23,9 +23,11 @@ public struct MeasureOptIn {
         book.screens.filter { iterations(for: $0) != nil }
     }
 
-    /// The note a simulator walk adds to its answer: ``deviceOnlyNote(for:)`` over the screens the walk executes, which are all of them unless `--screens` selects some; `nil` when none of those is measured.
+    /// The note a simulator walk adds to its answer: ``deviceOnlyNote(for:)`` over the screens the walk executes, which are all of them unless `--screens` selects some (its values split on commas as ``WalkbookSubset`` does, so `a,b` is two screens); `nil` when none of those is measured.
     public static func walkNote(for book: Walkbook, screens selected: [String]) -> String? {
-        let executed = selected.isEmpty ? book.screens : book.screens.filter { selected.contains($0.id) }
+        // The ids the values name once split, not the raw values: `a,b` is two screens. A value naming no screen was refused before the walk, so the raw values are only the fallback.
+        let ids = (try? WalkbookSubset.narrow(book, to: selected))?.screens.map(\.id) ?? selected
+        let executed = selected.isEmpty ? book.screens : book.screens.filter { ids.contains($0.id) }
         return deviceOnlyNote(for: executed)
     }
 

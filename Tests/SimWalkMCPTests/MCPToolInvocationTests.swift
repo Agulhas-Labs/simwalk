@@ -317,6 +317,16 @@ struct MCPToolInvocationTests {
         #expect(try MCPToolInvocation(tool: "session", arguments: ["action": "read", "id": "s1"]).argumentVector == ["read", "--", "s1"])
     }
 
+    /// SimWalk#253: only a session `step` names a route step for the usage log, as the JSON text the CLI takes.
+    @Test
+    func aSessionStepNamesItsRouteStepForTheUsageLog() throws {
+        let step = try MCPToolInvocation(tool: "session", arguments: ["action": "step", "id": "s1", "step": ["tap": ["label": "Next"]]])
+        let read = try MCPToolInvocation(tool: "session", arguments: ["action": "read", "id": "s1"])
+
+        #expect(step.sessionStep == #"{"tap":{"label":"Next"}}"#)
+        #expect(read.sessionStep == nil)
+    }
+
     /// `state` and `match` are optional even once `step` is given — omitting them omits the flags rather than passing an empty string.
     @Test
     func stateAndMatchAreOmittedWhenNotGiven() throws {

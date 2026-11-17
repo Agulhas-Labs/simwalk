@@ -30,14 +30,42 @@ struct LabelAuditSection {
     var verdictClauses: [String] {
         [
             AnswerVerdict.qualification(findingCount, noun, clause),
-            AnswerVerdict.qualification(result.unchecked, "capture", "not checked by \(name.rawValue) (no screenshot read)"),
+            AnswerVerdict.qualification(result.unchecked, "capture", "not checked by \(name.rawValue) (\(uncheckedDetail))"),
         ].compactMap(\.self)
+    }
+
+    /// Why the unchecked captures were not checked: no screenshot, recognition failing (with its first cause), or the split of both.
+    var uncheckedDetail: String {
+        let failed = result.recognitionFailed
+        let cause = result.recognitionFailure.map { ": \($0)" } ?? ""
+        if failed == 0 {
+            return "no screenshot read"
+        }
+        return failed == result.unchecked ? "recognition failed\(cause)" : "\(result.unchecked - failed) no screenshot read, \(failed) recognition failed\(cause)"
+    }
+
+    /// The heading's tail naming the captures not checked, and when recognition failed on every capture, what to run again (the cause is then in the reason before it).
+    private var uncheckedSuffix: String {
+        guard result.unchecked > 0 else {
+            return ""
+        }
+        let count = "\(result.unchecked) capture\(result.unchecked == 1 ? "" : "s") not checked"
+        if result.recognitionFailed == result.unchecked, result.unchecked == captureCount {
+            return "; the screenshots are there, so run the audit again rather than the walk; \(count) (recognition failed)"
+        }
+        return "; \(count) (\(uncheckedDetail))"
+    }
+
+    /// The heading's tail naming the runs left unchecked against the screen's width because a horizontal scroller holds them (SimWalk#287); empty for none.
+    private var scrollerSuffix: String {
+        let count = result.inHorizontalScroller
+        return count == 0 ? "" : "; \(count) \(examinedNoun)\(count == 1 ? "" : "s") past the screen's width inside a horizontal scroller, not reported"
     }
 
     /// The heading, its arithmetic, and the findings grouped under their screens.
     var lines: [String] {
         let examined = "\(result.examined) \(examinedNoun)\(result.examined == 1 ? "" : "s") examined across \(captureCount) capture\(captureCount == 1 ? "" : "s")"
-        let unchecked = result.unchecked == 0 ? "" : "; \(result.unchecked) capture\(result.unchecked == 1 ? "" : "s") not checked (no screenshot read)"
+        let unchecked = uncheckedSuffix + scrollerSuffix
         if let notApplicable, findingCount == 0 {
             return ["[\(name.rawValue)] not applicable — \(notApplicable)\(unchecked)"]
         }

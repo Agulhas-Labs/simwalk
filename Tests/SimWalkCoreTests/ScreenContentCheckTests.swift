@@ -74,5 +74,52 @@ struct ScreenContentCheckTests {
         #expect(ScreenContentCheck.isChromeOnly(spinnerOnly))
     }
 
+    /// A title above a labelled `ProgressView` carries labels, so it is not chrome-only, yet it is loading: the spinner is found beside the text (SimWalk#267).
+    @Test
+    func alabelledSpinnerBesideTextIsFound() {
+        let loading = AXNode(type: "Application", frame: Self.screenFrame, label: "RouteFixture", children: [
+            AXNode(type: "StaticText", frame: Self.screenFrame, label: "Another way to see it"),
+            AXNode(type: "ActivityIndicator", frame: Self.screenFrame, label: "Loading the answer…", value: "1"),
+        ])
+
+        #expect(!ScreenContentCheck.isChromeOnly(loading))
+        #expect(ScreenContentCheck.spinner(in: loading)?.label == "Loading the answer…")
+    }
+
+    /// Chrome is searched too: a spinner in a navigation bar is still a screen loading.
+    @Test
+    func aSpinnerInsideANavigationBarIsFound() {
+        let loading = AXNode(type: "Application", frame: Self.screenFrame, label: "RouteFixture", children: [
+            AXNode(type: "NavigationBar", frame: Self.screenFrame, children: [
+                AXNode(type: "ActivityIndicator", frame: Self.screenFrame),
+            ]),
+        ])
+
+        #expect(ScreenContentCheck.spinner(in: loading) != nil)
+    }
+
+    /// The first in tree order wins, so a labelled indicator is returned over the unlabelled one nested inside it.
+    @Test
+    func theOuterSpinnerIsReturnedOverItsNestedChild() {
+        let loading = AXNode(type: "Application", frame: Self.screenFrame, children: [
+            AXNode(type: "ActivityIndicator", frame: Self.screenFrame, label: "Loading", children: [
+                AXNode(type: "ActivityIndicator", frame: Self.screenFrame),
+            ]),
+        ])
+
+        #expect(ScreenContentCheck.spinner(in: loading)?.label == "Loading")
+    }
+
+    /// A determinate progress bar reports progress rather than an unknown wait, and a tree with no indicator holds none.
+    @Test
+    func aProgressIndicatorAloneIsNotASpinner() {
+        let progress = AXNode(type: "Application", frame: Self.screenFrame, children: [
+            AXNode(type: "ProgressIndicator", frame: Self.screenFrame, label: "Upload", value: "0.5"),
+        ])
+
+        #expect(ScreenContentCheck.spinner(in: progress) == nil)
+        #expect(ScreenContentCheck.spinner(in: CaptureBundleFixture.populatedScreen()) == nil)
+    }
+
     private static let screenFrame = AXNode.Frame(x: 0, y: 0, width: 402, height: 874)
 }

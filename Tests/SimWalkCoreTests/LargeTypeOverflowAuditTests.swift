@@ -228,4 +228,97 @@ struct LargeTypeOverflowAuditTests {
 
         #expect(!result.findings.isEmpty)
     }
+
+    private static func strip(_ chips: [AXNode], width: Double = 600, height: Double = 68) -> AXNode {
+        AXNode(type: "ScrollView", frame: AXNode.Frame(x: 0, y: 240, width: width, height: height), identifier: "home-topics", children: chips)
+    }
+
+    private static func evaluate(_ children: [AXNode], screenWidth: Double, screenHeight: Double) -> LabelRuleResult {
+        let screen = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: screenWidth, height: screenHeight), children: children)
+        return LargeTypeOverflowAudit().evaluate(screen, screenID: "home", stateSlug: accessibility)
+    }
+
+    /// Topic chips in a horizontal ScrollView scroll sideways by design, so a chip past the edge is not overflow (SimWalk#287).
+    @Test
+    func runsInAHorizontalStripPastTheScreenWidthAreNotReportedButCounted() {
+        let chips = Self.strip([Self.text("Times tables", 20, 250, width: 160), Self.text("Fractions", 450, 250, width: 150)])
+
+        let result = Self.evaluate([chips], slug: Self.accessibility)
+
+        #expect(result.findings.isEmpty)
+        #expect(result.examined == 2)
+        #expect(result.inHorizontalScroller == 1)
+    }
+
+    /// A sheet holding a chip strip is not itself a strip: the chip past the edge exempts only the strip's own runs, and the sheet's overflowing label is reported (SimWalk#287 round 2 re-review).
+    @Test
+    func aSheetHoldingAChipStripStillReportsItsOwnOverflow() {
+        let chips = Self.strip([Self.text("Times tables", 20, 450, width: 160), Self.text("Fractions", 410, 450, width: 150)], width: 402)
+        let sheet = AXNode(type: "ScrollView", frame: AXNode.Frame(x: 0, y: 400, width: 402, height: 380), children: [
+            chips,
+            Self.text("Resting heart rate", 20, 560, width: 500),
+        ])
+
+        let result = Self.evaluate([sheet], slug: Self.accessibility)
+
+        #expect(result.findings.count == 1)
+        #expect(result.inHorizontalScroller == 1)
+    }
+
+    /// A short vertical scroller (a medium-detent sheet) has the strip's shape but nothing laid out past the screen, so its overflowing label is reported (SimWalk#287 round 2).
+    @Test
+    func aShortVerticalScrollerHoldingAnOverflowingRunIsStillReported() {
+        let sheet = AXNode(type: "ScrollView", frame: AXNode.Frame(x: 0, y: 400, width: 402, height: 380), children: [
+            Self.text("Resting heart rate", 20, 450, width: 500),
+        ])
+
+        let result = Self.evaluate([sheet], slug: Self.accessibility)
+
+        #expect(result.findings.count == 1)
+        #expect(result.inHorizontalScroller == 0)
+    }
+
+    /// A strip as wide as the screen is a scroller when a chip starts at or beyond the right edge.
+    @Test
+    func aScreenWideStripWithARunStartingPastTheEdgeIsExempt() {
+        let chips = Self.strip([Self.text("Times tables", 20, 250, width: 160), Self.text("Fractions", 410, 250, width: 150)], width: 402)
+
+        let result = Self.evaluate([chips], slug: Self.accessibility)
+
+        #expect(result.findings.isEmpty)
+        #expect(result.inHorizontalScroller == 1)
+        #expect(result.inHorizontalScrollerScreens == ["progress"])
+    }
+
+    /// A scroller as wide as a landscape iPad's screen is the vertical scroller of the whole screen, not a strip.
+    @Test
+    func aRunPastTheWidthInAFullScreenScrollViewIsStillReported() {
+        let scroller = AXNode(type: "ScrollView", frame: AXNode.Frame(x: 0, y: 0, width: 1194, height: 834), children: [
+            Self.text("Resting heart rate", 1000, 100, width: 300),
+        ])
+
+        let result = Self.evaluate([scroller], screenWidth: 1194, screenHeight: 834)
+
+        #expect(result.findings.count == 1)
+        #expect(result.inHorizontalScroller == 0)
+    }
+
+    @Test
+    func aRunPastTheWidthInAScrollViewTallerThanWideIsStillReported() {
+        let chips = Self.strip([Self.text("Fractions", 450, 250, width: 150)], width: 300, height: 600)
+
+        let result = Self.evaluate([chips], slug: Self.accessibility)
+
+        #expect(result.findings.count == 1)
+    }
+
+    @Test
+    func collidingRunsInsideAHorizontalStripStillCollide() {
+        let chips = Self.strip([Self.text("Times tables", 20, 250, width: 160, height: 40), Self.text("Fractions", 100, 260, width: 150, height: 40)])
+
+        let result = Self.evaluate([chips], slug: Self.accessibility)
+
+        #expect(result.findings.count == 1)
+        #expect(result.findings.first?.note?.contains("overlaps 'Fractions'") == true)
+    }
 }

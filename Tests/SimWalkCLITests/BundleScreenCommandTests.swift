@@ -202,8 +202,86 @@ struct BundleScreenCommandTests {
         #expect(entries.map(\.tool) == ["bundle screen"])
     }
 
-    private static func command(for bundle: CaptureBundle, step: Int) throws -> BundleScreenCommand {
-        try BundleScreenCommand.parse([bundle.url.path, String(step)])
+    /// `--state light` reads the `light-args_<h>` capture: a leading component names the state when one slug starts with it (SimWalk#291).
+    @Test
+    func aleadingComponentPicksTheOneStateItStarts() throws {
+        let directory = try TemporaryDirectory()
+        let bundle = try Self.argsBundle(in: directory, states: [
+            Walkbook.CaptureState(theme: .light, arguments: ["-a"]),
+            Walkbook.CaptureState(theme: .dark, arguments: ["-a"]),
+        ])
+        let recorder = StreamRecorder()
+
+        try Self.command(for: bundle, step: 1, state: "light").run(log: Self.log(in: directory), emit: recorder.emit, emitError: recorder.emitError)
+
+        let answer = try #require(recorder.out.first)
+        #expect(answer.contains("label light"))
+        #expect(!answer.contains("label dark"))
+    }
+
+    /// An exact slug still wins over a prefix of a longer one.
+    @Test
+    func anExactSlugWinsOverAPrefix() throws {
+        let directory = try TemporaryDirectory()
+        let bundle = try Self.argsBundle(in: directory, states: [
+            Walkbook.CaptureState(theme: .light, arguments: ["-a"]),
+            Walkbook.CaptureState(theme: .light),
+        ])
+        let recorder = StreamRecorder()
+
+        try Self.command(for: bundle, step: 1, state: "light").run(log: Self.log(in: directory), emit: recorder.emit, emitError: recorder.emitError)
+
+        let answer = try #require(recorder.out.first)
+        #expect(answer.contains("[light]"))
+    }
+
+    /// Two slugs starting with the component are refused as ambiguous, both named.
+    @Test
+    func aleadingComponentOfTwoStatesIsRefusedNamingBoth() throws {
+        let directory = try TemporaryDirectory()
+        let first = Walkbook.CaptureState(theme: .light, arguments: ["-a"])
+        let second = Walkbook.CaptureState(theme: .light, arguments: ["-b"])
+        let bundle = try Self.argsBundle(in: directory, states: [first, second])
+        let recorder = StreamRecorder()
+
+        let thrown = try #require(#expect(throws: ExitCode.self) {
+            try Self.command(for: bundle, step: 1, state: "light").run(log: Self.log(in: directory), emit: recorder.emit, emitError: recorder.emitError)
+        })
+
+        #expect(thrown == ExitCode(AnswerVerdict.refusedExitCode))
+        let message = try #require(recorder.err.first)
+        #expect(message.contains(first.slug))
+        #expect(message.contains(second.slug))
+    }
+
+    /// A component no slug starts with is refused, listing every slug on the screen.
+    @Test
+    func anUnknownComponentIsRefusedListingTheScreensSlugs() throws {
+        let directory = try TemporaryDirectory()
+        let light = Walkbook.CaptureState(theme: .light, arguments: ["-a"])
+        let dark = Walkbook.CaptureState(theme: .dark, arguments: ["-a"])
+        let bundle = try Self.argsBundle(in: directory, states: [light, dark])
+        let recorder = StreamRecorder()
+
+        let thrown = try #require(#expect(throws: ExitCode.self) {
+            try Self.command(for: bundle, step: 1, state: "sepia").run(log: Self.log(in: directory), emit: recorder.emit, emitError: recorder.emitError)
+        })
+
+        #expect(thrown == ExitCode(AnswerVerdict.refusedExitCode))
+        let message = try #require(recorder.err.first)
+        #expect(message.contains(light.slug))
+        #expect(message.contains(dark.slug))
+    }
+
+    /// One screen, one capture per state, each carrying its theme as its text.
+    private static func argsBundle(in directory: TemporaryDirectory, states: [Walkbook.CaptureState]) throws -> CaptureBundle {
+        try CaptureBundleFixture.write(in: directory, captures: states.map { state in
+            CaptureBundleFixture.Capture(screenID: "progress", state: state, tree: AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874), children: [CaptureBundleFixture.row(type: "StaticText", label: "label \(state.theme.rawValue)")]))
+        })
+    }
+
+    private static func command(for bundle: CaptureBundle, step: Int, state: String? = nil) throws -> BundleScreenCommand {
+        try BundleScreenCommand.parse([bundle.url.path, String(step)] + (state.map { ["--state", $0] } ?? []))
     }
 
     private static func log(in directory: TemporaryDirectory) -> UsageLog {

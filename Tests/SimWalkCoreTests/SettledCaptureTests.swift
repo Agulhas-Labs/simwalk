@@ -181,6 +181,38 @@ struct SettledCaptureTests {
         #expect((source.pictureAt ?? 0) >= 4)
     }
 
+    /// A title above a labelled spinner: content, so not chrome-only, yet still loading (SimWalk#267).
+    private static let titledSpinnerScreen = AXNode(type: "Application", frame: screen, label: "App", children: [
+        AXNode(type: "Window", frame: screen, children: [
+            AXNode(type: "StaticText", frame: screen, label: "Another way to see it"),
+            AXNode(type: "ActivityIndicator", frame: screen, label: "Loading the answer…", value: "1"),
+        ]),
+    ])
+
+    /// A labelled spinner beside a title is waited on, and the capture holds the loaded tree once it arrives (SimWalk#267).
+    @Test
+    func aLabelledSpinnerBesideATitleIsCapturedSettledOnceItLoads() throws {
+        let source = ScriptedSource(app: Self.appScreen, springboard: .success(Self.clearSpringboard), loading: Self.titledSpinnerScreen, loadsAt: 3)
+
+        let capture = try SettledCapture.take(from: source, quiet: 0.25, budget: 2.5, interval: 0.25, motion: nil)
+
+        #expect(capture.didSettle)
+        #expect(capture.tree == Self.appScreen)
+        #expect((source.pictureAt ?? 0) >= 3)
+    }
+
+    /// One that never loads is captured unsettled with its spinner in the tree, after the whole content wait (SimWalk#267).
+    @Test
+    func aLabelledSpinnerThatNeverLoadsIsCapturedUnsettledAfterTheContentWait() throws {
+        let source = ScriptedSource(app: Self.appScreen, springboard: .success(Self.clearSpringboard), loading: Self.titledSpinnerScreen)
+
+        let capture = try SettledCapture.take(from: source, quiet: 0.25, budget: 2.5, interval: 0.25, motion: nil)
+
+        #expect(!capture.didSettle)
+        #expect(capture.tree == Self.titledSpinnerScreen)
+        #expect(source.elapsed() >= SettleWindow.contentWait)
+    }
+
     /// The first read after a push can still hold the screen being left — a navigating step lands before its transition has finished — and that passing content must not spend the spinner's wait: the budget runs from when the *current* content arrived (SimWalk#81).
     @Test
     func theScreenBeingLeftDoesNotSpendTheSpinnersWait() throws {

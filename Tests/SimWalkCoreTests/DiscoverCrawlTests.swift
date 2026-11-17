@@ -20,7 +20,7 @@ struct DiscoverCrawlTests {
             switch step {
             case let .tab(label):
                 #expect(["Settings", "Profile"].contains(label))
-            case let .tap(label), let .scrollTo(label):
+            case let .tap(label), let .scrollTo(label, _):
                 #expect(rows.contains(label))
             case .back:
                 break

@@ -36,7 +36,7 @@ public struct ReadingOrderAudit: PerTreeLabelAuditRule {
     }
 
     private static let skipped: Set<String> = ["TabBar", "NavigationBar", "Toolbar"]
-    private static let controls = AuditedControl.types.union(["SecureTextField", "SearchField"])
+    private static let controls = LabelledStop.controls
     private static let rightToLeft: Set<String> = ["ar", "he", "fa", "ur", "iw", "yi", "ps", "ckb", "ug"]
     /// Points of slack when comparing edges, so two elements that touch are not ordered by rounding.
     private static let tolerance = 1.0
@@ -77,7 +77,7 @@ public struct ReadingOrderAudit: PerTreeLabelAuditRule {
         }
         let isControl = Self.controls.contains(node.type)
         let carriesText = node.children.isEmpty && (!AuditedControl.isBlank(node.label) || !AuditedControl.isBlank(node.value))
-        let isOneStop = !isControl && (Self.speaksForItsText(node) || Self.isLabelledCellWithoutControl(node))
+        let isOneStop = !isControl && (LabelledStop.speaksForItsText(node) || Self.isLabelledCellWithoutControl(node))
         if isControl && node.isEnabled || carriesText || isOneStop, node.frame.isOnScreen(screen) {
             found.append(node)
         }
@@ -91,36 +91,10 @@ public struct ReadingOrderAudit: PerTreeLabelAuditRule {
         }
     }
 
-    /// Whether a labelled container is one VoiceOver stop that reads all the text inside it (SimWalk#105): its label carries every text leaf below, and nothing below is an enabled control.
-    private static func speaksForItsText(_ node: AXNode) -> Bool {
-        guard !node.children.isEmpty, !AuditedControl.isBlank(node.label), let label = node.label else { return false }
-        var leafTexts: [String] = []
-        guard gatherLeafTexts(node.children, into: &leafTexts) else { return false }
-        return !leafTexts.isEmpty && leafTexts.allSatisfy { label.contains($0) }
-    }
-
     /// Whether a labelled table cell is one VoiceOver stop (SimWalk#236): UIKit reads a cell with a label as a single element unless it holds a control, so the order of its children is never swiped. Unlike `speaksForItsText`, the label need not carry the children's text (an icon's symbol name is not in it).
     private static func isLabelledCellWithoutControl(_ node: AXNode) -> Bool {
         var leafTexts: [String] = []
-        return node.type == "Cell" && !node.children.isEmpty && !AuditedControl.isBlank(node.label) && gatherLeafTexts(node.children, into: &leafTexts)
-    }
-
-    /// Collects the trimmed text of each text-carrying leaf below, or reports `false` at the first enabled control.
-    private static func gatherLeafTexts(_ nodes: [AXNode], into texts: inout [String]) -> Bool {
-        for node in nodes {
-            if controls.contains(node.type), node.isEnabled {
-                return false
-            }
-            if node.children.isEmpty {
-                let source = AuditedControl.isBlank(node.label) ? node.value : node.label
-                if let source, !AuditedControl.isBlank(source) {
-                    texts.append(source.trimmingCharacters(in: .whitespacesAndNewlines))
-                }
-            } else if !gatherLeafTexts(node.children, into: &texts) {
-                return false
-            }
-        }
-        return true
+        return node.type == "Cell" && !node.children.isEmpty && !AuditedControl.isBlank(node.label) && LabelledStop.gatherLeafTexts(node.children, into: &leafTexts)
     }
 
     /// Where `later` sits relative to `earlier` when it is visually before it, or nothing when the step is not backwards.

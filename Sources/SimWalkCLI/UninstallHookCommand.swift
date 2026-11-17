@@ -94,19 +94,8 @@ struct UninstallHookCommand: ParsableCommand {
 
 private extension UninstallHookCommand {
     /// Whether Claude Code's config at `config` registers this tool's server at user scope, or at local scope in any project: both places its removal reaches.
-    ///
-    /// The local half mirrors Fieldwork's `ClaudeMcpServer.hasLocalEntry(in:)`, which it does not export.
     static func serverRegistered(in config: URL) -> Bool {
-        if SimWalkClaudeSetup.server.userEntry(in: config) != nil {
-            return true
-        }
-        guard let data = try? Data(contentsOf: config),
-              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let projects = object["projects"] as? [String: Any]
-        else { return false }
-        return projects.values.contains { project in
-            ((project as? [String: Any])?["mcpServers"] as? [String: Any])?[SimWalkClaudeSetup.server.name] != nil
-        }
+        SimWalkClaudeSetup.server.userEntry(in: config) != nil || SimWalkClaudeSetup.server.hasLocalEntry(in: config)
     }
 
     /// The status line, from whichever of its two homes it went into.

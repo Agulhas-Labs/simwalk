@@ -13,7 +13,7 @@ struct ProgressWriterResultTests {
     func theResultFileExistsWhenTheProgressFileFirstNamesIt() throws {
         let directory = try ProgressWriterTests.scratchDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let resultURL = ProgressLocation.resultURL(session: "s", in: directory)
+        let resultURL = ProgressLocation.resultURL(session: "s", pid: 1, startedAt: Date(timeIntervalSince1970: 0), in: directory)
         let probe = ResultProbe(resultURL)
         let writer = ProgressWriter(url: ProgressLocation.progressURL(session: "s", in: directory), clock: probe.read, pid: 1)
         writer.begin(tool: "walk")

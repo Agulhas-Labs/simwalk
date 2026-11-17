@@ -6,7 +6,7 @@ import Foundation
 
 /// A live session's `step`: the guard, the per-step setup a walk gives a route step, and the answer — decided here so `swift test` checks it, with the runner handing in only the reads and the step itself.
 ///
-/// **A stale guard is refused before anything acts.** The screen is read once, hashed (``ScreenHash``), and compared with the request's `guard`; a text-less screen whose tree is the one a remembered hash was printed for, and whose picture moved by no more than ``PixelSignature/guardTolerance``, still holds the guard (SimWalk#226). Any other mismatch answers `snapshotChanged` with both hashes, and neither the sheet baseline nor the step is touched. That read is also the delta's *before*, so an unguarded step costs the same one read. **After the step the screen is watched until it holds still** (``SettleTracker``), then read as a `session read` reads it.
+/// **A stale guard is refused before anything acts.** The screen is read once, hashed (``ScreenHash``), and compared with the request's `guard`; a text-less screen whose tree is the one a remembered hash was printed for, and whose picture moved by no more than ``PixelSignature/guardTolerance``, still holds the guard (SimWalk#226), as does a text screen whose remembered tree has the same elements with frames that moved only a little (``AXNode/steadyShift(to:)``, SimWalk#252). Any other mismatch answers `snapshotChanged` with both hashes, and neither the sheet baseline nor the step is touched. That read is also the delta's *before*, so an unguarded step costs the same one read. **After the step the screen is watched until it holds still** (``SettleTracker``), then read as a `session read` reads it.
 ///
 /// **The step is taken as a walk takes it** (`WalkRunner.follow`): the sheet scope a `systemTap` answers from comes from one ``SystemSheetBaseline`` kept for the whole session and told of every landed step, under the session's quiet period. A walk knows its route and reads a baseline only while a `systemTap` is still to come; a session does not know what the agent will send next, so it reads one before every step that is not a `systemTap` — the price of one tree read, the same as a baseline made without a route (``SystemSheetBaseline/init()``).
 ///
@@ -17,19 +17,19 @@ public struct LiveSessionStepper: Sendable {
     private var baseline = SystemSheetBaseline()
     private var printed: [Printed] = []
 
-    /// How many printed text-less hashes the session remembers the picture of.
+    /// How many printed hashes the session remembers the read behind.
     static let memory = 32
 
     public init(quiet: TimeInterval) {
         self.quiet = quiet
     }
 
-    /// Remembers the picture behind the `screen <hash>` a read of `screen` prints, when its tree has no text (SimWalk#226); the oldest is dropped past ``memory``.
+    /// Remembers the read behind the `screen <hash>` a read of `screen` prints: its picture when the tree has no text (SimWalk#226), and its tree either way, so a guard on a text screen can be held across a pulse the whole-point hash reads as a change (SimWalk#252); the oldest is dropped past ``memory``.
     public mutating func remember(_ screen: LiveScreen) {
-        guard let tree = screen.tree, let pixels = screen.pixels else { return }
-        let hash = ScreenHash.of(tree, pixels: pixels)
+        guard let tree = screen.tree else { return }
+        let hash = ScreenHash.of(tree, pixels: screen.pixels)
         printed.removeAll { $0.hash == hash }
-        printed.append(Printed(hash: hash, treeHash: ScreenHash.of(tree), pixels: pixels))
+        printed.append(Printed(hash: hash, treeHash: ScreenHash.of(tree), tree: tree, pixels: screen.pixels))
         if printed.count > Self.memory {
             printed.removeFirst(printed.count - Self.memory)
         }
@@ -63,16 +63,21 @@ public struct LiveSessionStepper: Sendable {
         // A tree with no text is told from another by its picture (SimWalk#150), from the source a read uses; a tree with text never costs a screenshot.
         let beforePixels = PixelSignature.isNeeded(for: before) ? pixels(before) : nil
         let found = ScreenHash.of(before, pixels: beforePixels)
-        var held: (expected: String, moved: Double)?
+        var held: LiveSessionStepAnswer.Held?
         if let expected = request.guardHash, expected != found {
+            let remembered = printed.first { $0.hash == expected }
             var moved: Double?
-            if let beforePixels, let remembered = printed.first(where: { $0.hash == expected }), remembered.treeHash == ScreenHash.of(before) {
-                moved = remembered.pixels.changedFraction(to: beforePixels)
+            if let beforePixels, let remembered, let picture = remembered.pixels, remembered.treeHash == ScreenHash.of(before) {
+                moved = picture.changedFraction(to: beforePixels)
             }
-            guard let moved, moved <= PixelSignature.guardTolerance else {
+            if let moved, moved <= PixelSignature.guardTolerance {
+                held = .picture(expected: expected, moved: moved)
+            } else if beforePixels == nil, let shift = remembered?.tree.steadyShift(to: before) {
+                // A tree with text has no picture to compare; the same elements with frames a pulse moved a little are the same screen (SimWalk#252).
+                held = .frames(expected: expected, points: shift)
+            } else {
                 return LiveSessionResponse(n: request.n, action: .step, step: .snapshotChanged(expected: expected, found: found, moved: moved))
             }
-            held = (expected, moved)
         }
         let scope = try baseline.scope(for: step, from: sheetReads, quiet: quiet)
         let performed = try perform(step, scope)
@@ -138,11 +143,12 @@ public struct LiveSessionStepper: Sendable {
 }
 
 extension LiveSessionStepper {
-    /// A text-less screen's printed hash, with the tree's own hash and the picture it was made from.
+    /// A printed hash, with the tree's own hash, the tree, and the picture it was made from when the tree has no text.
     struct Printed: Equatable, Sendable {
         let hash: String
         let treeHash: String
-        let pixels: PixelSignature
+        let tree: AXNode
+        let pixels: PixelSignature?
     }
 }
 

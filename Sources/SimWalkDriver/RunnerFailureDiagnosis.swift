@@ -25,6 +25,41 @@ public enum RunnerFailureDiagnosis: Equatable, Sendable {
         "WalkRunner/testWalk()"
     }
 
+    /// Whether the runner stopped because its first `app.launch()` timed out: `Failed to launch <app>: Timed out attempting to launch app.`
+    ///
+    /// A failed `app.launch()` ends the test even under `continueAfterFailure = true` (measured 2026-10-25), so it is always the last failure, which is the one a digest keeps and the one a start failure lists. Other launch failures (an app library that returns nil, say) fail the same way twice and are not retried (SimWalk#266).
+    public var isLaunchTimeout: Bool {
+        switch self {
+        case let .digested(_, digest, _):
+            Self.isLaunchTimeout(digest.failure)
+        case let .failedBeforeTest(_, failures):
+            failures.contains { Self.isLaunchTimeout($0.failureText) }
+        case .nothingToShow, .unreadable:
+            false
+        }
+    }
+
+    private static func isLaunchTimeout(_ text: String) -> Bool {
+        text.contains("Failed to launch") && text.contains("Timed out attempting to launch app")
+    }
+
+    /// Whether the runner stopped because XCTest timed out synthesizing a gesture (``SynthesisTimeout``): a runner without the retry, or a gesture outside a route, still records it (SimWalk#274).
+    public var isSynthesisTimeout: Bool {
+        switch self {
+        case let .digested(_, digest, _):
+            SynthesisTimeout.matches(digest.failure)
+        case let .failedBeforeTest(_, failures):
+            failures.contains { SynthesisTimeout.matches($0.failureText) }
+        case .nothingToShow, .unreadable:
+            false
+        }
+    }
+
+    /// What a synthesis timeout means, said under the failure: the app had gone idle, so it is not the app's.
+    private static var synthesisTimeoutLine: String {
+        "XCTest timed out synthesizing a gesture after the app went idle: the runner or the device, not the app — walk again"
+    }
+
     /// Reads the bundle at `resultBundlePath`, exporting the failure's hierarchy beside it (``exportDirectory(forResultBundle:)``).
     public static func read(resultBundlePath: String, testID: String = walkTestID, shell: Shell) -> RunnerFailureDiagnosis {
         guard FileManager.default.fileExists(atPath: resultBundlePath) else {
@@ -82,7 +117,8 @@ public enum RunnerFailureDiagnosis: Equatable, Sendable {
         case let .digested(path, digest, hierarchy):
             let recent = digest.recentActivities.isEmpty ? [] : ["the last \(digest.recentActivities.count) activities before the failure:"] + digest.recentActivities.map { "  \($0)" }
             let earlier = digest.earlierFailures == 0 ? "" : " (the last of \(digest.earlierFailures + 1) recorded)"
-            return ["result bundle: \(path)"] + recent + ["failure: \(digest.failure)\(earlier)"] + hierarchy.lines
+            let synthesis = isSynthesisTimeout ? [Self.synthesisTimeoutLine] : []
+            return ["result bundle: \(path)"] + recent + ["failure: \(digest.failure)\(earlier)"] + synthesis + hierarchy.lines
         case let .nothingToShow(path):
             return ["the runner's result bundle records no failure to show: \(path)"]
         case let .failedBeforeTest(path, failures):

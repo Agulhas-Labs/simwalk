@@ -101,8 +101,11 @@ public struct CaptureManifestValidator {
         switch screen.outcome {
         case .captured where screen.captures.isEmpty:
             found.append(.capturedWithoutCaptures(screenID: screen.id))
-        case let .unreachable(routeTried, _, _, _):
+        case let .unreachable(routeTried, _, _, _, stopped):
             found.append(contentsOf: refusalProblems(in: screen))
+            if let stopped, stopped != CaptureBundleLayout.unreachedDirectory(screenID: screen.id) {
+                found.append(.misfiledUnreachedDirectory(screenID: screen.id, stated: stopped, expected: CaptureBundleLayout.unreachedDirectory(screenID: screen.id)))
+            }
             // `routeTaken` is what the runner completed and `routeTried` what it attempted, so the first
             // is the leading part of the second. Unconstrained they were two unrelated answers to one
             // question, and nothing could say which was the honest record.
@@ -216,7 +219,7 @@ public struct CaptureManifestValidator {
                 return .boundElementStepOutOfRange(screenID: screen.id, step: bound.step, routeLength: screen.routeTaken.count)
             }
             return switch screen.routeTaken[bound.step] {
-            case .tap, .scrollTo, .type, .longPress:
+            case .tap, .tapUnchanged, .scrollTo, .type, .longPress:
                 nil
             default:
                 .boundElementOnStepThatBindsNothing(screenID: screen.id, step: bound.step, routeStep: screen.routeTaken[bound.step])
@@ -247,13 +250,23 @@ public struct CaptureManifestValidator {
         fileManager: FileManager = .default
     ) -> [CaptureManifestProblem] {
         manifest.screens.flatMap { screen in
-            screen.captures.flatMap { capture in
+            unreachedMissingProblems(in: screen, bundleURL: bundleURL, fileManager: fileManager) + screen.captures.flatMap { capture in
                 ([capture.screenshotPath, capture.axTreePath] + [capture.appleAudit?.path].compactMap(\.self)).compactMap { path -> CaptureManifestProblem? in
                     let url = CaptureBundleLayout.url(forRelativePath: path, in: bundleURL)
                     guard !fileManager.fileExists(atPath: url.path) else { return nil }
                     return .artefactMissing(screenID: screen.id, stateSlug: capture.state.slug, expectedPath: path)
                 }
             }
+        }
+    }
+
+    /// The files an unreachable screen claims for the state its route stopped in that are not in the bundle (SimWalk#281).
+    ///
+    /// A claim at a path other than the layout's is `problems(in:)`'s to report as misfiled, so only the derived paths are looked for here.
+    private static func unreachedMissingProblems(in screen: CaptureManifest.ScreenRecord, bundleURL: URL, fileManager: FileManager) -> [CaptureManifestProblem] {
+        guard case let .unreachable(_, _, _, _, stopped?) = screen.outcome, stopped == CaptureBundleLayout.unreachedDirectory(screenID: screen.id) else { return [] }
+        return [CaptureBundleLayout.unreachedScreenshotPath(screenID: screen.id), CaptureBundleLayout.unreachedAXTreePath(screenID: screen.id)].compactMap { path in
+            fileManager.fileExists(atPath: CaptureBundleLayout.url(forRelativePath: path, in: bundleURL).path) ? nil : .unreachedArtefactMissing(screenID: screen.id, expectedPath: path)
         }
     }
 

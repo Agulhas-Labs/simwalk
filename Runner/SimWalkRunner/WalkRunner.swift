@@ -36,6 +36,16 @@ final class WalkRunner: XCTestCase {
         continueAfterFailure = true
     }
 
+    /// Records `issue`, unless it is XCTest timing out synthesizing a route gesture in flight, which the performer holds and makes once more (`StepPerformer.GestureSynthesis`, SimWalk#274); every other issue is recorded as before.
+    ///
+    /// XCTest declares this nonisolated, so the override is too, in a main-actor class. A gesture is made on the main thread and its issue is recorded there, so only an issue recorded on the main thread is asked about; one from any other thread is never a gesture's and is recorded.
+    override func record(_ issue: XCTIssue) {
+        let description = issue.compactDescription
+        let held = Thread.isMainThread && MainActor.assumeIsolated { StepPerformer.GestureSynthesis.holds(description) }
+        guard !held else { return }
+        super.record(issue)
+    }
+
     /// Walks the walkbook named in the environment and writes its bundle.
     func testWalk() throws {
         let environment = ProcessInfo.processInfo.environment
@@ -323,6 +333,18 @@ final class WalkRunner: XCTestCase {
         log("inspect.runner", target: bundleID, since: started, succeeded: true, err: nil)
     }
 
+    /// Reads the tree and screenshot as they are where an unreachable screen's route stopped and files them, returning the bundle-relative directory, or `nil` when either the read or the write failed (SimWalk#281).
+    static func captureStopped(_ screen: Walkbook.Screen, in app: XCUIApplication, with writer: CaptureBundleWriter) -> String? {
+        do {
+            let tree = try AXTreeCapture.tree(of: app)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            return try writer.writeUnreached(screenID: screen.id, screenshot: screenshot(of: app), axTree: encoder.encode(tree))
+        } catch {
+            return nil
+        }
+    }
+
     /// The one screenshot every consumer takes: the whole screen, turned upright when the device is rotated to landscape and the app is in front (SimWalk#199, SimWalk#221).
     ///
     /// A rotated device's `XCUIScreen` screenshot comes back in the device's portrait pixel grid with the content drawn sideways and an Orientation tag nothing honours. `app.screenshot()` is not the cure: it returns the landscape pixel size over that same portrait grid, cropped, so the right third is black and the rest of the screen is lost (SimWalk#221). So the whole screen is taken and its stored pixels are turned a quarter with ``UprightScreenshot``: `landscapeLeft` counter-clockwise, `landscapeRight` clockwise. The decision is the device's, not the app's frame, so it costs no accessibility query per screenshot, and the state check keeps it off an app that died since the tree was read. A portrait capture takes today's call, so it changes no byte.
@@ -407,6 +429,21 @@ final class WalkRunner: XCTestCase {
     ///
     /// **A screen's states are taken into memory first and written afterwards**, which is what makes `StateApplicationCheck` possible at all: the states can only be compared with each other once they all exist, and a bundle that had already filed the first two would have to reach back and unfile them. It is also what stops a refusal leaving artefacts behind — an absent directory beside a stated refusal is a fact, where an empty one reads as a capture that produced nothing. The cost is a screen's screenshots held at once, which for the three states a real walkbook asks for is a few megabytes.
     private func walk(
+        _ screen: Walkbook.Screen,
+        of walkbook: Walkbook,
+        in app: XCUIApplication,
+        over baseEnvironment: [String: String],
+        writer: CaptureBundleWriter
+    ) -> CaptureManifest.ScreenRecord {
+        // The monotonic clock, from before the first launch to after the last capture is filed (SimWalk#274).
+        let started = ProcessInfo.processInfo.systemUptime
+        var record = walkStates(screen, of: walkbook, in: app, over: baseEnvironment, writer: writer)
+        record.wallMilliseconds = Int(((ProcessInfo.processInfo.systemUptime - started) * 1000).rounded())
+        return record
+    }
+
+    /// `walk` less its timing: the states, the route and the filing.
+    private func walkStates(
         _ screen: Walkbook.Screen,
         of walkbook: Walkbook,
         in app: XCUIApplication,
@@ -498,9 +535,13 @@ final class WalkRunner: XCTestCase {
                 // and this returned whatever earlier states had already been written to disk — so a
                 // screen that captured light and then could not reach anything under dark discarded the
                 // whole walk's bundle rather than reporting one screen.
+                //
+                // Where the route stopped is read once, unsettled, and filed beside the refusal (SimWalk#281);
+                // a read or write that throws leaves `stopped` nil and never changes the outcome.
+                let stopped = Self.captureStopped(screen, in: app, with: writer)
                 return CaptureManifest.ScreenRecord.filed(
                     id: screen.id,
-                    outcome: .unreachable(routeTried: followed.resolvedSteps + [followed.failedStep].compactMap(\.self), reason: reason, cause: cause, state: ScreenOutcome.UnreachableState(failing: state.slug, among: screen.states.map(\.slug))),
+                    outcome: .unreachable(routeTried: followed.resolvedSteps + [followed.failedStep].compactMap(\.self), reason: reason, cause: cause, state: ScreenOutcome.UnreachableState(failing: state.slug, among: screen.states.map(\.slug)), stopped: stopped),
                     routeTaken: followed.resolvedSteps,
                     settleQuietMilliseconds: ownSettle,
                     launches: CaptureManifest.ScreenRecord.Launches(resets: launchResets, deviceTurns: deviceTurns),
@@ -665,6 +706,7 @@ final class WalkRunner: XCTestCase {
             evidence: taken.map(\.evidence),
             expect: screen.expect,
             expectMenu: screen.expectMenu,
+            expectValues: screen.expectValues,
             instead: outcome,
             deviceAppearance: deviceAppearance,
             deviceLocale: deviceLocale,
@@ -793,7 +835,8 @@ final class WalkRunner: XCTestCase {
             // A physical device cannot read its own UDID, so the host that named it passes it (SimWalk#116).
             udid: environment["SIMULATOR_UDID"] ?? environment[Input.deviceUDID] ?? "unknown",
             osVersion: UIDevice.current.systemVersion,
-            locale: deviceLocale
+            locale: deviceLocale,
+            contentSize: environment[Input.deviceContentSize]
         )
     }
 
@@ -988,6 +1031,11 @@ private extension WalkRunner {
             "SIMWALK_DEVICE_LOCALE"
         }
 
+        /// The Dynamic Type size the device was already at, a `UICTContentSizeCategory…` name; absent means it could not be read or the device is physical (SimWalk#288).
+        static var deviceContentSize: String {
+            "SIMWALK_DEVICE_CONTENT_SIZE"
+        }
+
         /// `1` for `walk --dry-run`: follow every route, capture nothing, write a route-probe report to the output path; absent means a walk.
         static var dryRun: String {
             "SIMWALK_DRY_RUN"
@@ -1158,6 +1206,11 @@ extension WalkRunner {
             !ScreenContentCheck.isChromeOnly(tree)
         }
 
+        /// The activity indicator the tree still holds, if any (SimWalk#267): a settled capture never holds one, since the content wait does not settle on a spinner, so it is recorded on an unsettled capture only.
+        var spinner: CaptureManifest.Spinner? {
+            ScreenContentCheck.spinner(in: tree).map { CaptureManifest.Spinner(label: $0.label) }
+        }
+
         /// What `StateApplicationCheck` compares this state against its siblings by.
         var evidence: StateApplicationCheck.Evidence {
             StateApplicationCheck.Evidence(state: state, screenshot: screenshot, tree: tree)
@@ -1171,6 +1224,7 @@ extension WalkRunner {
                 state: state,
                 axTreeSettled: didSettle,
                 axTreeHasContent: hasContent,
+                axTreeSpinner: spinner,
                 identicalTo: base,
                 unverifiedAxes: unverifiedAxes,
                 capturedAt: readAt,

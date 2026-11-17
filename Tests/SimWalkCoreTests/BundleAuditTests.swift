@@ -67,6 +67,25 @@ struct BundleAuditTests {
         #expect(text.contains("y 100–597 (497 pt) overlaps 'Found 6 Jan' y 300–540 (240 pt)"), "\(text)")
     }
 
+    /// SimWalk#288: a walk run on a device left at an accessibility size captured every screen at it, so a default state is judged there; the same bundle without the device's size is not applicable.
+    @Test
+    func aDefaultStateOnADeviceAtAnAccessibilitySizeIsJudgedByLargeTypeOverflow() throws {
+        let directory = try TemporaryDirectory()
+        let children = [AXNode(type: "StaticText", frame: AXNode.Frame(x: 200, y: 100, width: 300, height: 20), label: "Resting heart rate")]
+        let bundle = try Fixture.write(in: directory, captures: [Self.capture(Self.light, children)], deviceContentSize: "UICTContentSizeCategoryAccessibilityXL")
+
+        let text = try BundleAuditSummary(BundleAudit(bundle, rules: [.largeTypeOverflow]).run(), of: bundle).render()
+
+        #expect(text.contains("[largeTypeOverflow] 1 found"), "\(text)")
+        #expect(!text.contains("not applicable"), "\(text)")
+        #expect(text.contains("text size: accessibility-extra-large (device)"), "\(text)")
+
+        let other = try TemporaryDirectory()
+        let unrecorded = try Fixture.write(in: other, captures: [Self.capture(Self.light, children)])
+        let plain = try BundleAuditSummary(BundleAudit(unrecorded, rules: [.largeTypeOverflow]).run(), of: unrecorded).render()
+        #expect(plain.contains("[largeTypeOverflow] not applicable — no accessibility type-size state"), "\(plain)")
+    }
+
     private static let ax1 = Walkbook.CaptureState(theme: .light, dynamicTypeSize: "UICTContentSizeCategoryAccessibilityM")
     private static let ax5 = Walkbook.CaptureState(theme: .light, dynamicTypeSize: "UICTContentSizeCategoryAccessibilityXXXL")
 

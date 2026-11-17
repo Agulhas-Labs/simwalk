@@ -24,6 +24,37 @@ public struct ContentSizeCategoryName {
         "UICTContentSizeCategoryAccessibilityXXXL",
     ]
 
+    /// The default size, `large`.
+    public static var defaultName: String {
+        "UICTContentSizeCategoryL"
+    }
+
+    /// `simctl ui <udid> content_size`'s names, each beside the category name meaning the same size (SimWalk#288).
+    private static let simctlNames: [(simctl: String, category: String)] = [
+        ("extra-small", "UICTContentSizeCategoryXS"),
+        ("small", "UICTContentSizeCategoryS"),
+        ("medium", "UICTContentSizeCategoryM"),
+        ("large", "UICTContentSizeCategoryL"),
+        ("extra-large", "UICTContentSizeCategoryXL"),
+        ("extra-extra-large", "UICTContentSizeCategoryXXL"),
+        ("extra-extra-extra-large", "UICTContentSizeCategoryXXXL"),
+        ("accessibility-medium", "UICTContentSizeCategoryAccessibilityM"),
+        ("accessibility-large", "UICTContentSizeCategoryAccessibilityL"),
+        ("accessibility-extra-large", "UICTContentSizeCategoryAccessibilityXL"),
+        ("accessibility-extra-extra-large", "UICTContentSizeCategoryAccessibilityXXL"),
+        ("accessibility-extra-extra-extra-large", "UICTContentSizeCategoryAccessibilityXXXL"),
+    ]
+
+    /// The category name for a size `simctl ui content_size` printed, or `nil` for anything else (including `unspecified`).
+    public static func category(forSimctl name: String) -> String? {
+        simctlNames.first { $0.simctl == name }?.category
+    }
+
+    /// The name `simctl` uses for a category name, or `nil` for one it has no name for.
+    public static func simctl(forCategory name: String) -> String? {
+        simctlNames.first { $0.category == name }?.simctl
+    }
+
     /// SwiftUI's `DynamicTypeSize` case names, mapped to the platform name meaning the same size.
     ///
     /// Not accepted as input — an alias silently doing the right thing is how the two spellings stayed confusable in the first place. They exist so a refusal can name the value the author almost certainly meant, which is the difference between a rejection that teaches and one that only blocks.

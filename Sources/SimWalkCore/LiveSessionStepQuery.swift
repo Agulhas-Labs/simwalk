@@ -50,9 +50,14 @@ public struct LiveSessionStepQuery {
         return Answer(header: LiveScreenQuery.header(of: screen), verdict: verdict, residue: residue)
     }
 
-    /// The line saying a guard held across a text-less screen's movement (SimWalk#226); none for a step whose guard matched exactly.
+    /// The line saying a guard held across a screen's movement: a text-less picture's (SimWalk#226) or a text screen's elements' (SimWalk#252); none for a step whose guard matched exactly.
     private static func heldLines(_ answer: LiveSessionStepAnswer) -> [String] {
-        guard let moved = answer.pixelsMoved, let expected = answer.expectedHash else { return [] }
+        guard let expected = answer.expectedHash else { return [] }
+        if let points = answer.pointsMoved {
+            let text = points.rounded() == points ? String(format: "%.0f", points) : String(format: "%.1f", points)
+            return ["guard: held, elements moved up to \(text) pt since \(expected) (the tree is otherwise the same, so the guard allows elements an animation moves a little)"]
+        }
+        guard let moved = answer.pixelsMoved else { return [] }
         return ["guard: held, \(ScreenDelta.percentOfScreen(moved)) of the screen moved since \(expected) (the tree has no text, so the guard allows a picture that moves a little)"]
     }
 

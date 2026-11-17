@@ -28,7 +28,12 @@ public struct CaptureBundleSummary {
     ///
     /// `appending` carries residue the caller measured for itself — `inspect`'s on-disk report — which stays a fact about the answer rather than about the manifest, and rides after the manifest's own residue for that reason.
     public func answer(appending extra: [String] = []) -> Answer {
-        var residue = bundle.manifest.screens.enumerated().map { Self.screenLine($0.element, position: $0.offset + 1) }
+        let screens = bundle.manifest.screens
+        var residue = screens.enumerated().map { index, screen in
+            // Only a screen that reached its screen can be named as a route's start: an unreachable one's completed steps led nowhere.
+            let earlier = screens[..<index].filter { !Self.isUnreachable($0.outcome) }.map { (id: $0.id, route: $0.routeTaken) }
+            return Self.screenLine(screen, position: index + 1, earlier: earlier)
+        }
         residue.append(Self.settleLine(bundle.manifest))
         residue += Self.appleAuditLines(bundle.manifest)
         residue += Self.appearanceSettleLines(bundle.manifest)
@@ -38,6 +43,7 @@ public struct CaptureBundleSummary {
         residue += Self.deviceTurnLines(bundle.manifest)
         residue += Self.unsettledLines(bundle.manifest)
         residue += Self.chromeOnlyLines(bundle.manifest)
+        residue += Self.loadingLines(bundle.manifest)
         residue += Self.unverifiedLines(bundle.manifest)
         if !extra.isEmpty {
             residue += [""] + extra
@@ -68,7 +74,7 @@ public struct CaptureBundleSummary {
             switch screen.outcome {
             case .captured:
                 counts.captured += 1
-            case .unreachable(_, _, .snapshotBlind, _):
+            case .unreachable(_, _, .snapshotBlind, _, _):
                 // Named apart from a missing control (SimWalk#48): the control was there, and the app's snapshot could not see it.
                 counts.snapshotBlind += 1
             case .unreachable:
@@ -87,6 +93,7 @@ public struct CaptureBundleSummary {
         let stated = [
             AnswerVerdict.qualification(bundle.manifest.movingCaptures.count, "capture", "taken before the tree settled"),
             AnswerVerdict.qualification(bundle.manifest.chromeOnlyCaptures.count, "capture", "holding the app's chrome and nothing else"),
+            AnswerVerdict.qualification(bundle.manifest.loadingCaptures.count, "capture", "still showing a spinner"),
             AnswerVerdict.qualification(bundle.manifest.unverifiedCaptures.count, "capture", "with a state axis set and unverified"),
             AnswerVerdict.qualification(counts.unreachable, "screen", "unreachable"),
             AnswerVerdict.qualification(counts.snapshotBlind, "screen", "unreachable behind a system sheet the app's snapshot cannot see"),
@@ -181,7 +188,7 @@ public struct CaptureBundleSummary {
         }
     }
 
-    /// Captures taken before the accessibility tree stopped changing, or while it still held only the app's chrome when the content wait ran out (SimWalk#81), named rather than left in the manifest.
+    /// Captures taken before the accessibility tree stopped changing, or while it still held only the app's chrome or a spinner when the content wait ran out (SimWalk#81, #267), named rather than left in the manifest.
     ///
     /// Without this the report is identical whether every capture was of a still tree or none of them were, which is the ambiguity that made a half-rendered insight card unattributable — the reviewer could not tell a capture race from an app bug, and the summary is where that has to be said. The verdict already counts them; this names which.
     private static func unsettledLines(_ manifest: CaptureManifest) -> [String] {
@@ -189,7 +196,7 @@ public struct CaptureBundleSummary {
         guard !unsettled.isEmpty else { return [] }
         return [
             "",
-            "⚠ \(unsettled.count) capture\(unsettled.count == 1 ? " was" : "s were") taken before the accessibility tree stopped changing, or while it held only the app's chrome — read them knowing that:",
+            "⚠ \(unsettled.count) capture\(unsettled.count == 1 ? " was" : "s were") taken before the accessibility tree stopped changing, or while it held only the app's chrome or a spinner — read them knowing that:",
         ] + unsettled.map { "    \($0.screenID) [\($0.stateSlug)]" }
     }
 
@@ -254,12 +261,50 @@ public struct CaptureBundleSummary {
         ] + chromeOnly.map { "    \($0.screenID) [\($0.stateSlug)]" }
     }
 
+    /// Captures that still showed a spinner when the content wait ran out, each with the spinner's label (SimWalk#267).
+    ///
+    /// Named apart from the chrome-only ones because the tree held a screen's title or more: the capture is of a screen that was still loading rather than one that never arrived, and the fix is the same nameable one, the screen's own `settle`.
+    private static func loadingLines(_ manifest: CaptureManifest) -> [String] {
+        let loading = manifest.screens.flatMap { screen in
+            screen.captures.compactMap { capture -> String? in
+                guard capture.axTreeSettled == false, capture.axTreeHasContent != false, let spinner = capture.axTreeSpinner else { return nil }
+                return "    \(screen.id) [\(capture.state.slug)]: \(spinner.label.map { "'\($0)'" } ?? "an unlabelled spinner")"
+            }
+        }
+        guard !loading.isEmpty else { return [] }
+        return [
+            "",
+            "⚠ \(loading.count) capture\(loading.count == 1 ? " still showed" : "s still showed") a spinner when the \(Int(SettleWindow.contentWait)) s content wait ran out — the screen was still loading; only a `settle` above \(SettleWindow.contentWaitExtendedAboveQuiet.formatted()) s extends the wait:",
+        ] + loading
+    }
+
+    private static func isUnreachable(_ outcome: ScreenOutcome) -> Bool {
+        if case .unreachable = outcome {
+            return true
+        }
+        return false
+    }
+
     /// One screen's line, carrying the route it walked as well as its verdict.
     ///
     /// A captured screen's route is the answer to "how was this reached", which a bundle records and nothing surfaced; an unreachable one prints both routes, because how far it got and what it was reaching for are different facts and the gap between them is where the failure is.
     ///
     /// **`position` leads the line** — this screen's 1-based place in this listing — because it is the number `bundle screen`'s own `<step>` counts from, and after a `--screens` walk or a walkbook reorder that number is not the walkbook's own position for the screen, only this bundle's.
-    static func screenLine(_ screen: CaptureManifest.ScreenRecord, position: Int) -> String {
+    static func screenLine(_ screen: CaptureManifest.ScreenRecord, position: Int, earlier: [(id: String, route: [Walkbook.RouteStep])] = []) -> String {
+        verdictLine(screen, position: position, earlier: earlier) + tookClause(screen)
+    }
+
+    /// The trailing `, took 4 min 12 s` of a screen that took a minute or more, or nothing (SimWalk#274).
+    ///
+    /// Nothing under a minute, so every other line prints as it always did: the reader's question is which screen was slow, not how long the fast ones were. `M min S s`, the seconds dropped when they are zero (`took 2 min`).
+    static func tookClause(_ screen: CaptureManifest.ScreenRecord) -> String {
+        guard let milliseconds = screen.wallMilliseconds, milliseconds >= 60000 else { return "" }
+        let seconds = milliseconds / 1000
+        let (minutes, rest) = (seconds / 60, seconds % 60)
+        return rest == 0 ? ", took \(minutes) min" : ", took \(minutes) min \(rest) s"
+    }
+
+    private static func verdictLine(_ screen: CaptureManifest.ScreenRecord, position: Int, earlier: [(id: String, route: [Walkbook.RouteStep])]) -> String {
         switch screen.outcome {
         case .captured:
             // A capture filed as identical to its base says so on the line (SimWalk#18): two states, one picture,
@@ -267,30 +312,31 @@ public struct CaptureBundleSummary {
             let states = screen.captures.map { capture in
                 capture.identicalTo.map { "\(capture.state.slug) (= \($0))" } ?? capture.state.slug
             }.joined(separator: ", ")
-            return "  \(position) \(screen.id) — captured [\(states)] via \(screen.routeTaken.rendered)\(ownSettle(screen))\(fixedAppearanceClause(screen))"
-        case let .unreachable(routeTried, reason, _, state):
+            return "  \(position) \(screen.id) — captured [\(states)] via \(screen.routeTaken.summarized(after: earlier))\(ownSettle(screen))\(fixedAppearanceClause(screen))"
+        case let .unreachable(routeTried, reason, _, state, stopped):
             // Why the last step did not land, where the runner knows — what its label matched and what the tap
             // did — because "route tried" alone reads like a missing element when a navigation bar took the label.
             let why = reason.map { " — \($0)" } ?? ""
             let stateClause = state.map { " \($0.clause)" } ?? ""
-            return "  \(position) \(screen.id) — UNREACHABLE\(stateClause), route tried: \(routeTried.rendered); completed: \(screen.routeTaken.rendered)\(why)"
+            let stoppedClause = stopped.map { " (last state captured: \($0))" } ?? ""
+            return "  \(position) \(screen.id) — UNREACHABLE\(stateClause), route tried: \(routeTried.summarized(after: earlier)); completed: \(screen.routeTaken.summarized(after: earlier))\(why)\(stoppedClause)"
         case let .buildMismatch(expected, found):
             return "  \(position) \(screen.id) — REFUSED, build mismatch: expected \(expected), found \(found)"
         case let .captureFailed(reason):
             // The states it *did* record are named, because "reached, got light, failed on dark" is a
             // different fact from "reached and recorded nothing", and a reader acts on them differently.
             let recorded = screen.captures.isEmpty ? "nothing" : "[\(screen.captures.map(\.state.slug).joined(separator: ", "))]"
-            return "  \(position) \(screen.id) — CAPTURE FAILED after \(recorded), via \(screen.routeTaken.rendered): \(reason)"
+            return "  \(position) \(screen.id) — CAPTURE FAILED after \(recorded), via \(screen.routeTaken.summarized(after: earlier)): \(reason)"
         case let .stateNotApplied(reason):
             // Named as a refusal rather than as a shortfall, because the screen was reached and drawn:
             // what is missing is any way to say which state the picture is of.
             guard let refused = screen.refusedStates else {
-                return "  \(position) \(screen.id) — REFUSED, state not applied, via \(screen.routeTaken.rendered): \(reason)"
+                return "  \(position) \(screen.id) — REFUSED, state not applied, via \(screen.routeTaken.summarized(after: earlier)): \(reason)"
             }
             // Both lists, because "refused dark, kept light" and "refused dark, reached nothing" are
             // different facts, and the kept states are the ones a reader can go and look at.
             let kept = screen.captures.isEmpty ? "nothing" : "[\(screen.captures.map(\.state.slug).joined(separator: ", "))]"
-            return "  \(position) \(screen.id) — REFUSED [\(refused.map(\.slug).joined(separator: ", "))], state not applied; kept \(kept), via \(screen.routeTaken.rendered): \(reason)\(fixedAppearanceClause(screen))"
+            return "  \(position) \(screen.id) — REFUSED [\(refused.map(\.slug).joined(separator: ", "))], state not applied; kept \(kept), via \(screen.routeTaken.summarized(after: earlier)): \(reason)\(fixedAppearanceClause(screen))"
         case let .unexpectedScreen(expected, found, reason):
             // Captured, named, and printed — the wrong screen is evidence a reader needs to see, not a
             // shortfall to hide behind a count.
@@ -307,7 +353,7 @@ public struct CaptureBundleSummary {
             // it as one (round 5, finding 4); whatever else held at the same time is named beside it exactly
             // as `stateNotApplied`'s own reason is printed above.
             let reasonClause = reason.map { " — \($0)" } ?? ""
-            return "  \(position) \(screen.id) — REFUSED, expected '\(expected)', found [\(foundText)] among the states it took (captured \(captured)\(refused)), via \(screen.routeTaken.rendered)\(reasonClause)"
+            return "  \(position) \(screen.id) — REFUSED, expected '\(expected)', found [\(foundText)] among the states it took (captured \(captured)\(refused)), via \(screen.routeTaken.summarized(after: earlier))\(reasonClause)"
         }
     }
 

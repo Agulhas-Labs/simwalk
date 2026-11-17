@@ -1,0 +1,34 @@
+{
+  "name": "route-fixture-pulse",
+  "appBundleID": "dev.simwalk.route-fixture",
+  "screens": [
+    {
+      "id": "pulse-start",
+      "route": [
+        { "openURL": { "url": "simwalk-fixture://pulse" } },
+        { "tap": { "label": "Start" } }
+      ],
+      "states": [{ "theme": "light" }]
+    },
+    {
+      "id": "pulse-far",
+      "route": [
+        { "openURL": { "url": "simwalk-fixture://pulse" } },
+        { "scrollTo": { "label": "Far node" } },
+        { "tap": { "label": "Far node" } }
+      ],
+      "states": [{ "theme": "light" }]
+    },
+    {
+      "id": "pulse-answer",
+      "expect": "route-pulse-done",
+      "route": [
+        { "openURL": { "url": "simwalk-fixture://pulse" } },
+        { "tap": { "label": "6" } },
+        { "tap": { "label": "Check" } },
+        { "tap": { "label": "Continue" } }
+      ],
+      "states": [{ "theme": "light" }]
+    }
+  ]
+}

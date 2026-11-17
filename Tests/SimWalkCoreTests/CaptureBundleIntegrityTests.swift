@@ -357,6 +357,34 @@ struct CaptureBundleIntegrityTests {
         ])
     }
 
+    /// SimWalk#281: a claimed last-state directory must be the layout's, and both files must be there.
+    @Test
+    func aClaimedUnreachedStateMustBeWhereTheLayoutFilesItAndPresent() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("simwalk-unreached-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        func manifest(_ stopped: String) -> CaptureManifest {
+            Self.manifest(screens: [CaptureManifest.ScreenRecord(id: "power", outcome: .unreachable(routeTried: [.tab(label: "Today")], stopped: stopped), routeTaken: [])])
+        }
+
+        let claimed = manifest("screens/power/unreached")
+        #expect(CaptureManifestValidator.problems(in: claimed).isEmpty)
+        #expect(CaptureManifestValidator.missingArtefactProblems(for: claimed, in: directory) == [
+            .unreachedArtefactMissing(screenID: "power", expectedPath: "screens/power/unreached/screen.png"),
+            .unreachedArtefactMissing(screenID: "power", expectedPath: "screens/power/unreached/ax-tree.json"),
+        ])
+
+        let files = directory.appendingPathComponent("screens/power/unreached")
+        try FileManager.default.createDirectory(at: files, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: files.appendingPathComponent("screen.png"))
+        try Data("{}".utf8).write(to: files.appendingPathComponent("ax-tree.json"))
+        #expect(CaptureManifestValidator.missingArtefactProblems(for: claimed, in: directory).isEmpty)
+
+        #expect(CaptureManifestValidator.problems(in: manifest("screens/power/light")) == [
+            .misfiledUnreachedDirectory(screenID: "power", stated: "screens/power/light", expected: "screens/power/unreached"),
+        ])
+    }
+
     /// A bound element names the step that bound it, so the step must be one the screen took (SimWalk#96 item 10).
     @Test
     func aBoundElementOnAStepBeyondTheRouteIsAProblem() {

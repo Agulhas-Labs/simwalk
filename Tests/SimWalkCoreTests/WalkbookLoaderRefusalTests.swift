@@ -284,6 +284,17 @@ struct WalkbookLoaderRefusalTests {
         #expect(problems == [.mangledExpect(screenID: "today", index: 0, value: "_TtGC7SwiftUI32NavigationStackHosting")])
     }
 
+    /// SimWalk#259: an `expectValues` that is empty, or holds a blank or padded label or a blank value, could never check anything or never pass.
+    @Test
+    func anEmptyBlankOrPaddedExpectValuesIsRefused() throws {
+        let screen = #"{"id":"home","route":[{"tab":{"label":"Home"}}],"states":[{"theme":"light"}],"expectValues":"#
+
+        #expect(try Self.refusal(screen: screen + "[]}") == [.emptyExpectValues(screenID: "home", index: 0)])
+        #expect(try Self.refusal(screen: screen + #"[{"label":" ","value":"Done"}]}"#) == [.blankExpectValueLabel(screenID: "home", index: 0, position: 0)])
+        #expect(try Self.refusal(screen: screen + #"[{"label":"X","value":"Done"},{"label":" X","value":"Done"}]}"#) == [.paddedExpectValueLabel(screenID: "home", index: 0, position: 1, value: " X")])
+        #expect(try Self.refusal(screen: screen + #"[{"label":"X","value":""}]}"#) == [.blankExpectValue(screenID: "home", index: 0, position: 0)])
+    }
+
     /// SimWalk#111: an `expectMenu` that is empty, or holds a blank or padded label, could never check anything or never pass.
     @Test
     func anEmptyBlankOrPaddedExpectMenuIsRefused() throws {

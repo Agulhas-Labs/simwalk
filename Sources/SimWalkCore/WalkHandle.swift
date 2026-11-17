@@ -46,7 +46,7 @@ public struct WalkHandle: Equatable, Sendable {
         progress.pid == pid && Self.milliseconds(progress.startedAt) == startedAtMs
     }
 
-    private static func milliseconds(_ date: Date) -> Int64 {
+    static func milliseconds(_ date: Date) -> Int64 {
         Int64((date.timeIntervalSince1970 * 1000).rounded())
     }
 }

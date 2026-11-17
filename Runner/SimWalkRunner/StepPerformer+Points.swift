@@ -56,7 +56,10 @@ extension StepPerformer {
         // release (6 s or more if it were pixels), so the velocity is the distance in points over `seconds`.
         let distance = hypot(placed[1].x - placed[0].x, placed[1].y - placed[0].y)
         let velocity = XCUIGestureVelocity(max(distance, 1) / seconds)
-        start.press(forDuration: hold, thenDragTo: end, withVelocity: velocity, thenHoldForDuration: 0)
+        // Made once more when XCTest timed out synthesizing it, and refused when it did twice (SimWalk#274).
+        guard GestureSynthesis.withRetry({ start.press(forDuration: hold, thenDragTo: end, withVelocity: velocity, thenHoldForDuration: 0) }) else {
+            return .blocked(reason: SynthesisTimeout.refusal(.drag, on: label))
+        }
         return landedAfterQuietPeriod()
     }
 

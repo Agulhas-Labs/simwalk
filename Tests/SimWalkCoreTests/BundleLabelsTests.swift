@@ -109,6 +109,24 @@ struct BundleLabelsTests {
         #expect(larger.manual.contains("Apple's audit reports 2 textClipped findings at accessibility sizes on root, general; its textClipped check proved unreliable, so check them by hand"), "\(larger.manual)")
     }
 
+    /// Chips past the edge in a horizontal strip are a manual line naming the count and screens; the claim still holds (SimWalk#287).
+    @Test
+    func runsInAHorizontalScrollerAreAManualLineThatDoesNotFailTheClaim() throws {
+        let directory = try TemporaryDirectory()
+        let strip = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874), children: [
+            AXNode(type: "ScrollView", frame: AXNode.Frame(x: 0, y: 240, width: 600, height: 68), children: [
+                AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 250, width: 160, height: 20), label: "Times tables"),
+                AXNode(type: "StaticText", frame: AXNode.Frame(x: 450, y: 250, width: 150, height: 20), label: "Fractions"),
+            ]),
+        ])
+        let bundle = try Self.bundle(in: directory, screens: ["home"], states: [Self.light(size: Self.ax3)], setup: true, tree: { _ in strip })
+
+        let larger = try #require(try BundleLabels(bundle, claims: [.largerText]).run().claims.first)
+
+        #expect(larger.fails.isEmpty, "\(larger.fails)")
+        #expect(larger.manual.contains("1 text run inside a horizontal scroller on home was not checked against the screen's width; check it scrolls into view"), "\(larger.manual)")
+    }
+
     /// Text drawn truncated fails Larger Text at an accessibility size only, in the overflow line's shape.
     @Test
     func truncatedTextFailsLargerTextAtAnAccessibilitySizeOnly() throws {
@@ -227,7 +245,19 @@ struct BundleLabelsTests {
         let largerFails = try #require(try BundleLabels(bundle, claims: [.largerText], recognizer: RecordingRecognizer(lines: [whole], failsOnPathsContaining: "accessibility")).run().claims.first)
 
         #expect(!smallerFails.manual.contains { $0.hasPrefix("whether text is drawn truncated") }, "\(smallerFails.manual)")
-        #expect(largerFails.manual.contains("whether text is drawn truncated on 1 capture: no readable screenshot"), "\(largerFails.manual)")
+        #expect(largerFails.manual.contains("whether text is drawn truncated on 1 capture: recognition failed: busy"), "\(largerFails.manual)")
+    }
+
+    /// Recognition failing on screenshots that are there is worded as that, with its cause, not as a missing screenshot (SimWalk#244).
+    @Test
+    func recognitionFailingOnReadableScreenshotsNamesTheCauseInTheManualLine() throws {
+        let directory = try TemporaryDirectory()
+        let bundle = try Self.bundle(in: directory, screens: ["root", "general", "about"], states: [Self.light(size: Self.ax3)], setup: true, tree: { _ in Self.titled() })
+
+        let larger = try #require(try BundleLabels(bundle, claims: [.largerText], recognizer: RecordingRecognizer(lines: [], failsOnPathsContaining: "accessibility")).run().claims.first)
+
+        #expect(larger.manual.contains("whether text is drawn truncated on 3 captures: recognition failed: busy"), "\(larger.manual)")
+        #expect(!larger.manual.contains { $0.contains("no readable screenshot") }, "\(larger.manual)")
     }
 
     /// With no recognizer the claim says truncation was not checked, never silence.
@@ -473,6 +503,11 @@ struct BundleLabelsTests {
 }
 
 private extension BundleLabelsTests {
+    /// A recognition failure naming its cause.
+    struct Busy: ScreenTextRecognitionFailure {
+        let cause = "busy"
+    }
+
     /// A recogniser that notes each screenshot it is asked to read, and can read only from, or fail on, paths containing a fragment.
     final class RecordingRecognizer: ScreenTextRecognizing, @unchecked Sendable {
         private let lock = NSLock()
@@ -496,10 +531,10 @@ private extension BundleLabelsTests {
         func lines(inPNGAt url: URL) throws -> [MirrorTextLine] {
             lock.withLock { paths.append(url.path) }
             if let fragment = failsOnPathsContaining, url.path.contains(fragment) {
-                throw CocoaError(.fileReadCorruptFile)
+                throw Busy()
             }
             if let fragment = failsOnPathsNotContaining, !url.path.contains(fragment) {
-                throw CocoaError(.fileReadCorruptFile)
+                throw Busy()
             }
             if let only = readsOnlyFromPathsContaining, !url.path.contains(only) {
                 return []

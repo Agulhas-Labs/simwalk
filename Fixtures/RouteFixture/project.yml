@@ -11,6 +11,12 @@
 # `replace-specimens.walkbook.json` walks the `type` step's `replace: true` refusals (SimWalk#214) against Hub's
 # `Open replace specimens` screen: a long left-to-right field, an uppercasing field, one that uppercases a beat later, a secure field, a disabled field.
 #
+# `pulse.walkbook.json` walks `simwalk-fixture://pulse` (`PulseScreen`): buttons pulsing forever, answer tiles that only change a
+# trait, and a feedback panel sliding in on a spring (SimWalk#251, #252, #253, #255, #258).
+#
+# `loading.walkbook.json` walks home's `Loading` and `Stalled` buttons (`LoadingScreen`): a title and a labelled
+# `ProgressView` that gives way to its content after 3 s, or never (SimWalk#267).
+#
 # `RouteFixtureFailureSpecimen` is a UI-test target that FAILS ON PURPOSE, with a scheme of its own (it is not in the
 # `RouteFixture` scheme, so building or testing RouteFixture is unchanged). It exists to make the result bundle
 # `Tests/SimWalkCoreTests/Fixtures/runner-failure-activities.json` is exported from; its test file says how.

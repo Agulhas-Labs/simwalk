@@ -412,6 +412,53 @@ extension LiveSessionStepTests {
 
     // MARK: - Pixels for a tree with no text (SimWalk#150)
 
+    // MARK: - A guard on a text screen across a pulse (SimWalk#252)
+
+    /// A screen with text and one button a `phaseAnimator` scales a point either way.
+    private static func pulsing(x: Double = 163, y: Double = 294, width: Double = 77, height: Double = 81, title: String = "Play") -> AXNode {
+        AXNode(type: "Application", frame: screenFrame, label: "Game", children: [
+            AXNode(type: "StaticText", frame: AXNode.Frame(x: 16, y: 100, width: 200, height: 40), label: "Level 3"),
+            AXNode(type: "Button", frame: AXNode.Frame(x: x, y: y, width: width, height: height), label: title),
+        ])
+    }
+
+    /// A stepper that read `read`, then a step guarded by that read's hash taken while the screen is `now`.
+    private func guardedStep(read: AXNode, now: AXNode) throws -> (response: LiveSessionResponse, printed: String) {
+        var stepper = LiveSessionStepper(quiet: 0.25)
+        stepper.remember(Self.screen(read))
+        let printed = ScreenHash.of(read)
+        let source = CountingTreeSource(tree: now)
+        return try (step(&stepper, on: source, of: now, guardHash: printed), printed)
+    }
+
+    @Test
+    func aGuardOnATextScreenHoldsWhenAButtonPulsedAPointAndTheStepSaysSo() throws {
+        let pulsed = Self.pulsing(x: 162, y: 293, width: 78, height: 82)
+        #expect(ScreenHash.of(pulsed) != ScreenHash.of(Self.pulsing()))
+
+        let (response, printed) = try guardedStep(read: Self.pulsing(), now: pulsed)
+
+        #expect(response.step?.outcome == .landed)
+        #expect(response.step?.pointsMoved == 1)
+        #expect(response.step?.pixelsMoved == nil)
+        let residue = try LiveSessionStepQuery(sent: .back, answer: #require(response.step), screen: response.screen).answer().residue
+        #expect(residue.contains("guard: held, elements moved up to 1 pt since \(printed) (the tree is otherwise the same, so the guard allows elements an animation moves a little)"))
+    }
+
+    @Test
+    func aGuardOnATextScreenWhoseLabelChangedIsRefused() throws {
+        let (response, printed) = try guardedStep(read: Self.pulsing(), now: Self.pulsing(title: "Pause"))
+
+        #expect(response.step == .snapshotChanged(expected: printed, found: ScreenHash.of(Self.pulsing(title: "Pause"))))
+    }
+
+    @Test
+    func aGuardOnATextScreenWhereAnElementSlidFarIsRefused() throws {
+        let (response, printed) = try guardedStep(read: Self.pulsing(), now: Self.pulsing(x: 263))
+
+        #expect(response.step == .snapshotChanged(expected: printed, found: ScreenHash.of(Self.pulsing(x: 263))))
+    }
+
     /// A game's tree: one view, nothing a reader lists.
     static let canvas = AXNode(type: "Application", frame: screenFrame, children: [AXNode(type: "Other", frame: screenFrame)])
 
@@ -573,7 +620,7 @@ extension LiveSessionStepTests {
     }
 
     @Test
-    func aHashTheSessionNeverPrintedIsRefusedWithNoPictureComparedAndATreeWithTextStillNeedsTheExactHash() throws {
+    func aHashTheSessionNeverPrintedIsRefusedWithNoPictureComparedAndATreeWithTextNeedsARememberedHashToHold() throws {
         let black = try PixelSignatureTests.png()
         let nudged = try PixelSignatureTests.png(whiteTopFraction: 0.05)
         var (stepper, _) = try stepperThatRead(Self.canvas, black)

@@ -112,6 +112,21 @@ struct AnswerContractTests {
         #expect(CaptureBundleHeader.line(withUnrecorded).contains("settled: 1/3 (1 unrecorded)"))
     }
 
+    /// The device's text size is in the header when it is not the default, in simctl's own name, and absent at `large` or when unrecorded (SimWalk#288).
+    @Test
+    func theHeaderNamesTheDeviceTextSizeOnlyWhenItIsNotTheDefault() {
+        var manifest = CaptureBundleTests.manifest()
+        manifest.screens = []
+
+        #expect(!CaptureBundleHeader.line(manifest).contains("text size"))
+
+        manifest.device.contentSize = "UICTContentSizeCategoryAccessibilityXL"
+        #expect(CaptureBundleHeader.line(manifest).contains("text size: accessibility-extra-large (device)"))
+
+        manifest.device.contentSize = ContentSizeCategoryName.defaultName
+        #expect(!CaptureBundleHeader.line(manifest).contains("text size"))
+    }
+
     /// The animation state sits between the device and the settle count when the bundle records it, and is absent when it does not (SimWalk#154).
     @Test
     func theHeaderNamesTheAnimationStateOnlyWhenRecorded() {

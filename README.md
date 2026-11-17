@@ -123,7 +123,7 @@ settle: the accessibility tree had to hold still for 250ms before each capture �
 accessibility: the XCUITest session switched com.apple.Accessibility AccessibilityEnabled off as it ended, and this walk switched it back on for <udid> and saw it hold — in-process accessibility suites on this device build their trees as before
 
 animations: UIKit off in the app under walk (SwiftUI animations still run); --animations keeps them
-result: ~/.simwalk/progress/<id>.result.json
+result: ~/.simwalk/progress/<handle>.result.json
 ~66k tokens saved — 9 screenshots (~4.1k each at the 2576 px cap) and 122 kB of accessibility trees at 4 bytes a token, against 1.5 kB served. A floor: only what this answer stood in for is counted.
 ```
 

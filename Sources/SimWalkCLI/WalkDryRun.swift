@@ -73,26 +73,42 @@ struct WalkDryRun {
             // report, started after the second's own launch.
             let runNonce = nonce()
             // Named before the run, as a walk's is, so a refusal reads this run's result bundle (SimWalk#50).
-            let resultBundlePath = prepared.runner.resultBundlePath(launchedAt: launchedAt, id: runNonce)
+            let firstResultBundlePath = prepared.runner.resultBundlePath(launchedAt: launchedAt, id: runNonce)
+            // A second runner when the first timed out launching and wrote nothing (SimWalk#266), with the nonce kept and a result bundle of its own.
+            var launchRetry = LaunchTimeoutRetry.Run(failure: nil, resultBundlePath: firstResultBundlePath)
             do {
                 try WalkTelemetry.measure(telemetry, \.runMs, runnerOwnsFile: false) {
-                    try prepared.runner.walk(
-                        walkbookPath: prepared.executedPath,
-                        outputPath: prepared.outputURL.path,
-                        buildHash: prepared.buildHash,
-                        logFilePath: logFileURL.path,
-                        settleMilliseconds: command.settle,
-                        animationsOffLibrary: prepared.animationsOffLibrary,
-                        runnerCommit: prepared.source.commit,
-                        dryRun: true,
-                        nonce: runNonce,
-                        resultBundlePath: resultBundlePath,
-                        on: prepared.simulator
+                    launchRetry = LaunchTimeoutRetry.run(
+                        resultBundlePath: firstResultBundlePath,
+                        nextResultBundlePath: { prepared.runner.resultBundlePath(launchedAt: now(), id: nonce()) },
+                        output: prepared.outputURL,
+                        // A dry run has no interruption stop of its own: nothing but the runner's own end stops it.
+                        stopped: { false },
+                        diagnose: { RunnerFailureDiagnosis.read(resultBundlePath: $0, shell: shell) },
+                        attempt: { resultBundlePath in
+                            try prepared.runner.walk(
+                                walkbookPath: prepared.executedPath,
+                                outputPath: prepared.outputURL.path,
+                                buildHash: prepared.buildHash,
+                                logFilePath: logFileURL.path,
+                                settleMilliseconds: command.settle,
+                                animationsOffLibrary: prepared.animationsOffLibrary,
+                                runnerCommit: prepared.source.commit,
+                                dryRun: true,
+                                nonce: runNonce,
+                                resultBundlePath: resultBundlePath,
+                                on: prepared.simulator
+                            )
+                        }
                     )
+                    if let failure = launchRetry.failure {
+                        throw failure
+                    }
                 }
             } catch {
                 runnerFailure = error
             }
+            let resultBundlePath = launchRetry.resultBundlePath
             // Held to the walkbook the runner was handed — the `--screens` subset when there was one — read from the
             // same file, so the report is compared with exactly the plan that ran. It is this run's because the path
             // was refused above unless nothing was there, and because it names the build this run installed, started
@@ -119,7 +135,11 @@ struct WalkDryRun {
                 launchConditionGaps: launchConditionGaps,
                 setup: setup,
                 setupNotMade: setupNotMade,
-                diagnosingRunnerFailure: { RunnerFailureDiagnosis.read(resultBundlePath: resultBundlePath, shell: shell) },
+                diagnosingRunnerFailure: { launchRetry.diagnosis ?? RunnerFailureDiagnosis.read(resultBundlePath: resultBundlePath, shell: shell) },
+                launchRetry: launchRetry,
+                checkingLaunch: { _ in
+                    LaunchTimeoutCheck.line(attempts: launchRetry.attempts, executedPath: prepared.executedPath, bundleID: prepared.book.appBundleID, simulator: prepared.simulator, now: now(), shell: shell)
+                },
                 readingReport: { try read.get() }
             )
             // `prepare` slimmed or stocked the device for a dry run as for a walk, so the answer says so as a walk's does.
@@ -139,24 +159,35 @@ struct WalkDryRun {
         setup: DeviceSetup.Report? = nil,
         setupNotMade: String? = nil,
         diagnosingRunnerFailure diagnose: () -> RunnerFailureDiagnosis? = { nil },
+        launchRetry: LaunchTimeoutRetry.Run? = nil,
+        checkingLaunch: (RunnerFailureDiagnosis) -> String? = { _ in nil },
         readingReport read: () throws -> RouteProbeReport
     ) throws -> Outcome {
         let report: RouteProbeReport
         do {
             report = try read()
         } catch {
-            let refusal = runnerFailure ?? error
+            // As for a walk: a save failure over a passed test is a line under the reader's error, not the refusal (SimWalk#289).
+            let saveFailure = (runnerFailure as? RunnerError)?.resultBundleNotSavedReason == nil ? nil : runnerFailure
+            let refusal = saveFailure == nil ? runnerFailure ?? error : error
             guard let handback else { throw refusal }
-            throw WalkCommand.Refusal(underlying: refusal, handback: handback, setup: setup, setupNotMade: setupNotMade, runnerDiagnosis: runnerFailure == nil ? [] : diagnose()?.lines ?? [])
+            let diagnosis = saveFailure.map { [String(describing: $0)] }
+                ?? (runnerFailure == nil ? [] : LaunchTimeoutRetry.diagnosisLines(diagnosis: diagnose(), retry: launchRetry, checkingLaunch: checkingLaunch))
+            throw WalkCommand.Refusal(underlying: refusal, handback: handback, setup: setup, setupNotMade: setupNotMade, runnerDiagnosis: diagnosis)
         }
-        return Outcome(
+        // A test that passed and a result bundle `xcodebuild` then failed to save leaves the report whole, as for a walk (SimWalk#289).
+        let notSaved = (runnerFailure as? RunnerError)?.resultBundleNotSavedReason
+        var outcome = Outcome(
             report: report,
             launchConditionGaps: launchConditionGaps,
-            survivedRunnerFailure: runnerFailure.map { String(describing: $0) },
+            survivedRunnerFailure: notSaved == nil ? runnerFailure.map { String(describing: $0) } : nil,
             handback: handback,
             setup: setup,
             setupNotMade: setupNotMade
         )
+        outcome.resultBundleNotSaved = notSaved
+        outcome.launchRetryNote = launchRetry?.note(writing: "report")
+        return outcome
     }
 }
 
@@ -168,6 +199,10 @@ extension WalkDryRun {
         let launchConditionGaps: [RouteProbeSummary.LaunchConditionGap]
         /// The runner's own failure, when a readable report was on disk in spite of it.
         let survivedRunnerFailure: String?
+        /// Why `xcodebuild` could not save the result bundle of a runner whose test passed (SimWalk#289); `nil` when it saved it or the runner failed otherwise.
+        ///
+        /// It does not qualify the verdict.
+        var resultBundleNotSaved: String?
         /// What the run put back on the device; `nil` only where a caller supplied a report without a run.
         let handback: DeviceHandback?
         /// The walkbook's setup — what the run made and what the handback put back, and a leftover another walk left, settled first; `nil` when the walkbook made none and there was no leftover (SimWalk#73).
@@ -176,6 +211,8 @@ extension WalkDryRun {
         let setupNotMade: String?
         /// What the run did about the device's launchd services (``SlimWalkProvisioning/afterBoot(_:)``); `nil` when nothing was decided.
         var deviceNote: String?
+        /// That a second runner wrote this report because the first timed out launching the app (SimWalk#266); `nil` when one runner ran.
+        var launchRetryNote: String?
 
         init(
             report: RouteProbeReport,
@@ -209,6 +246,10 @@ extension WalkDryRun {
         /// The failure's own text, and what the run handed the device back in.
         private var notes: [String] {
             var lines: [String] = []
+            if let resultBundleNotSaved {
+                let resolved = report.probes.count { $0.outcome == .resolved }
+                lines.append("result bundle not saved (\(resultBundleNotSaved)); \(resolved) of \(report.probes.count) routes resolved")
+            }
             if let survivedRunnerFailure {
                 lines.append("⚠ the runner reported a failure and this report survived it — every route above is what the run actually followed: \(survivedRunnerFailure)")
             }
@@ -217,6 +258,9 @@ extension WalkDryRun {
             }
             if let deviceNote {
                 lines += (lines.isEmpty ? [] : [""]) + [deviceNote]
+            }
+            if let launchRetryNote {
+                lines += (lines.isEmpty ? [] : [""]) + [launchRetryNote]
             }
             if let setup {
                 lines += (lines.isEmpty ? [] : [""]) + setup.lines

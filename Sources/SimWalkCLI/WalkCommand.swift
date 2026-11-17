@@ -38,7 +38,7 @@ struct WalkCommand: ParsableCommand {
     @Option(
         name: .long,
         parsing: .upToNextOption,
-        help: "Walk only these screen ids, in walkbook order. The bundle records the subset as the plan it ran, so it does not stand in for a full walk."
+        help: "Walk only these screen ids, in walkbook order: a comma-separated list, or the option repeated. The bundle records the subset as the plan it ran, so it does not stand in for a full walk."
     )
     var screens: [String] = []
 
@@ -157,7 +157,7 @@ struct WalkCommand: ParsableCommand {
         return try WalkDryRun.perform(self, shell: shell, runner: resolveRunner, logFileURL: logFileURL, builds: builds, leases: leases, telemetry: telemetry, firstLaunch: firstLaunch, animationsLibrary: animationsLibrary, note: note)
     }
 
-    /// What this run writes about itself: the progress file `<session>.json` beside the usage log, and a walk's result file beside that — a dry run writes none (`Docs/SIMWALK-PROGRESS.md` §1).
+    /// What this run writes about itself: the progress file `<session>.json` beside the usage log, and a walk's own result file `<handle>.result.json` beside that — a dry run writes none (`Docs/SIMWALK-PROGRESS.md` §1).
     ///
     /// The session is `CLAUDE_CODE_SESSION_ID` — the MCP server and the walk it serves are one process — and `default` without one; the directory is the usage log's, so `SIMWALK_USAGE_LOG` moves both. A run that starts while another of the session's is alive writes `<session>.2.json` instead, and so on: the telemetry holds a ``ProgressClaim`` on its files for as long as it lives (SimWalk#83).
     ///
@@ -429,34 +429,50 @@ struct WalkCommand: ParsableCommand {
         let runNonce = nonce()
         // Named before the run, so a refusal reads this run's result bundle rather than searching for the
         // newest (SimWalk#50); the nonce names it, as the dry run's does.
-        let resultBundlePath = runner.resultBundlePath(launchedAt: launchedAt, id: runNonce)
-        // The first runner alone is handed the progress file and timed as `runMs`: a second pass runs during `matching`, and
-        // one that took the file over would write `running` after it.
+        let firstResultBundlePath = runner.resultBundlePath(launchedAt: launchedAt, id: runNonce)
+        // The runner(s) of the launch-timeout retry (SimWalk#266): a second runner when the first timed out launching and wrote nothing.
+        // It keeps the nonce, so the bundle either writes is this walk's, and takes a result bundle of its own.
+        var launchRetry = LaunchTimeoutRetry.Run(failure: nil, resultBundlePath: firstResultBundlePath)
+        // The launch-timeout runners are handed the progress file and timed as `runMs`; the appearance retry's second pass is not: it runs
+        // during `matching`, and one that took the file over would write `running` after it.
         do {
             markRunner?(.started)
             defer { markRunner?(.ended) }
             try WalkTelemetry.measure(telemetry, \.runMs) {
-                try runner.walk(
-                    walkbookPath: run.executedPath,
-                    outputPath: outputURL.path,
-                    buildHash: buildHash,
-                    logFilePath: logFileURL.path,
-                    settleMilliseconds: settle,
-                    motion: motion,
-                    appleAudit: appleAudit,
-                    animationsOffLibrary: run.animationsOffLibrary,
-                    deviceAppearance: foundAppearance,
-                    deviceLocale: foundLocale,
-                    runnerCommit: source.commit,
-                    nonce: runNonce,
-                    resultBundlePath: resultBundlePath,
-                    progressPath: telemetry?.writer.url.path,
-                    on: simulator
+                launchRetry = LaunchTimeoutRetry.run(
+                    resultBundlePath: firstResultBundlePath,
+                    nextResultBundlePath: { runner.resultBundlePath(launchedAt: now(), id: nonce()) },
+                    output: outputURL,
+                    stopped: { run.interruptionStop.isStopped },
+                    diagnose: { RunnerFailureDiagnosis.read(resultBundlePath: $0, shell: shell) },
+                    attempt: { resultBundlePath in
+                        try runner.walk(
+                            walkbookPath: run.executedPath,
+                            outputPath: outputURL.path,
+                            buildHash: buildHash,
+                            logFilePath: logFileURL.path,
+                            settleMilliseconds: settle,
+                            motion: motion,
+                            appleAudit: appleAudit,
+                            animationsOffLibrary: run.animationsOffLibrary,
+                            deviceAppearance: foundAppearance,
+                            deviceLocale: foundLocale,
+                            runnerCommit: source.commit,
+                            nonce: runNonce,
+                            resultBundlePath: resultBundlePath,
+                            progressPath: telemetry?.writer.url.path,
+                            on: simulator
+                        )
+                    }
                 )
+                if let failure = launchRetry.failure {
+                    throw failure
+                }
             }
         } catch {
             runnerFailure = error
         }
+        let resultBundlePath = launchRetry.resultBundlePath
         // The end of the window a runner failure's crash reports are read over (SimWalk#176).
         let runnerEndedAt = now()
         telemetry?.takeBack()
@@ -583,8 +599,13 @@ struct WalkCommand: ParsableCommand {
                 appearanceRetry: retry?.report,
                 setup: setup,
                 setupNotMade: setupNotMade,
-                diagnosingRunnerFailure: { RunnerFailureDiagnosis.read(resultBundlePath: resultBundlePath, shell: shell) },
+                diagnosingRunnerFailure: { launchRetry.diagnosis ?? RunnerFailureDiagnosis.read(resultBundlePath: resultBundlePath, shell: shell) },
                 blamingCrashes: { crashReports.blame($0, resultBundlePath: resultBundlePath, launchedAt: launchedAt, endedAt: runnerEndedAt, shell: shell) },
+                launchRetry: launchRetry,
+                // An interrupted walk is never launch-checked: its device is given back to whoever stopped it.
+                checkingLaunch: { _ in
+                    run.interruptionStop.isStopped ? nil : LaunchTimeoutCheck.line(attempts: launchRetry.attempts, executedPath: run.executedPath, bundleID: book.appBundleID, simulator: simulator, now: now(), shell: shell)
+                },
                 readingBundle: { try recorded ?? final.get() }
             )
         } catch var refusal as Refusal {
@@ -769,53 +790,6 @@ struct WalkCommand: ParsableCommand {
         "the lease on \(lease.udid) could not be renewed: \(reason)" + (consequence.map { "; \($0)" } ?? "")
     }
 
-    /// What a walk answers once the runner has had its say: the bundle when one was written and is readable, and the runner's own failure when it was not.
-    ///
-    /// Separated from `performWalk` because it is the whole decision and none of the I/O — the half that has to be checkable without a simulator, a build and a two-minute walk. The runner's error is preferred over the bundle's when both failed, because "the walk could not run" explains "there is no bundle here" and the reverse explains nothing.
-    ///
-    /// **A refusal still carries the handback.** A walk with no readable bundle ended an XCUITest session all the same, so the device was switched off all the same, and the line saying whether it was put back — with the command when it was not — is the one a reader of that refusal most needs.
-    ///
-    /// **And what the runner's result bundle says about its failure** (SimWalk#50), asked of `diagnose` only when a runner failure is the refusal — never for a walk that answered with a bundle, so a run that worked prints nothing new.
-    ///
-    /// **A failure that was XCTest blaming the walk for a host process's crash is not a runner failure** (SimWalk#176): `blame` is asked of a runner failure a readable bundle survived, and an excused one leaves the bundle unqualified, its line in the residue; an unexplained one keeps the qualification and adds its line.
-    static func outcome(
-        runnerFailure: Error?,
-        handback: DeviceHandback?,
-        appearanceRetry: AppearanceRetryPass.Report? = nil,
-        setup: DeviceSetup.Report? = nil,
-        setupNotMade: String? = nil,
-        diagnosingRunnerFailure diagnose: () -> RunnerFailureDiagnosis? = { nil },
-        blamingCrashes blame: (Error) -> XCTestCrashBlame = { _ in .notApplicable },
-        readingBundle read: () throws -> CaptureBundle
-    ) throws -> Outcome {
-        let bundle: CaptureBundle
-        do {
-            bundle = try read()
-        } catch {
-            let refusal = runnerFailure ?? error
-            guard let handback else { throw refusal }
-            throw Refusal(
-                underlying: refusal,
-                handback: handback,
-                appearanceRetry: appearanceRetry?.notes(udid: handback.accessibility.udid, recorded: false) ?? [],
-                setup: setup,
-                setupNotMade: setupNotMade,
-                runnerDiagnosis: runnerFailure == nil ? [] : diagnose()?.lines ?? []
-            )
-        }
-        let crashes = runnerFailure.map(blame) ?? .notApplicable
-        var outcome = Outcome(
-            bundle: bundle,
-            survivedRunnerFailure: crashes.isExcused ? nil : runnerFailure.map { String(describing: $0) },
-            handback: handback,
-            appearanceRetry: appearanceRetry,
-            setup: setup,
-            setupNotMade: setupNotMade
-        )
-        outcome.xctestCrashes = crashes
-        return outcome
-    }
-
     /// The bundle at `url`, provided it is this walk's own: its manifest started no earlier than the walk launched its runner, was written against `buildHash`, and carries `nonce` — the value this walk's host generated and passed its own runner, which catches what the build hash and the start-time slack alone miss: two overlapping walks of the same build to the same path, each able to read the other's bundle (SimWalk#41), the way `RouteProbeReport.read` closes the same gap for a dry run (SimWalk#36).
     ///
     /// A second's slack on the start, because the manifest rounds to the millisecond and the runner's clock is the simulator's, not this process's.
@@ -852,6 +826,63 @@ struct WalkCommand: ParsableCommand {
 }
 
 extension WalkCommand {
+    /// What a walk answers once the runner has had its say: the bundle when one was written and is readable, and the runner's own failure when it was not.
+    ///
+    /// Separated from `performWalk` because it is the whole decision and none of the I/O — the half that has to be checkable without a simulator, a build and a two-minute walk. The runner's error is preferred over the bundle's when both failed, because "the walk could not run" explains "there is no bundle here" and the reverse explains nothing.
+    ///
+    /// **A refusal still carries the handback.** A walk with no readable bundle ended an XCUITest session all the same, so the device was switched off all the same, and the line saying whether it was put back — with the command when it was not — is the one a reader of that refusal most needs.
+    ///
+    /// **And what the runner's result bundle says about its failure** (SimWalk#50), asked of `diagnose` only when a runner failure is the refusal — never for a walk that answered with a bundle, so a run that worked prints nothing new.
+    ///
+    /// **A failure that was XCTest blaming the walk for a host process's crash is not a runner failure** (SimWalk#176): `blame` is asked of a runner failure a readable bundle survived, and an excused one leaves the bundle unqualified, its line in the residue; an unexplained one keeps the qualification and adds its line.
+    static func outcome(
+        runnerFailure: Error?,
+        handback: DeviceHandback?,
+        appearanceRetry: AppearanceRetryPass.Report? = nil,
+        setup: DeviceSetup.Report? = nil,
+        setupNotMade: String? = nil,
+        diagnosingRunnerFailure diagnose: () -> RunnerFailureDiagnosis? = { nil },
+        blamingCrashes blame: (Error) -> XCTestCrashBlame = { _ in .notApplicable },
+        launchRetry: LaunchTimeoutRetry.Run? = nil,
+        checkingLaunch: (RunnerFailureDiagnosis) -> String? = { _ in nil },
+        readingBundle read: () throws -> CaptureBundle
+    ) throws -> Outcome {
+        let bundle: CaptureBundle
+        do {
+            bundle = try read()
+        } catch {
+            // A save failure over a test that passed is not why the bundle is unreadable: the reader's error is the refusal, the save failure a line under it, and no result bundle to diagnose (SimWalk#289).
+            let saveFailure = (runnerFailure as? RunnerError)?.resultBundleNotSavedReason == nil ? nil : runnerFailure
+            let refusal = saveFailure == nil ? runnerFailure ?? error : error
+            guard let handback else { throw refusal }
+            throw Refusal(
+                underlying: refusal,
+                handback: handback,
+                appearanceRetry: appearanceRetry?.notes(udid: handback.accessibility.udid, recorded: false) ?? [],
+                setup: setup,
+                setupNotMade: setupNotMade,
+                runnerDiagnosis: saveFailure.map { [String(describing: $0)] }
+                    ?? (runnerFailure == nil ? [] : LaunchTimeoutRetry.diagnosisLines(diagnosis: diagnose(), retry: launchRetry, checkingLaunch: checkingLaunch))
+            )
+        }
+        // A test that passed and a result bundle `xcodebuild` then failed to save leaves the bundle whole: said on one line, never a qualification (SimWalk#289).
+        let notSaved = (runnerFailure as? RunnerError)?.resultBundleNotSavedReason
+        let failure = notSaved == nil ? runnerFailure : nil
+        let crashes = failure.map(blame) ?? .notApplicable
+        var outcome = Outcome(
+            bundle: bundle,
+            survivedRunnerFailure: crashes.isExcused ? nil : failure.map { String(describing: $0) },
+            handback: handback,
+            appearanceRetry: appearanceRetry,
+            setup: setup,
+            setupNotMade: setupNotMade
+        )
+        outcome.resultBundleNotSaved = notSaved
+        outcome.xctestCrashes = crashes
+        outcome.launchRetryNote = launchRetry?.note(writing: "bundle")
+        return outcome
+    }
+
     /// What a walk produced: the bundle, and the two things a reader has to know that the bundle cannot say.
     ///
     /// The bundle is the answer and it stays the answer. What it cannot carry is a fact about the *run* rather than the walk — that `xcodebuild` reported a failure the bundle outlived, and what the walk handed the device back in. Both are printed under the summary and neither is written into a manifest, because a manifest attests to a walk and these are not part of one.
@@ -867,8 +898,16 @@ extension WalkCommand {
         var deviceNote: String?
         /// What the walk did about a timed-out Apple audit's `testmanagerd` on this device (SimWalk#173); `nil` when no audit timed out there.
         var testManagerNote: String?
+        /// That a second runner wrote this bundle because the first timed out launching the app (SimWalk#266); `nil` when one runner ran.
+        ///
+        /// It does not qualify the verdict.
+        var launchRetryNote: String?
         /// The runner's own failure, when a readable bundle was on disk in spite of it — `nil` when it was XCTest blaming the walk for a host process's crash (``xctestCrashes``).
         let survivedRunnerFailure: String?
+        /// Why `xcodebuild` could not save the result bundle of a runner whose test passed (SimWalk#289); `nil` when it saved it or the runner failed otherwise.
+        ///
+        /// It does not qualify the verdict.
+        var resultBundleNotSaved: String?
         /// What the runner's failure came to as XCTest's crash blame (SimWalk#176): excused, and its line said in place of the failure; unexplained, and its line said after it.
         var xctestCrashes: XCTestCrashBlame = .notApplicable
         /// What the walk put back on the device — every walk has one; `nil` only where a caller supplied a bundle without a walk.
@@ -952,6 +991,16 @@ extension WalkCommand {
         /// Lines printed under the residue: the failure's own text, and what the walk handed the device back in — whose qualifications, if any, are on the verdict as well.
         private var notes: [String] {
             var lines: [String] = []
+            if let resultBundleNotSaved {
+                let captured = bundle.manifest.screens.count { screen in
+                    if case .captured = screen.outcome {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                lines.append("result bundle not saved (\(resultBundleNotSaved)); \(captured) of \(bundle.manifest.screens.count) screens captured")
+            }
             if let survivedRunnerFailure {
                 lines.append("⚠ the runner reported a failure and this bundle survived it — every screen above is what the run actually recorded, and the screens it never reached say so: \(survivedRunnerFailure)")
             }
@@ -981,6 +1030,9 @@ extension WalkCommand {
             if let testManagerNote {
                 lines += (lines.isEmpty ? [] : [""]) + [testManagerNote]
             }
+            if let launchRetryNote {
+                lines += (lines.isEmpty ? [] : [""]) + [launchRetryNote]
+            }
             // The manifest's record prints with the bundle's own residue; only a record that could not be written is said here.
             if let setup, bundle.manifest.deviceSetup == nil {
                 lines += (lines.isEmpty ? [] : [""]) + setup.lines + ["⚠ the setup above is not recorded in the bundle's manifest — rewriting it failed"]
@@ -990,6 +1042,12 @@ extension WalkCommand {
             }
             for (label, other) in zip(otherDeviceLabels, otherDevices) where !other.notes.isEmpty {
                 lines += (lines.isEmpty ? [] : [""]) + ["\(label):"] + other.notes
+            }
+            // The text the answer reports as failure: the runner failure it survived, and the bundle's own verdict and residue.
+            let summary = CaptureBundleSummary(bundle).answer()
+            let failureTexts = [survivedRunnerFailure].compactMap(\.self) + [summary.verdict.line] + summary.residue
+            if let load = HostLoadLine.line(failureTexts: failureTexts, loadAverage: SimctlLaunchCheck.hostLoadAverage, cores: ProcessInfo.processInfo.activeProcessorCount) {
+                lines += (lines.isEmpty ? [] : [""]) + [load]
             }
             return lines
         }
@@ -1050,7 +1108,8 @@ extension WalkCommand {
 
         var description: String {
             let underlyingDescription = String(describing: underlying)
-            let notes = appearanceRetry + handback.notes(by: actor) + (setup?.lines ?? []) + [setupNotMade, testManagerNote].compactMap(\.self)
+            let load = HostLoadLine.line(failureTexts: [underlyingDescription] + runnerDiagnosis, loadAverage: SimctlLaunchCheck.hostLoadAverage, cores: ProcessInfo.processInfo.activeProcessorCount)
+            let notes = appearanceRetry + handback.notes(by: actor) + (setup?.lines ?? []) + [setupNotMade, testManagerNote, load].compactMap(\.self)
             // A multi-line description (`CaptureBundleError.bundleFromAnotherWalk`'s bulleted problem list, say)
             // already ends its own thought on its last bullet — joining a note onto it with " — " reads as
             // though the note were part of that bullet. A single-line description has no such line to land on,

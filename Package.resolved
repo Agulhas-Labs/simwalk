@@ -1,5 +1,5 @@
 {
-  "originHash" : "e0a7af96516b02780cfb435b9ba20502741ff3aef73bb0c4ca94ab263fabc7e5",
+  "originHash" : "74200f6f8033a9e7234b5e3fd7658f905ff9aad956f52cf3f88a32fa07f2be10",
   "pins" : [
     {
       "identity" : "swift-argument-parser",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Agulhas-Labs/swift-fieldwork.git",
       "state" : {
-        "revision" : "689bae9eb6d51be37ba818b1e55a72c3abfb3cf6",
-        "version" : "0.9.0"
+        "revision" : "197c9d6c3885b4816f94d6f24d89f29c4a589b40",
+        "version" : "0.10.0"
       }
     }
   ],

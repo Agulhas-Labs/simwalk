@@ -162,6 +162,83 @@ struct WalkCommandTests {
         #expect(thrown != nil)
     }
 
+    /// SimWalk#289: a passed test whose result bundle was not saved says nothing about why the capture bundle is unreadable: the reader's error is the refusal, the save failure a line under it, no diagnosis asked.
+    @Test
+    func aSaveFailureOverAnUnreadableBundleIsRefusedWithTheReadersError() throws {
+        let save = RunnerError.resultBundleNotSaved(reason: "mkstemp failed")
+        var diagnosed = false
+        let thrown = try #require(#expect(throws: WalkCommand.Refusal.self) {
+            try WalkCommand.outcome(runnerFailure: save, handback: Self.cleanHandback, diagnosingRunnerFailure: {
+                diagnosed = true
+                return nil
+            }, readingBundle: {
+                throw CaptureBundleError.manifestMissing(bundlePath: "/nowhere.simwalk", expectedPath: "/nowhere.simwalk/manifest.json")
+            })
+        })
+
+        #expect(thrown.underlying is CaptureBundleError)
+        #expect(thrown.runnerDiagnosis == [String(describing: save)])
+        #expect(!diagnosed)
+    }
+
+    /// SimWalk#289: a runner whose test passed and whose one failure was `xcodebuild` saving its result bundle is no runner failure — exit 0, and one line saying the bundle was not saved and what the walk captured.
+    @Test(arguments: [Int32(1), 65])
+    func aRunnerWhoseOnlyFailureWasSavingItsResultBundleIsNotQualified(runnerStatus: Int32) throws {
+        let directory = try TemporaryDirectory()
+        let writes = try Self.runnerWrites(in: directory)
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: runnerStatus, runnerOutput: (Self.passedTestOutput, Self.resultBundleNotSaved), writes: writes)
+        let walk = try WalkCommand.parse([Self.walkbook(in: directory), "--output", writes.to.path, "--device", "UDID-1"])
+
+        let outcome = try walk.performWalk(shell: Shell(script: script.run), pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory))
+        let recorder = StreamRecorder()
+        try Self.command().run(log: Self.log(in: directory), emit: recorder.emit, emitError: recorder.emitError) { outcome }
+
+        #expect(outcome.survivedRunnerFailure == nil)
+        #expect(outcome.answer().verdict.exitCode == 0)
+        #expect(recorder.out.joined().contains("result bundle not saved (mkstemp: No such file or directory); 1 of 1 screens captured"))
+        #expect(!recorder.out.joined().contains("the runner reported a failure"))
+    }
+
+    /// The same save failure beside a failed test, or with no word from `xcodebuild` that the test passed, is the qualified runner failure it always was: only a pass `xcodebuild` printed excuses the save.
+    @Test(arguments: [
+        "Test Case '-[SimWalkRunner.WalkRunner testWalk]' failed (12.000 seconds).\n",
+        "Test Case '-[SimWalkRunner.WalkRunner testWalk]' passed (39.179 seconds).\nFailing tests:\n\tWalkRunner.testWalk()\n",
+        "Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.\nTest Case '-[SimWalkRunner.WalkRunner testWalk]' passed (39.179 seconds).\n",
+        "\n",
+    ])
+    func aSaveFailureWithoutAPassingTestStaysARunnerFailure(standardOutput: String) throws {
+        let directory = try TemporaryDirectory()
+        let writes = try Self.runnerWrites(in: directory)
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 65, runnerOutput: (standardOutput, Self.resultBundleNotSaved), writes: writes)
+        let walk = try WalkCommand.parse([Self.walkbook(in: directory), "--output", writes.to.path, "--device", "UDID-1"])
+
+        let outcome = try walk.performWalk(shell: Shell(script: script.run), pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory))
+
+        #expect(outcome.resultBundleNotSaved == nil)
+        #expect(outcome.survivedRunnerFailure != nil)
+        try Self.expectQualifiedExit(reporting: outcome, in: directory)
+    }
+
+    /// What `xcodebuild` printed of a walk's test that passed, as measured on iOS 27.0.
+    static var passedTestOutput: String {
+        """
+        Test Suite 'WalkRunner' started at 2026-10-29 12:57:21.615.
+        Test Case '-[SimWalkRunner.WalkRunner testWalk]' started.
+        Test Case '-[SimWalkRunner.WalkRunner testWalk]' passed (39.179 seconds).
+        Test Suite 'WalkRunner' passed at 2026-10-29 12:58:00.801.
+        \t Executed 1 test, with 0 failures (0 unexpected) in 39.179 (39.186) seconds
+
+        """
+    }
+
+    /// The result-bundle save failure as `xcodebuild` printed it in real use (SimWalk#289).
+    static var resultBundleNotSaved: String {
+        """
+        Error saving invocation record to resultBundlePath:Error Domain=IDEFoundationErrorDomain Code=12 "The result bundle could not be saved due to multiple errors: failed to import activity log, underlying error: fileSystemFailure(reason: "mkstemp: No such file or directory"), The operation couldn’t be completed. (XCResultKit_CASDB.FileBackedCASDatabase.Error error 0.)" UserInfo={NSUnderlyingError=0x7c025f6220 {Error Domain=IDEFoundation.ResultBundleError Code=2 "failed to import activity log, underlying error: fileSystemFailure(reason: "mkstemp: No such file or directory")"}}
+
+        """
+    }
+
     /// With no runner failure, a bundle that cannot be read is still the refusal it always was.
     @Test
     func abundleThatCannotBeReadIsStillArefusalWhenTheRunnerSucceeded() {
@@ -276,6 +353,26 @@ struct WalkCommandTests {
         #expect(outcome.handback?.appearance == .restored(.light))
         #expect(outcome.handback?.reset == .held)
         #expect((outcome.survivedRunnerFailure != nil) == (runnerStatus != 0))
+    }
+
+    /// SimWalk#288: the device's Dynamic Type size is read before the runner, handed to it, and lands in the manifest under the category name a state's `dynamicTypeSize` uses; a size `simctl` has no name for records nothing.
+    @Test(arguments: [
+        ("accessibility-extra-large", "UICTContentSizeCategoryAccessibilityXL"),
+        ("large", "UICTContentSizeCategoryL"),
+        ("unspecified", nil),
+    ] as [(String, String?)])
+    func awalkRecordsTheDevicesTextSize(printed: String, recorded: String?) throws {
+        let directory = try TemporaryDirectory()
+        let writes = try Self.runnerWrites(in: directory)
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 0, writes: writes, contentSize: printed)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", writes.to.path, "--device", "UDID-1"])
+
+        _ = try command.performWalk(shell: Shell(script: script.run), pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory))
+
+        let runner = try #require(script.calls.first { $0.arguments.contains("test-without-building") })
+
+        #expect(runner.environment["TEST_RUNNER_SIMWALK_DEVICE_CONTENT_SIZE"] == recorded)
+        #expect(try CaptureBundle.read(at: writes.to).manifest.device.contentSize == recorded)
     }
 
     /// XCTest blamed the walk for a crash of a process named `xctest` on the Mac (SimWalk#176).
@@ -401,6 +498,111 @@ struct WalkCommandTests {
             }
             return result
         })
+    }
+
+    /// XCUITest's text when an app's first launch outlasts it, as the walkbook's app (`com.example.probe`) names it.
+    static var launchTimeoutText: String {
+        "Failed to launch com.example.probe: Timed out attempting to launch app."
+    }
+
+    /// `script` as a runner whose result bundle (made at the `-resultBundlePath` it is handed) lists one failure, `failureText`, and a device where `simctl launch` answers `com.example.probe: 4312`.
+    static func launchFailureShell(_ script: WalkScript, failureText: String = launchTimeoutText) -> Shell {
+        Shell(script: { executable, arguments, environment in
+            if arguments.starts(with: ["xcresulttool", "get", "test-results", "activities"]) {
+                return Shell.Result(status: 1, standardOutput: "", standardError: "Error: Failed to find test\n")
+            }
+            if arguments.starts(with: ["xcresulttool", "get", "test-results", "summary"]) {
+                let summary = ["result": "Failed", "testFailures": [["testName": "testWalk()", "failureText": failureText]]] as [String: Any]
+                return try Shell.Result(status: 0, standardOutput: String(decoding: JSONSerialization.data(withJSONObject: summary), as: UTF8.self), standardError: "")
+            }
+            let result = try script.run(executable, arguments, environment)
+            if arguments.contains("test-without-building"), let flag = arguments.firstIndex(of: "-resultBundlePath") {
+                try FileManager.default.createDirectory(atPath: arguments[flag + 1], withIntermediateDirectories: true)
+            }
+            if arguments.starts(with: ["simctl", "launch"]) {
+                return Shell.Result(status: 0, standardOutput: "com.example.probe: 4312\n", standardError: "")
+            }
+            return result
+        })
+    }
+
+    /// SimWalk#266: a runner that timed out launching the app and wrote nothing is run once more, with the same nonce and a result bundle of its own, and the bundle the second one writes is the answer, unqualified, with a line naming the first runner's result bundle.
+    @Test
+    func aLaunchTimeoutWithNothingWrittenRunsASecondRunnerWhoseBundleIsTheAnswer() throws {
+        let directory = try TemporaryDirectory()
+        let output = directory.url.appendingPathComponent("walked.\(CaptureBundleLayout.directoryExtension)")
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 65, retryWrites: Self.bundle(in: directory).url, retryStatus: 0)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", output.path, "--device", "UDID-1"])
+        var nonces = 0
+
+        let outcome = try command.performWalk(shell: Self.launchFailureShell(script), pause: { _ in }, now: script.now, nonce: { nonces += 1
+            return "nonce-\(nonces)"
+        }, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory))
+
+        let runs = script.calls.filter { $0.arguments.contains("test-without-building") }
+        let paths = runs.compactMap { Self.resultBundlePath(in: $0.arguments) }
+        let note = try #require(outcome.launchRetryNote)
+
+        #expect(runs.count == 2)
+        #expect(Set(paths).count == 2)
+        #expect(runs.map { $0.environment["TEST_RUNNER_SIMWALK_NONCE"] } == ["nonce-1", "nonce-1"])
+        #expect(note.contains("first runner's result bundle: \(paths[0])"))
+        #expect(outcome.survivedRunnerFailure == nil)
+        #expect({
+            if case .unqualified = outcome.answer().verdict {
+                true
+            } else {
+                false
+            }
+        }())
+        #expect(outcome.answer().text.contains(note))
+        #expect(!script.calls.contains { $0.arguments.starts(with: ["simctl", "launch"]) })
+    }
+
+    /// SimWalk#266: both runners timing out refuses, naming the first runner's result bundle, and after the handback the walk launches the app itself with the first state's launch arguments, says what that showed, and terminates it.
+    @Test
+    func aSecondLaunchTimeoutRefusesAndTheAppIsLaunchedWithSimctlAfterTheHandback() throws {
+        let directory = try TemporaryDirectory()
+        let output = directory.url.appendingPathComponent("walked.\(CaptureBundleLayout.directoryExtension)")
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 65)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", output.path, "--device", "UDID-1"])
+        let book = try WalkbookLoader.load(contentsOf: URL(fileURLWithPath: Self.walkbook(in: directory)))
+        let state = try #require(book.screens.first?.states.first)
+
+        let refusal = try #require(#expect(throws: WalkCommand.Refusal.self) {
+            try command.performWalk(shell: Self.launchFailureShell(script), pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory))
+        })
+
+        let calls = script.calls.map(\.arguments)
+        let lastRunner = try #require(calls.lastIndex { $0.contains("test-without-building") })
+        let firstRunner = try #require(calls.firstIndex { $0.contains("test-without-building") })
+        let firstPath = try #require(Self.resultBundlePath(in: calls[firstRunner]))
+        let handbackWrite = try #require(calls.indices.first { $0 > lastRunner && calls[$0].contains("write") })
+        let launchIndex = try #require(calls.firstIndex { $0.starts(with: ["simctl", "launch"]) })
+
+        #expect(calls.filter { $0.contains("test-without-building") }.count == 2)
+        #expect(refusal.description.contains("the first runner timed out launching the app (result bundle: \(firstPath)); what follows is the second runner's"))
+        #expect(refusal.description.contains("the app launches with simctl (pid 4312), but XCUITest timed out launching it twice"))
+        #expect(launchIndex > handbackWrite)
+        #expect(Array(calls[launchIndex].dropFirst(4)) == state.launchArguments)
+        #expect(calls[launchIndex + 1].starts(with: ["simctl", "terminate"]))
+    }
+
+    /// SimWalk#266: another launch failure fails the same way twice, so it is not run again and the app is not launched with simctl.
+    @Test
+    func anotherLaunchFailureIsNeitherRetriedNorLaunchChecked() throws {
+        let directory = try TemporaryDirectory()
+        let output = directory.url.appendingPathComponent("walked.\(CaptureBundleLayout.directoryExtension)")
+        let script = try WalkScript(appPath: Self.fakeApp(in: directory), runnerStatus: 65)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", output.path, "--device", "UDID-1"])
+
+        let refusal = try #require(#expect(throws: WalkCommand.Refusal.self) {
+            try command.performWalk(shell: Self.launchFailureShell(script, failureText: #"Failed to launch com.example.probe: The request to open "com.example.probe" failed."#), pause: { _ in }, now: script.now, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory))
+        })
+
+        #expect(script.calls.filter { $0.arguments.contains("test-without-building") }.count == 1)
+        #expect(!script.calls.contains { $0.arguments.starts(with: ["simctl", "launch"]) })
+        #expect(!refusal.description.contains("first runner timed out"))
     }
 
     /// SimWalk#107: an `--output` left without `.simwalk` is completed rather than refused, and the answer's first line says so.
@@ -2496,8 +2698,12 @@ extension WalkCommandTests {
         /// What `simctl ui … increase_contrast` reads — `disabled`, as a fresh device has it, until something sets it.
         private(set) var increaseContrast = "disabled"
         private var statusBarOverridden = false
+        /// What `simctl ui … content_size` prints; empty reads as a device that named no size (SimWalk#288).
+        private let contentSize: String
         private let appPath: String
         private let runnerStatus: Int32
+        /// What the runner prints on `xcodebuild`'s two streams, which is all a walk reads of how its test went (SimWalk#289).
+        private let runnerOutput: (standardOutput: String, standardError: String)
         private let appearanceAfterRunner: String
         /// A bundle written ahead, and where the runner puts it when it runs — `nil` for a runner that writes nothing.
         private let writes: (bundle: URL, to: URL)?
@@ -2526,6 +2732,7 @@ extension WalkCommandTests {
         init(
             appPath: String,
             runnerStatus: Int32,
+            runnerOutput: (standardOutput: String, standardError: String) = ("\n", ""),
             appearance: String = "light",
             appearanceAfterRunner: String = "light",
             writes: (bundle: URL, to: URL)? = nil,
@@ -2537,14 +2744,17 @@ extension WalkCommandTests {
             booted: Bool = true,
             udid: String = "UDID-1",
             deviceType: String? = nil,
-            wedging: Bool = false
+            wedging: Bool = false,
+            contentSize: String = "large"
         ) {
+            self.contentSize = contentSize
             self.udid = udid
             self.deviceType = deviceType
             self.booted = booted
             self.wedging = wedging
             self.appPath = appPath
             self.runnerStatus = runnerStatus
+            self.runnerOutput = runnerOutput
             self.appearance = appearance
             self.appearanceAfterRunner = appearanceAfterRunner
             self.writes = writes
@@ -2625,6 +2835,11 @@ extension WalkCommandTests {
             if let nonce = environment["TEST_RUNNER_SIMWALK_NONCE"] {
                 object["nonce"] = nonce
             }
+            // What the runner does with the device size the host read: it files it under the manifest's device (SimWalk#288).
+            if let size = environment["TEST_RUNNER_SIMWALK_DEVICE_CONTENT_SIZE"], var device = object["device"] as? [String: Any] {
+                device["contentSize"] = size
+                object["device"] = device
+            }
             guard let patched = try? JSONSerialization.data(withJSONObject: object) else { return }
             try? patched.write(to: manifestURL)
         }
@@ -2641,6 +2856,8 @@ extension WalkCommandTests {
                 output = appPath
             // Increase Contrast is its own setting: a walkbook's setup sets it with a five-argument `simctl ui` too, and
             // read as an appearance it would corrupt the one the walk found.
+            case _ where arguments.starts(with: ["simctl", "ui"]) && arguments.count == 4 && arguments[3] == "content_size":
+                output = contentSize
             case _ where arguments.starts(with: ["simctl", "ui"]) && arguments.count > 3 && arguments[3] == "increase_contrast":
                 if arguments.count == 5 {
                     increaseContrast = arguments[4]
@@ -2652,10 +2869,10 @@ extension WalkCommandTests {
                 }
                 output = appearance
             case _ where arguments.contains("test-without-building"):
-                output = ""
                 let isRetry = walkedScreens.count > 1
                 status = isRetry ? retryStatus ?? runnerStatus : runnerStatus
                 appearance = isRetry ? appearanceAfterRetry ?? appearanceAfterRunner : appearanceAfterRunner
+                return Shell.Result(status: status, standardOutput: runnerOutput.standardOutput, standardError: runnerOutput.standardError)
             // The runner's own write, which is the only way a bundle gets to `--output` now that a walk
             // refuses one that is already there — done in `runnerWrites`, which has the environment this
             // needs to stamp the copy with (SimWalk#41).

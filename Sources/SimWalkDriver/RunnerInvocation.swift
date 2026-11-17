@@ -118,6 +118,11 @@ public struct RunnerInvocation {
         if let deviceLocale {
             environment["TEST_RUNNER_SIMWALK_DEVICE_LOCALE"] = deviceLocale
         }
+        // The Dynamic Type size the device was already at, which the runner records in the manifest for a state that sets none
+        // (SimWalk#288). Absent means unknown or unreadable, and the manifest then says nothing.
+        if let deviceContentSize = DeviceContentSize.read(udid: simulator.udid, run: { try shell.run($0, $1) }) {
+            environment["TEST_RUNNER_SIMWALK_DEVICE_CONTENT_SIZE"] = deviceContentSize
+        }
         // Which commit the runner was built from, so the manifest can say which runner produced the bundle
         // (SimWalk#16). Absent when it cannot be told, and the manifest then says nothing rather than guessing.
         if let runnerCommit {
@@ -433,6 +438,10 @@ public struct RunnerInvocation {
         let result = try shell.run("/usr/bin/xcodebuild", testArguments(only: "testWalk", resultBundlePath: resultBundlePath, destination: Self.destination(of: simulator)), environment: environment)
 
         guard result.succeeded else {
+            // A test that passed and a result bundle `xcodebuild` then failed to save is said apart from a runner that failed (SimWalk#289).
+            if let reason = ResultBundleSaveFailure.only(in: result, test: "testWalk") {
+                throw RunnerError.resultBundleNotSaved(reason: reason)
+            }
             // The status rides along, so a walk can tell a test that failed (65) from every other way a runner ends (SimWalk#176).
             throw RunnerError.walkFailed(reason: Self.diagnostic(from: result), status: result.status)
         }

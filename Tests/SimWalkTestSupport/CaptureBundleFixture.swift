@@ -22,7 +22,8 @@ public struct CaptureBundleFixture {
         buildHash: String = "a1b2c3d4",
         walkbookHash: String = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0",
         nonce: String? = nil,
-        appBuildProvenance: CaptureManifest.AppBuildProvenance? = nil
+        appBuildProvenance: CaptureManifest.AppBuildProvenance? = nil,
+        deviceContentSize: String? = nil
     ) throws -> CaptureBundle {
         precondition(!trees.isEmpty, "CaptureBundleFixture needs at least one tree — the manifest screen id comes from the first")
         let url = directory.url.appendingPathComponent("audit.\(CaptureBundleLayout.directoryExtension)")
@@ -35,6 +36,7 @@ public struct CaptureBundleFixture {
                 state: capture.state,
                 axTreeSettled: capture.settled,
                 axTreeHasContent: capture.hasContent,
+                axTreeSpinner: capture.spinner,
                 capturedAt: capture.capturedAt,
                 appleAudit: capture.appleAudit
             )
@@ -60,7 +62,7 @@ public struct CaptureBundleFixture {
             appBundleID: "dev.simwalk.route-fixture",
             appBuildHash: buildHash,
             walkbookHash: walkbookHash,
-            device: CaptureManifest.Device(name: "iPhone 17 Pro", udid: "9E7F0C2A-0000-4000-8000-000000000001", osVersion: "26.0"),
+            device: CaptureManifest.Device(name: "iPhone 17 Pro", udid: "9E7F0C2A-0000-4000-8000-000000000001", osVersion: "26.0", contentSize: deviceContentSize),
             startedAt: Date(timeIntervalSince1970: 1_786_867_200.125),
             finishedAt: Date(timeIntervalSince1970: 1_786_867_440.5),
             settleQuietMilliseconds: 250,
@@ -87,6 +89,7 @@ public struct CaptureBundleFixture {
                     state: capture.state,
                     axTreeSettled: capture.settled,
                     axTreeHasContent: capture.hasContent,
+                    axTreeSpinner: capture.spinner,
                     motion: capture.motion,
                     performance: capture.performance,
                     appleAudit: capture.appleAudit
@@ -290,6 +293,8 @@ public extension CaptureBundleFixture {
         public let tree: AXNode
         public let settled: Bool
         public let hasContent: Bool
+        /// The activity indicator the capture was filed still showing; `nil` as a capture that held none.
+        public let spinner: CaptureManifest.Spinner?
         /// The screenshot's dimensions, defaulting to the ones a real walk of an iPhone 17 produces — so a bundle written here weighs what a bundle written by the runner would.
         public let width: Int
         public let height: Int
@@ -308,6 +313,7 @@ public extension CaptureBundleFixture {
             tree: AXNode,
             settled: Bool = true,
             hasContent: Bool = true,
+            spinner: CaptureManifest.Spinner? = nil,
             width: Int = 1206,
             height: Int = 2622,
             motion: CaptureManifest.Motion? = nil,
@@ -324,6 +330,7 @@ public extension CaptureBundleFixture {
             self.tree = tree
             self.settled = settled
             self.hasContent = hasContent
+            self.spinner = spinner
             self.width = width
             self.height = height
         }

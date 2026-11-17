@@ -23,6 +23,8 @@ import SimWalkCore
 /// **The call is attributed to a Claude Code session when a hook says whose it is (SimWalk#14).** A process run from an agent's shell has no session of its own, so it claims the slip ``CallAttribution`` holds for its own arguments — as the call *starts*, since a walk runs for minutes and the slip is claimable for two — and the line it logs carries that session. Beside a log only: the slip lives next to the log it tags, and `usage`, which logs nothing, claims nothing. `arguments` is the process's own `argv` in normal use, and a parameter so a test can state it.
 ///
 /// **`defaultFailureKind` is what a call site falls back to when the thrown error has no opinion of its own** (``UsageFailureKind/of(_:)`` returns `nil`) — a raw Foundation error from one of this command's own file writes, say, rather than a type this codebase has classified. It never overrides an error that has one. **Every command states its own, and there is no default to forget**: `install-hook` and `uninstall-hook` pass `.setupFailed`, since an unmapped failure there is Claude Code's own configuration or this tool's registration files, never a caller's argument; `walk` passes `.runnerFailed`, for the same reason one level down; `validate`, `bundle inspect` and `bundle audit` pass `.toolError`, because every failure of their argument is already a classified type (`WalkbookLoadError`, `CaptureBundleError` — a tree the runner wrote that does not decode included, which is `runner-failed` on its own account) and what is left is their own code. An optional parameter defaulting to `nil` let three verbs record no kind at all, which `simwalk usage` reads as `unclassified`.
+///
+/// **`step` is a live session step's route step, as sent (SimWalk#253).** Given, it is logged beside the call, and so is the answer's verdict line, which is how a step whose answer was lost to a pipe can be reconstructed. Every other command passes none and logs what it always did.
 struct TimedCall {
     static func run(
         tool: String,
@@ -35,6 +37,7 @@ struct TimedCall {
         isStdoutPiped: () -> Bool = StandardStreams.isStdoutPiped,
         refusalClosing closing: String? = nil,
         junit: JUnitOutput? = nil,
+        step: String? = nil,
         body: () throws -> Answer
     ) throws {
         let started = ContinuousClock.now
@@ -49,7 +52,7 @@ struct TimedCall {
             let reason = String(describing: error)
             let unwritten = junit?.finish(refusal: reason)
             emitError(([AnswerVerdict.refused(reason).line] + [closing, unwritten].compactMap(\.self)).joined(separator: "\n"))
-            record(log, of: call, err: reason, saving: nil, kind: .of(error) ?? defaultFailureKind)
+            record(log, of: call, err: reason, saving: nil, kind: .of(error) ?? defaultFailureKind, step: step)
             // Lost focus is the one refusal a caller should retry, so it alone has an exit of its own.
             let exitCode = error is MirrorFocusRefusal ? AnswerVerdict.notFrontmostExitCode : AnswerVerdict.refusedExitCode
             warnIfPiped(exitCode: exitCode, isStdoutPiped: isStdoutPiped, emitError: emitError)
@@ -59,7 +62,7 @@ struct TimedCall {
             answer = junit.finish(answer)
         }
         emit(answer.text)
-        record(log, of: call, err: nil, saving: answer.saving)
+        record(log, of: call, err: nil, saving: answer.saving, step: step, verdict: step == nil ? nil : answer.verdict.line.components(separatedBy: "\n").first)
         // Thrown after the answer is printed and logged, so the report a human reads is unchanged and only
         // the exit code differs. A walk that refused a screen is not a failed *call* — the bundle is
         // written, honest and readable — which is why a qualification has its own code: a caller can tell
@@ -85,12 +88,14 @@ struct TimedCall {
         of call: Call,
         err: String?,
         saving: ContextSaving?,
-        kind: UsageFailureKind? = nil
+        kind: UsageFailureKind? = nil,
+        step: String? = nil,
+        verdict: String? = nil
     ) {
         guard let log else { return }
         let elapsed = ContinuousClock.now - call.started
         let milliseconds = Int(elapsed / .milliseconds(1))
-        log.record(tool: call.tool, target: call.target, milliseconds: milliseconds, succeeded: err == nil, err: err, saving: saving, session: call.session, kind: kind)
+        log.record(tool: call.tool, target: call.target, milliseconds: milliseconds, succeeded: err == nil, err: err, saving: saving, session: call.session, kind: kind, step: step, verdict: verdict)
     }
 }
 

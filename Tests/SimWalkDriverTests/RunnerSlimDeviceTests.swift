@@ -48,7 +48,10 @@ struct RunnerSlimDeviceTests {
             if executable == "/bin/ps" {
                 return Shell.Result(status: 1, standardOutput: "", standardError: "")
             }
-            runnerEnvironments.append(environment)
+            // Only the runner's launch counts: the walk also reads the device's text size through `xcrun simctl` (SimWalk#288).
+            if executable == "/usr/bin/xcodebuild" {
+                runnerEnvironments.append(environment)
+            }
             return Shell.Result(status: 0, standardOutput: "", standardError: "")
         })
         let runner = RunnerInvocation(projectPath: "/runner/SimWalkRunner.xcodeproj", derivedDataPath: "/runner/dd", shell: shell, overrideRoot: root, profileLookup: { $0 == runtime ? profile : nil })

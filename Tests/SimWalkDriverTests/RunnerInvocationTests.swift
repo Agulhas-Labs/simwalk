@@ -105,7 +105,10 @@ struct RunnerInvocationTests {
         var runnerEnvironments: [[String: String]] = []
         let shell = Shell(script: { executable, _, environment in
             guard executable == "/bin/ps" else {
-                runnerEnvironments.append(environment)
+                // Only the runner's launch counts: the walk also reads the device's text size through `xcrun simctl` (SimWalk#288).
+                if executable == "/usr/bin/xcodebuild" {
+                    runnerEnvironments.append(environment)
+                }
                 return Shell.Result(status: 0, standardOutput: "", standardError: "")
             }
             let line = "84326 01:10 launchd_sim /Users/me/Library/Developer/CoreSimulator/Devices/UDID-1/data/var/run/launchd_bootstrap.plist\n"

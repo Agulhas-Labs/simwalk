@@ -20,14 +20,14 @@ import Foundation
 public struct ExpectedScreenCheck {
     /// The outcome a screen must be recorded under given the trees its captures actually produced, or `intended` when the screen names no expectation or every tree carries `expect`.
     ///
-    /// `found` names each mismatched capture's first (outermost) screen identifier (`ScreenIdentifierRule.screenIdentifier(of:)`) — `nil` for a capture carrying none. So it never contains `expect` and is never empty: a mismatched tree carries no screen-level identifier equal to `expect`, so its first is not `expect` either, and there is at least one mismatched tree.
+    /// `found` names each mismatched capture's path of screen identifiers (`ScreenIdentifierRule.foundPath(of:)`: those on the chain to the deepest, outer to inner, joined by ` > `) — `nil` for a capture carrying none. So it never equals `expect` and is never empty: a mismatched tree carries no screen-level identifier equal to `expect`, so no entry is `expect` either, and there is at least one mismatched tree. When a path holds more than one identifier the `reason` also says which is the deepest and that an identifier set on a container replaces those of the views inside it.
     ///
     /// **A mismatch keeps what `intended` already said.** A screen that failed mid-capture *and* filed a capture of the wrong screen has two things wrong with it, and recording only one would un-diagnose the other: the failure rides in `unexpectedScreen`'s `reason`, the same place a state refusal does (`StateApplicationCheck.refusedOutcome`). Exhaustive, so an outcome added later has to decide here what a mismatch does to it.
     public static func outcome(for trees: [AXNode], expect: String?, instead intended: ScreenOutcome) -> ScreenOutcome {
         guard let expect else { return intended }
         let mismatched = trees.filter { !ScreenIdentifierRule.carries(expect, in: $0) }
         guard !mismatched.isEmpty else { return intended }
-        let found = distinct(mismatched.map(ScreenIdentifierRule.screenIdentifier(of:)))
+        let found = distinct(mismatched.map(ScreenIdentifierRule.foundPath(of:)))
         // The mismatch is exactly `expect` naming this screen's title: name the content's real identifier
         // when it carries one — that is what a corrected `expect` should say — rather than advising an
         // author to add one that is already there.
@@ -38,15 +38,29 @@ public struct ExpectedScreenCheck {
             }
             return "'\(expect)' is this screen's navigation-bar title; titles are localised and never count; set an accessibilityIdentifier on the content"
         }.first
+        let deepestClause = mismatched.lazy.compactMap(ScreenIdentifierRule.deepestIdentifierClause(of:)).first
+        // `expect` names an element's identifier, not a screen's: say what the element is and which screen
+        // identifier to write instead, with the route step that still requires the element, since `scrollTo` matches an
+        // identifier as well as a label (SimWalk#284). A node in a bar stays silent — chrome is no candidate.
+        let elementClause = mismatched.lazy.compactMap { tree -> String? in
+            guard let hit = ScreenIdentifierRule.elementCarrying(expect, in: tree) else { return nil }
+            let article = hit.type.first.map { "AEIOU".contains($0) } == true ? "an" : "a"
+            guard let enclosing = hit.enclosing else {
+                return "'\(expect)' is on \(article) \(hit.type) inside no screen identifier, not a screen container; set an accessibilityIdentifier on the screen's content"
+            }
+            return "'\(expect)' is on \(article) \(hit.type) inside '\(enclosing)', not a screen container: expect '\(enclosing)' and end the route with scrollTo '\(expect)' to require the element"
+        }.first
+        let clauses = [titleHint, deepestClause, elementClause].compactMap(\.self)
+        let hint = clauses.isEmpty ? nil : clauses.joined(separator: ". ")
         return switch intended {
         case .captured:
-            .unexpectedScreen(expected: expect, found: found, reason: titleHint)
+            .unexpectedScreen(expected: expect, found: found, reason: hint)
         case let .captureFailed(failure):
-            .unexpectedScreen(expected: expect, found: found, reason: joined(titleHint, "The screen also failed mid-capture: \(failure)"))
+            .unexpectedScreen(expected: expect, found: found, reason: joined(hint, "The screen also failed mid-capture: \(failure)"))
         case let .stateNotApplied(reason):
-            .unexpectedScreen(expected: expect, found: found, reason: joined(titleHint, reason))
+            .unexpectedScreen(expected: expect, found: found, reason: joined(hint, reason))
         case let .unexpectedScreen(_, _, reason):
-            .unexpectedScreen(expected: expect, found: found, reason: joined(titleHint, reason))
+            .unexpectedScreen(expected: expect, found: found, reason: joined(hint, reason))
         case .unreachable, .buildMismatch:
             // Verdicts that file nothing: a tree handed in beside one is not evidence this screen holds,
             // so there is nothing for a mismatch to be about.

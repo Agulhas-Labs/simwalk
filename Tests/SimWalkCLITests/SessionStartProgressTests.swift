@@ -100,7 +100,7 @@ struct SessionStartProgressTests {
         let session = Self.start(in: directory)
 
         #expect(session.claim.progressURL.lastPathComponent == "s.2.json")
-        #expect(session.claim.resultURL.lastPathComponent == "s.2.result.json")
+        #expect(session.claim.resultURL.lastPathComponent.hasPrefix("s.2@"))
     }
 
     /// A walk while a session holds slot 2 takes slot 1, the session's own name.

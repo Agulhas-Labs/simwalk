@@ -21,7 +21,7 @@ public struct BundleAuditScope {
         var found: [Capture] = []
         for screen in bundle.manifest.screens where !Self.isWrongScreen(screen) {
             for capture in screen.captures {
-                try found.append(Capture(screenID: screen.id, stateSlug: capture.state.slug, tree: bundle.axTree(for: capture), screenshotURL: bundle.screenshotURL(for: capture)))
+                try found.append(Capture(screenID: screen.id, stateSlug: capture.state.slug, tree: bundle.axTree(for: capture), screenshotURL: bundle.screenshotURL(for: capture), deviceTextSize: bundle.manifest.device.contentSize))
             }
         }
         return found
@@ -83,11 +83,15 @@ public extension BundleAuditScope {
         public let tree: AXNode
         public let screenshotURL: URL?
 
-        public init(screenID: String, stateSlug: String, tree: AXNode, screenshotURL: URL? = nil) {
+        /// The size the device was at, `UICTContentSizeCategory…`, for a state that sets none (SimWalk#288); `nil` when the bundle does not say.
+        public let deviceTextSize: String?
+
+        public init(screenID: String, stateSlug: String, tree: AXNode, screenshotURL: URL? = nil, deviceTextSize: String? = nil) {
             self.screenID = screenID
             self.stateSlug = stateSlug
             self.tree = tree
             self.screenshotURL = screenshotURL
+            self.deviceTextSize = deviceTextSize
         }
     }
 

@@ -27,9 +27,14 @@ struct SessionStepCommand: ParsableCommand {
     var guardHash: String?
 
     func run() throws {
-        try TimedCall.run(tool: "session step", target: id, defaultFailureKind: .runnerFailed) {
-            try perform()
-        }
+        try run(log: .standard(), emit: StandardStreams.emit) { try perform() }
+    }
+
+    /// The same run with its log, its printing and the step itself injectable, so a test can read what a step leaves in the usage log without a runner (SimWalk#253).
+    ///
+    /// The step JSON goes to `TimedCall` as typed, even where `perform` refuses it: a malformed step is the one a caller most needs to see again.
+    func run(log: UsageLog?, emit: (String) -> Void, perform body: () throws -> Answer) throws {
+        try TimedCall.run(tool: "session step", target: id, log: log, emit: emit, defaultFailureKind: .runnerFailed, step: step, body: body)
     }
 
     /// How long a step waits for its answer: a step's own waits (a label resolved, a scroll's swipes, the arrival) and two reads.

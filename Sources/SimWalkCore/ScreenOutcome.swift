@@ -17,7 +17,9 @@ public enum ScreenOutcome: Codable, Equatable, Sendable {
     /// `cause` names a reason the walk's verdict counts on its own (`UnreachableCause`), `nil` for every other.
     ///
     /// `state` is the state whose route failed, the states that reached the screen before it, and the states never tried (SimWalk#120); a route runs once per state, so without it a reader assumes every state failed. `nil` in a bundle written before SimWalk#120.
-    case unreachable(routeTried: [Walkbook.RouteStep], reason: String? = nil, cause: UnreachableCause? = nil, state: UnreachableState? = nil)
+    ///
+    /// `stopped` is the bundle-relative directory holding the tree and screenshot read where the route stopped, unsettled (SimWalk#281). `nil` in a bundle written before it, or where the read failed.
+    case unreachable(routeTried: [Walkbook.RouteStep], reason: String? = nil, cause: UnreachableCause? = nil, state: UnreachableState? = nil, stopped: String? = nil)
     /// The installed app's build hash does not match the build the walk claims to validate; the capture is refused.
     case buildMismatch(expected: String, found: String)
     /// The screen **was** reached, and an artefact could not be recorded; the payload names why.
@@ -56,7 +58,7 @@ public enum ScreenOutcome: Codable, Equatable, Sendable {
         case .unreachable:
             let nested = try container.nestedContainer(keyedBy: UnreachableKeys.self, forKey: .unreachable)
             let cause = try nested.decodeIfPresent(String.self, forKey: .cause).flatMap { UnreachableCause(rawValue: $0) }
-            self = try .unreachable(routeTried: nested.decode([Walkbook.RouteStep].self, forKey: .routeTried), reason: nested.decodeIfPresent(String.self, forKey: .reason), cause: cause, state: nested.decodeIfPresent(UnreachableState.self, forKey: .state))
+            self = try .unreachable(routeTried: nested.decode([Walkbook.RouteStep].self, forKey: .routeTried), reason: nested.decodeIfPresent(String.self, forKey: .reason), cause: cause, state: nested.decodeIfPresent(UnreachableState.self, forKey: .state), stopped: nested.decodeIfPresent(String.self, forKey: .stopped))
         case .buildMismatch:
             let nested = try container.nestedContainer(keyedBy: BuildMismatchKeys.self, forKey: .buildMismatch)
             self = try .buildMismatch(expected: nested.decode(String.self, forKey: .expected), found: nested.decode(String.self, forKey: .found))
@@ -153,7 +155,7 @@ private extension ScreenOutcome {
     }
 
     enum UnreachableKeys: String, CodingKey {
-        case routeTried, reason, cause, state
+        case routeTried, reason, cause, state, stopped
     }
 
     enum BuildMismatchKeys: String, CodingKey {

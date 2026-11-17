@@ -23,7 +23,7 @@ public struct MotionWatch: Equatable, Sendable {
         switch lastStep {
         case .scrollTo, .systemTap, .swipe, .drag:
             afterScroll = true
-        case .tab, .tap, .type, .longPress, .tapPoint, .openURL, .back, nil:
+        case .tab, .tap, .tapUnchanged, .type, .longPress, .tapPoint, .openURL, .back, nil:
             afterScroll = false
         }
     }

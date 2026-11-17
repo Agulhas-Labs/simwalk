@@ -18,8 +18,10 @@ import Foundation
 public final class ProgressClaim: @unchecked Sendable {
     /// The run's progress file.
     public let progressURL: URL
-    /// The run's result file.
+    /// The run's result file, named by the walk's handle (``WalkHandle``): its stem, `pid` and ``startedAt``.
     public let resultURL: URL
+    /// The start time in the result file's name, which the run's progress file carries as its `startedAt` (``ProgressWriter/begin(tool:phase:logPath:startedAt:)``), so the file and the handle `walk_status` is given correspond.
+    public let startedAt: Date
     /// The locked descriptor, or `-1` when no lock could be taken.
     private let descriptor: Int32
     /// Whether a child process is handed the lock and keeps it after this object goes away — a live session's `xcodebuild`, whose life is the session's (SimWalk#83).
@@ -28,9 +30,12 @@ public final class ProgressClaim: @unchecked Sendable {
     /// Whether a child was spawned holding the descriptor (``markHandedOver()``): only then is the lock left to it.
     private var handedOver = false
 
-    private init(session: String?, slot: Int, in directory: URL, descriptor: Int32, sharedWithChild: Bool) {
+    private init(session: String?, slot: Int, in directory: URL, pid: Int32, startedAt: Date, descriptor: Int32, sharedWithChild: Bool) {
+        // Rounded as the progress file holds it, so the name and the file agree to the millisecond.
+        let startedAt = Date(timeIntervalSince1970: Double(WalkHandle.milliseconds(startedAt)) / 1000)
+        self.startedAt = startedAt
         progressURL = ProgressLocation.progressURL(session: session, slot: slot, in: directory)
-        resultURL = ProgressLocation.resultURL(session: session, slot: slot, in: directory)
+        resultURL = ProgressLocation.resultURL(session: session, slot: slot, pid: pid, startedAt: startedAt, in: directory)
         self.descriptor = descriptor
         self.sharedWithChild = sharedWithChild
     }
@@ -63,21 +68,30 @@ public final class ProgressClaim: @unchecked Sendable {
     /// `firstSlot` is 1, the session's own name, for a walk, and 2 for a live session, which leaves the session's own name to walks (SimWalk#83).
     ///
     /// `sharedWithChild` takes a claim whose lock a child is handed (``descriptorForChild``) and keeps once this object is gone: once ``markHandedOver()`` says a child holds it, it is never unlocked here, only closed.
-    public static func take(session: String?, in directory: URL, firstSlot: Int = 1, sharedWithChild: Bool = false) -> ProgressClaim {
+    ///
+    /// `pid` and `startedAt` name the run's result file, one per walk (``resultURL``); the run begins its progress file at the same `startedAt`.
+    public static func take(
+        session: String?,
+        in directory: URL,
+        firstSlot: Int = 1,
+        sharedWithChild: Bool = false,
+        pid: Int32 = ProcessInfo.processInfo.processIdentifier,
+        startedAt: Date = Date()
+    ) -> ProgressClaim {
         try? FileManager.default.createDirectory(at: ProgressLocation.progressDirectory(in: directory), withIntermediateDirectories: true)
         var slot = firstSlot
         while true {
             let descriptor = open(ProgressLocation.claimURL(session: session, slot: slot, in: directory).path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
             guard descriptor >= 0 else {
-                return ProgressClaim(session: session, slot: slot, in: directory, descriptor: -1, sharedWithChild: sharedWithChild)
+                return ProgressClaim(session: session, slot: slot, in: directory, pid: pid, startedAt: startedAt, descriptor: -1, sharedWithChild: sharedWithChild)
             }
             if flock(descriptor, LOCK_EX | LOCK_NB) == 0 {
-                return ProgressClaim(session: session, slot: slot, in: directory, descriptor: descriptor, sharedWithChild: sharedWithChild)
+                return ProgressClaim(session: session, slot: slot, in: directory, pid: pid, startedAt: startedAt, descriptor: descriptor, sharedWithChild: sharedWithChild)
             }
             let held = errno == EWOULDBLOCK
             close(descriptor)
             guard held else {
-                return ProgressClaim(session: session, slot: slot, in: directory, descriptor: -1, sharedWithChild: sharedWithChild)
+                return ProgressClaim(session: session, slot: slot, in: directory, pid: pid, startedAt: startedAt, descriptor: -1, sharedWithChild: sharedWithChild)
             }
             slot += 1
         }

@@ -99,8 +99,10 @@ struct WalkbookCodingTests {
     @Test(arguments: [
         (Walkbook.RouteStep.tab(label: "Progress"), #"{"tab":{"label":"Progress"}}"#),
         (Walkbook.RouteStep.tap(label: "Heart"), #"{"tap":{"label":"Heart"}}"#),
+        (Walkbook.RouteStep.tapUnchanged(label: "For grown-ups"), #"{"tap":{"label":"For grown-ups","unchanged":true}}"#),
         (Walkbook.RouteStep.type(label: "Search", text: "resting"), #"{"type":{"label":"Search","text":"resting"}}"#),
         (Walkbook.RouteStep.scrollTo(label: "Rows"), #"{"scrollTo":{"label":"Rows"}}"#),
+        (Walkbook.RouteStep.scrollTo(label: "Recurring mistakes", position: "top"), #"{"scrollTo":{"label":"Recurring mistakes","position":"top"}}"#),
         (Walkbook.RouteStep.tapPoint(label: "Steps chart", point: [0.8, 0.5]), #"{"tapPoint":{"at":[0.8,0.5],"label":"Steps chart"}}"#),
         (Walkbook.RouteStep.tapPoint(label: nil, point: [201, 610]), #"{"tapPoint":{"at":[201,610]}}"#),
         (Walkbook.RouteStep.drag(label: "Volume", from: [0.1, 0.5], to: [0.9, 0.5], hold: 0.3, seconds: 0.6), #"{"drag":{"from":[0.1,0.5],"hold":0.3,"label":"Volume","seconds":0.6,"to":[0.9,0.5]}}"#),
@@ -121,6 +123,13 @@ struct WalkbookCodingTests {
 
         #expect(written == expected)
         #expect(try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(expected.utf8)) == step)
+    }
+
+    /// A `scrollTo` is described with its `position` (SimWalk#270); without one it is described as it always was.
+    @Test
+    func aScrollToWithAPositionIsDescribedWithIt() {
+        #expect(Walkbook.RouteStep.scrollTo(label: "Recurring mistakes", position: "top").description == "scrollTo 'Recurring mistakes' (top)")
+        #expect(Walkbook.RouteStep.scrollTo(label: "Recurring mistakes").description == "scrollTo 'Recurring mistakes'")
     }
 
     /// A screen's own quiet period is authored in the walkbook, so it has to survive the trip through the format an author actually types — and through the loader, which is the only route a runner ever takes.
@@ -191,6 +200,32 @@ struct WalkbookCodingTests {
         let route: [Walkbook.RouteStep] = [.tapPoint(label: "Steps chart", point: [0.8, 0.5]), .tapPoint(label: nil, point: [201, 610.5])]
 
         #expect(route.rendered == "tap 'Steps chart' at 0.8,0.5 of its frame → tap at 201,610.5 pt")
+    }
+
+    /// **`unchanged: false` is a plain `tap`** (SimWalk#268).
+    @Test
+    func tapWithUnchangedFalseDecodesAsAPlainTap() throws {
+        let step = try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(#"{"tap":{"label":"Heart","unchanged":false}}"#.utf8))
+
+        #expect(step == .tap(label: "Heart"))
+    }
+
+    /// **An unknown key beside `unchanged` is still refused.**
+    @Test
+    func anUnknownKeyBesideUnchangedIsRefused() {
+        let json = #"{"tap":{"label":"Heart","unchanged":true,"twice":true}}"#
+
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(json.utf8))
+        }
+    }
+
+    /// **A tap that must change nothing prints as `(no change)`**, so the short route shows the expectation.
+    @Test
+    func aTapThatMustChangeNothingSaysSoInTheRoute() {
+        let route: [Walkbook.RouteStep] = [.tapUnchanged(label: "For grown-ups"), .tap(label: "Home")]
+
+        #expect(route.rendered == "tap 'For grown-ups' (no change) → tap 'Home'")
     }
 
     /// A point step naming no point has nothing to tap, and the loader says so by name.

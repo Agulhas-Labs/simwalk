@@ -75,7 +75,7 @@ public struct ControlCoverage {
     /// The labels a screen's route targets: the steps it completed and, for an unreachable screen, the ones it tried.
     private static func routeLabels(of screen: CaptureManifest.ScreenRecord) -> [String] {
         var steps = screen.routeTaken
-        if case let .unreachable(routeTried, _, _, _) = screen.outcome {
+        if case let .unreachable(routeTried, _, _, _, _) = screen.outcome {
             steps += routeTried
         }
         return steps.compactMap(label(of:))
@@ -84,7 +84,7 @@ public struct ControlCoverage {
     /// The label a step resolves by, or `nil` for a step that names no element.
     private static func label(of step: Walkbook.RouteStep) -> String? {
         switch step {
-        case let .tab(label), let .tap(label), let .type(label, _, _), let .scrollTo(label), let .systemTap(label, _, _), let .longPress(label, _):
+        case let .tab(label), let .tap(label), let .tapUnchanged(label), let .type(label, _, _), let .scrollTo(label, _), let .systemTap(label, _, _), let .longPress(label, _):
             label
         case let .tapPoint(label, _), let .swipe(label, _), let .drag(label, _, _, _, _):
             label

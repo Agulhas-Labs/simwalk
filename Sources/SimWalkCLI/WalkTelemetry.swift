@@ -24,6 +24,8 @@ final class WalkTelemetry {
     private var startedAt: TimeInterval?
     /// What ends the run as `failed` / `cancelled` from outside it — an MCP client's cancel, a signal to the CLI — heard from ``begin(tool:)`` on.
     private let cancellation: Cancellation?
+    /// The run's claim, whose `startedAt` names the result file and so begins the progress file.
+    private let claim: ProgressClaim?
 
     /// `claim`, when given, is held by the run's backstop, so it is released only after a run going away unfinished has written its end.
     init(
@@ -39,6 +41,7 @@ final class WalkTelemetry {
         self.verbose = verbose
         self.clock = clock
         self.cancellation = cancellation
+        self.claim = claim
         run = ProgressRun(writer: writer, claim: claim)
     }
 
@@ -49,7 +52,7 @@ final class WalkTelemetry {
         guard startedAt == nil else { return }
         startedAt = clock()
         timings = PhaseTimings()
-        writer.begin(tool: tool, logPath: logPath)
+        writer.begin(tool: tool, logPath: logPath, startedAt: claim?.startedAt)
         cancellation?.onCancel { [writer] in writer.cancel() }
     }
 
@@ -132,6 +135,7 @@ final class WalkTelemetry {
             return
         }
         writer.finish(writing: result, to: resultURL, as: ending)
+        ProgressLocation.pruneResults(beside: resultURL)
     }
 
     /// Ends a dry run, which writes no result: `failed` when a route drifted, else `done`.

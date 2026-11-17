@@ -102,7 +102,7 @@ public struct CaptureManifest: Codable, Equatable, Sendable {
         screens.filter { !$0.outcome.isCaptured }
     }
 
-    /// Every capture taken before the accessibility tree stopped changing — or while it still held only the app's chrome (SimWalk#81) — in manifest order.
+    /// Every capture taken before the accessibility tree stopped changing — or while it still held only the app's chrome (SimWalk#81), or still showed a spinner (SimWalk#267) — in manifest order.
     ///
     /// One generator, because three readers want it — the summary calls them out, `walk` gates its exit code on them, and anything deciding whether to trust a bundle asks the same question. A capture whose bundle never recorded settling is not listed: it makes no claim either way, and inventing one would be the dishonesty the flag exists to prevent.
     public var unsettledCaptures: [CaptureReference] {
@@ -119,7 +119,18 @@ public struct CaptureManifest: Codable, Equatable, Sendable {
     public var movingCaptures: [CaptureReference] {
         screens.flatMap { screen in
             screen.captures
-                .filter { $0.axTreeSettled == false && $0.axTreeHasContent != false }
+                .filter { $0.axTreeSettled == false && $0.axTreeHasContent != false && $0.axTreeSpinner == nil }
+                .map { CaptureReference(screenID: screen.id, stateSlug: $0.state.slug) }
+        }
+    }
+
+    /// The unsettled captures that still showed a spinner when the content wait ran out, in manifest order (SimWalk#267).
+    ///
+    /// Counted apart from `movingCaptures` for the reason chrome-only ones are: the tree held still, so "still changing" would misdescribe it. A bare tree with a spinner is the chrome-only shape (SimWalk#81) and is counted there alone.
+    public var loadingCaptures: [CaptureReference] {
+        screens.flatMap { screen in
+            screen.captures
+                .filter { $0.axTreeSettled == false && $0.axTreeHasContent != false && $0.axTreeSpinner != nil }
                 .map { CaptureReference(screenID: screen.id, stateSlug: $0.state.slug) }
         }
     }
@@ -194,12 +205,17 @@ public extension CaptureManifest {
         ///
         /// What explains a capture recorded `identicalTo` its base: a state asking for the device's own locale draws what the plain state draws (SimWalk#18).
         public var locale: String?
+        /// The Dynamic Type size the device was already at before the walk, as a `UICTContentSizeCategory…` name (the spelling a state's `dynamicTypeSize` uses); `nil` when it could not be read, the device is physical, or the bundle predates the field (SimWalk#288).
+        ///
+        /// What a capture was taken at when its state sets no size: `EffectiveTypeSize` answers it. Absent rather than empty, inside the current format, like `locale`.
+        public var contentSize: String?
 
-        public init(name: String, udid: String, osVersion: String, locale: String? = nil) {
+        public init(name: String, udid: String, osVersion: String, locale: String? = nil, contentSize: String? = nil) {
             self.name = name
             self.udid = udid
             self.osVersion = osVersion
             self.locale = locale
+            self.contentSize = contentSize
         }
     }
 
@@ -300,6 +316,10 @@ public extension CaptureManifest {
         ///
         /// **Absent rather than empty**, and inside format 11 for the reason `deviceTurns` is: a record decodes leniently, so an older reader ignores the key and misses only the disclosure.
         public var fixedAppearance: Walkbook.Theme?
+        /// How long the screen took, in milliseconds of the runner's monotonic clock: from the start of its first state's launch to its last capture filed (SimWalk#274); `nil` in a bundle written before the runner recorded it, and for a screen that was never started.
+        ///
+        /// Printed on the screen's line only from 60 s up (``CaptureBundleSummary``). **Absent rather than zero**, and inside format 11 for the reason `fixedAppearance` is: a record decodes leniently, so an older reader ignores the key and misses only the time.
+        public var wallMilliseconds: Int?
 
         public init(
             id: String,
@@ -312,7 +332,8 @@ public extension CaptureManifest {
             launchResets: [LaunchReset] = [],
             boundElements: [BoundElement]? = nil,
             deviceTurns: [String] = [],
-            fixedAppearance: Walkbook.Theme? = nil
+            fixedAppearance: Walkbook.Theme? = nil,
+            wallMilliseconds: Int? = nil
         ) {
             self.id = id
             self.outcome = outcome
@@ -325,6 +346,7 @@ public extension CaptureManifest {
             self.boundElements = boundElements
             self.deviceTurns = deviceTurns.isEmpty ? nil : deviceTurns
             self.fixedAppearance = fixedAppearance
+            self.wallMilliseconds = wallMilliseconds
         }
 
         /// A record as the runner files it: `launchResets`, `boundElements` and `deviceTurns` have **no default**, so the runner cannot omit them (SimWalk#91 item 6, SimWalk#93).
@@ -472,6 +494,16 @@ public extension CaptureManifest {
         }
     }
 
+    /// The activity indicator a capture was still showing when the content wait ran out (SimWalk#267): its label, when it had one.
+    struct Spinner: Codable, Equatable, Sendable {
+        /// The indicator's accessibility label; `nil` for an unlabelled one, which encodes as `{}`.
+        public let label: String?
+
+        public init(label: String?) {
+            self.label = label
+        }
+    }
+
     /// One state of one screen, and where its two artefacts live inside the bundle.
     struct StateCapture: Codable, Equatable, Sendable {
         /// The state that was requested and captured.
@@ -494,6 +526,10 @@ public extension CaptureManifest {
         ///
         /// `false` is a capture of a screen that had not arrived — a spinner inside a tab bar, filed under a screen id and perfectly still while it loaded. It is a qualification and not a refusal: the artefacts are honest, and what they are of is the load rather than the screen. `ScreenContentCheck` is where "content" is decided.
         public private(set) var axTreeHasContent: Bool?
+        /// The activity indicator the kept tree held, present only when it held one: a capture the content wait ran out on, still spinning (SimWalk#267).
+        ///
+        /// `{}` when the indicator has no label; absent otherwise, and in a bundle written before the runner recorded it. The manifest stays at format 11, since a reader that does not know the key ignores it.
+        public private(set) var axTreeSpinner: Spinner?
         /// The slug of the state on the same screen whose screenshot this one is byte-identical to, when that is the right result rather than a discard; `nil` otherwise.
         ///
         /// Set where the device was already in the conditions this state asked for — `light-loc_en_gb` on a device in `en_GB` draws what `light` draws (SimWalk#18). Applied, and identical to its base: filed and said so, where the identity rule used to refuse both. **Absent rather than empty**, like every optional field here.
@@ -528,6 +564,7 @@ public extension CaptureManifest {
             axTreePath: String,
             axTreeSettled: Bool? = nil,
             axTreeHasContent: Bool? = nil,
+            axTreeSpinner: Spinner? = nil,
             identicalTo: String? = nil,
             unverifiedAxes: [String]? = nil,
             capturedAt: Date? = nil,
@@ -541,6 +578,7 @@ public extension CaptureManifest {
             self.axTreePath = axTreePath
             self.axTreeSettled = axTreeSettled
             self.axTreeHasContent = axTreeHasContent
+            self.axTreeSpinner = axTreeSpinner
             self.identicalTo = identicalTo
             self.unverifiedAxes = unverifiedAxes
             self.motion = motion
@@ -554,6 +592,7 @@ public extension CaptureManifest {
             state: Walkbook.CaptureState,
             axTreeSettled: Bool? = nil,
             axTreeHasContent: Bool? = nil,
+            axTreeSpinner: Spinner? = nil,
             identicalTo: String? = nil,
             unverifiedAxes: [String]? = nil,
             capturedAt: Date? = nil,
@@ -567,6 +606,7 @@ public extension CaptureManifest {
             axTreePath = CaptureBundleLayout.axTreePath(screenID: screenID, stateSlug: state.slug)
             self.axTreeSettled = axTreeSettled
             self.axTreeHasContent = axTreeHasContent
+            self.axTreeSpinner = axTreeSpinner
             self.identicalTo = identicalTo
             self.unverifiedAxes = unverifiedAxes?.isEmpty == true ? nil : unverifiedAxes
             self.motion = motion
@@ -588,6 +628,7 @@ public extension CaptureManifest {
                 axTreeSettled = try decoder.container(keyedBy: LegacyCodingKeys.self).decodeIfPresent(Bool.self, forKey: .settled)
             }
             axTreeHasContent = try container.decodeIfPresent(Bool.self, forKey: .axTreeHasContent)
+            axTreeSpinner = try container.decodeIfPresent(Spinner.self, forKey: .axTreeSpinner)
             identicalTo = try container.decodeIfPresent(String.self, forKey: .identicalTo)
             unverifiedAxes = try container.decodeIfPresent([String].self, forKey: .unverifiedAxes)
             capturedAt = try container.decodeIfPresent(Date.self, forKey: .capturedAt)
@@ -627,6 +668,7 @@ extension CaptureManifest.StateCapture {
         case axTreePath
         case axTreeSettled
         case axTreeHasContent
+        case axTreeSpinner
         case identicalTo
         case unverifiedAxes
         case capturedAt

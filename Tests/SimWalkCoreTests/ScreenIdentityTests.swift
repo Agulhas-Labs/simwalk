@@ -69,6 +69,20 @@ struct ScreenIdentityTests {
         #expect(departed.hasBeenLeft(by: Self.browse()))
     }
 
+    /// **A tab bar's buttons gaining their identifiers is not an arrival** (SimWalk#279): they fill in up to 0.7 s after a tab switch, touched or not, so a dead control tapped in that window would otherwise land on them, with a capture of the screen it never left.
+    @Test
+    func anIdentifierFillingInIsNotAnArrival() {
+        func hub(_ identifiers: [String?]) -> AXNode {
+            let tabs = zip(["Hub", "Rows"], identifiers).map { AXNode(type: "Button", frame: Self.screenFrame, label: $0, identifier: $1) }
+            return AXNode(type: "Application", frame: Self.screenFrame, label: "RouteFixture", children: [
+                Self.row(label: "Press row"),
+                AXNode(type: "TabBar", frame: Self.screenFrame, label: "Tab Bar", children: tabs),
+            ])
+        }
+
+        #expect(!ScreenIdentity.of(hub([nil, nil])).hasBeenLeft(by: hub(["house", "list.bullet"])))
+    }
+
     /// A pure function of the tree, so the identity of one screen cannot drift between two reads of it — the direction a wrong answer would file false evidence rather than refuse.
     @Test
     func theSameTreeAlwaysReducesToTheSameIdentity() {

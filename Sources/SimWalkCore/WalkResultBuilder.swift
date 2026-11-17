@@ -148,7 +148,7 @@ private extension WalkResultBuilder {
             case let .unexpectedScreen(expected, found, _):
                 failure.expected = expected
                 failure.actual = found
-            case let .unreachable(routeTried, _, _, _):
+            case let .unreachable(routeTried, _, _, _, _):
                 // The step the runner was reaching for. The manifest records the steps taken, not the identifiers of the screen the walk stopped on, so `actual` stays `nil`.
                 failure.expected = routeTried.last?.description
             default:
@@ -183,7 +183,7 @@ private extension WalkResultBuilder {
             switch screen.outcome {
             case .captured:
                 CaptureBundleSummary.outcomeWords(screen.outcome)
-            case let .unreachable(routeTried, reason, _, state):
+            case let .unreachable(routeTried, reason, _, state, _):
                 (state.map { "\($0.clause), " } ?? "") + "route tried: \(routeTried.rendered)" + (reason.map { " — \($0)" } ?? "")
             case let .buildMismatch(expected, found):
                 "build mismatch: expected \(expected), found \(found)"

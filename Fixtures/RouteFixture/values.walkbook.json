@@ -1,0 +1,24 @@
+{
+  "name": "route-fixture-values",
+  "appBundleID": "dev.simwalk.route-fixture",
+  "screens": [
+    {
+      "id": "values-before",
+      "expectValues": [{ "label": "Choosing a strategy", "value": "Start" }],
+      "route": [
+        { "tap": { "label": "Values" } }
+      ],
+      "states": [{ "theme": "light" }]
+    },
+    {
+      "id": "values-after",
+      "expectValues": [{ "label": "Choosing a strategy", "value": "Done" }],
+      "route": [
+        { "tap": { "label": "Values" } },
+        { "tap": { "label": "Choosing a strategy" } },
+        { "tap": { "label": "Save" } }
+      ],
+      "states": [{ "theme": "light" }]
+    }
+  ]
+}

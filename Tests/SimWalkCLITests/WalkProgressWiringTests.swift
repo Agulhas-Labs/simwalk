@@ -342,13 +342,13 @@ struct WalkProgressWiringTests {
 
         try command.run(log: UsageLog(fileURL: walk.directory.url.appendingPathComponent("usage.jsonl"), now: { Date() }), emit: { emitted.append($0) }, emitError: { _ in }, walk: { outcome })
 
-        let line = "result: \(walk.resultURL.path)"
+        let line = "result: \(walk.producedResultURL.path)"
         let served = outcome.servedAnswer()
         #expect(served.residue.last == line)
         #expect(Array(served.residue.dropLast()) == outcome.answer().residue)
         #expect(served.text.split(separator: "\n").filter { $0.hasPrefix("result: ") } == [Substring(line)])
         #expect(emitted.joined(separator: "\n").split(separator: "\n").filter { $0.hasPrefix("result: ") } == [Substring(line)])
-        let result = try WalkResult.decoder().decode(WalkResult.self, from: Data(contentsOf: walk.resultURL))
+        let result = try WalkResult.decoder().decode(WalkResult.self, from: Data(contentsOf: walk.producedResultURL))
         #expect(result.verdict == .passed)
     }
 
@@ -364,7 +364,7 @@ struct WalkProgressWiringTests {
         let served = noted.servedAnswer()
 
         #expect(plain.residue.contains { $0.contains("the runner's own failure text") })
-        #expect(served.residue.last == "result: \(walk.resultURL.path)")
+        #expect(served.residue.last == "result: \(walk.producedResultURL.path)")
         #expect(Array(served.residue.dropLast()) == plain.residue)
     }
 
@@ -390,7 +390,8 @@ struct WalkProgressWiringTests {
         let progress = walk.directory.url.appendingPathComponent("progress/\(stem).json")
 
         #expect(FileManager.default.fileExists(atPath: progress.path))
-        #expect(outcome.resultPath == walk.directory.url.appendingPathComponent("progress/\(stem).result.json").path)
+        let handle = try WalkHandle(stem: stem, progress: WalkProgress.decoder().decode(WalkProgress.self, from: Data(contentsOf: progress)))
+        #expect(outcome.resultPath == ProgressLocation.resultURL(of: handle, in: walk.directory.url).path)
     }
 
     /// `--verbose` is off unless passed, and refused beside `--dry-run`, which writes no result for it to shape.
@@ -408,7 +409,7 @@ struct WalkProgressWiringTests {
 
         _ = try walk.performAsProduction(["--app-path", walk.appPath] + (verbose ? ["--verbose"] : []), session: "wiring")
 
-        let result = try WalkResult.decoder().decode(WalkResult.self, from: Data(contentsOf: walk.resultURL))
+        let result = try WalkResult.decoder().decode(WalkResult.self, from: Data(contentsOf: walk.producedResultURL))
 
         #expect(!result.steps.isEmpty)
         #expect(result.steps.allSatisfy { ($0.states != nil) == verbose })
@@ -502,7 +503,13 @@ extension WalkProgressWiringTests {
             ).url
             output = directory.url.appendingPathComponent("walked.\(CaptureBundleLayout.directoryExtension)")
             progressURL = ProgressLocation.progressURL(session: "wiring", in: directory.url)
-            resultURL = ProgressLocation.resultURL(session: "wiring", in: directory.url)
+            resultURL = ProgressLocation.resultURL(session: "wiring", pid: 4242, startedAt: Date(timeIntervalSince1970: 1_700_000_000), in: directory.url)
+        }
+
+        /// The result file of the walk the production telemetry ran under session `wiring`: named by the handle of the progress file it left.
+        var producedResultURL: URL {
+            let progress = progress() ?? WalkProgress(tool: "walk", phase: .idle, pid: 0, startedAt: Date(timeIntervalSince1970: 0))
+            return ProgressLocation.resultURL(of: WalkHandle(stem: "wiring", progress: progress), in: directory.url)
         }
 
         func progress() -> WalkProgress? {

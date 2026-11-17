@@ -90,6 +90,11 @@ private extension WalkStatusReader {
             return .answer(Self.refusal("the progress file for \(handle.text) is unreadable"))
         }
         guard handle.names(progress) else {
+            // A later run reused the slot's progress file; the walk's own result file, named by its handle, outlives that.
+            let resultURL = ProgressLocation.resultURL(of: handle, in: directory)
+            if FileManager.default.fileExists(atPath: resultURL.path) {
+                return .answer(endedAnswer(handle, path: resultURL.path))
+            }
             return .answer(Self.refusal("the walk \(handle.text) was replaced by a later run under \(handle.stem)"))
         }
         guard progress.tool != "session" else {

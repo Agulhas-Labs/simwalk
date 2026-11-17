@@ -87,6 +87,10 @@ public extension Walkbook {
         ///
         /// For a route that ends by opening a SwiftUI system `Menu`, whose open state hides the screen's identifier and has none of its own, so `expect` cannot verify it. `ExpectedMenuCheck` holds every capture's `Button` labels to these as an ordered subsequence, each matched exactly; a mismatch is the screen's outcome (`ScreenOutcome.unexpectedScreen`). Independent of `expect` — and since an open menu hides the screen's identifier, `expect` beside `expectMenu` normally fails. Left out of the canonical encoding when absent, so a walkbook without it hashes as it always did.
         public var expectMenu: [String]?
+        /// The values the reached screen's elements must read, each an element named by label or identifier and the value it must carry; `nil` checks nothing (SimWalk#259).
+        ///
+        /// For a walkbook that proves a state change a route cannot read: a lesson's `Button` whose accessibility value goes from `Start` to `Done`. `ExpectedValueCheck` holds every capture to every entry, each compared whole against some node so named; a mismatch is the screen's outcome (`ScreenOutcome.unexpectedScreen`). Independent of `expect` and `expectMenu`. Left out of the canonical encoding when absent, so a walkbook without it hashes as it always did.
+        public var expectValues: [ExpectedValue]?
         /// The appearance the app, not the device, draws this screen in, whatever a state's `theme` says; `nil` when the screen follows the device (SimWalk#19).
         ///
         /// Written `"fixedAppearance": "dark"` or `"light"`, decoded as `theme` is. The appearance comparisons are not made for such a screen and nothing is refused on appearance (`StateApplicationCheck`); the walk's line for it says so. Left out of the canonical encoding when absent, so a walkbook without it hashes as it always did.
@@ -106,6 +110,7 @@ public extension Walkbook {
             budgets: Budgets? = nil,
             expect: String? = nil,
             expectMenu: [String]? = nil,
+            expectValues: [ExpectedValue]? = nil,
             fixedAppearance: Theme? = nil,
             notes: String? = nil,
             figures: [Figure]? = nil
@@ -119,6 +124,7 @@ public extension Walkbook {
             self.budgets = budgets
             self.expect = expect
             self.expectMenu = expectMenu
+            self.expectValues = expectValues
             self.fixedAppearance = fixedAppearance
             self.notes = notes
             self.figures = figures
@@ -219,6 +225,10 @@ public extension Walkbook {
         case tab(label: String)
         /// Tap the element with the given accessibility label.
         case tap(label: String)
+        /// Tap the element with the given accessibility label and expect the tap to change nothing (SimWalk#268): written `{"tap": {"label": "…", "unchanged": true}}`.
+        ///
+        /// The tap is found, delivered and refused as ``tap(label:)`` is, then watched for the whole step budget: it lands when the screen was not left and the tapped element's own selection and enablement did not change, and is refused when either did. A separate case, so no `case let .tap(label)` pattern changes meaning.
+        case tapUnchanged(label: String)
         /// Tap the element with the given accessibility label and type `text` into it.
         ///
         /// The vocabulary could reach a search field and not drive it, so a search screen was capturable only empty (SimWalk#1 item 2). Tapping is part of the step rather than something an author writes before it: typing into a field that never took focus is an XCUITest failure and not a value the route loop can report, so the runner takes the focus itself, resolves the label among elements that can actually take text, and reports the step as not landed unless the field is afterwards carrying what was typed.
@@ -233,8 +243,10 @@ public extension Walkbook {
         ///
         /// Never a search: `scrollTo` swipes until it finds something, this swipes once in the direction written. A swipe often reveals rather than navigates (a swipe action's button), so it lands one quiet period after the gesture, unconditionally, as `tapPoint` does. `direction` is held as written, one of ``SwipeDirection``'s raw values, so a walkbook naming another is refused by `validate` with the value named rather than as an undecodable file.
         case swipe(label: String?, direction: String)
-        /// Scroll until the element with the given accessibility label is on screen.
-        case scrollTo(label: String)
+        /// Scroll until the element with the given accessibility label is on screen, then nudge it clear of any bar in front of it (SimWalk#108).
+        ///
+        /// **`position` places the element once it is there** (SimWalk#270): `top` drags the content until the element's top edge sits just below the top of its scroll container, for a capture of a section whose heading is the thing to see. It is held as written, one of ``ScrollPosition``'s raw values, so a walkbook naming another is refused by `validate` with the value named rather than as an undecodable file. Written only when set, so a plain `scrollTo` encodes as it always did.
+        case scrollTo(label: String, position: String? = nil)
         /// Tap a point rather than an element found by its label — for an accessibility tree that lies (SimWalk#29).
         ///
         /// Apple Health's charts are the specimen: after a period switch the previous period's bars stay in the tree with zero frames, and once a bar is selected the hero freezes on the selected value, so a bar can be reached by where it is drawn and by nothing the tree says. **With a `label`, `at` is a point within that element's frame**, each coordinate a fraction from 0 to 1 (`[0.8, 0.5]`: four fifths across, halfway down) — it survives a change of device, so it is the form to reach for first; the label resolves exactly as a `scrollTo`'s does. **Without one, `at` is a point on the screen in device points** (`[201, 610]`).
@@ -273,10 +285,12 @@ public extension Walkbook {
                 "tab '\(label)'"
             case let .tap(label):
                 "tap '\(label)'"
+            case let .tapUnchanged(label):
+                "tap '\(label)' (no change)"
             case let .type(label, text, replace):
                 "type '\(text)' into '\(label)'" + (replace ? ", replacing its text" : "")
-            case let .scrollTo(label):
-                "scrollTo '\(label)'"
+            case let .scrollTo(label, position):
+                "scrollTo '\(label)'" + (position.map { " (\($0))" } ?? "")
             case let .longPress(label, seconds):
                 "longPress '\(label)'" + (seconds == Self.defaultLongPressSeconds ? "" : " for \(Self.rendered([seconds])) s")
             case let .swipe(label?, direction):
@@ -494,15 +508,15 @@ public extension Walkbook {
     }
 }
 
-extension Walkbook.RouteStep {
+public extension Walkbook.RouteStep {
     /// The keys a `tapPoint` step is written with: its point is written `at`, as an author reads it (`tap 'Steps chart' at 0.8,0.5`), while the Swift name stays long enough to be a name.
-    enum TapPointCodingKeys: String, CodingKey {
+    internal enum TapPointCodingKeys: String, CodingKey {
         case label
         case point = "at"
     }
 
     /// Where a `systemTap` found the control it tapped — the tree the runner read, and so the most the manifest can say about who drew it.
-    public enum SystemSheetOwner: String, Codable, Equatable, Sendable {
+    enum SystemSheetOwner: String, Codable, Equatable, Sendable {
         /// SpringBoard's tree, where the system's alerts are drawn: nothing the app draws is there.
         case springboard
         /// The app's own window, in a subtree that appeared after the app's own screen — where HealthKit hosts its authorization sheet (`SystemSheetScope`).
@@ -520,20 +534,25 @@ extension Walkbook.RouteStep {
     }
 
     /// The directions a `swipe` may be written with, as its `direction` spells them.
-    public enum SwipeDirection: String, CaseIterable, Sendable {
+    enum SwipeDirection: String, CaseIterable, Sendable {
         case up
         case down
         case left
         case right
     }
 
+    /// The positions a `scrollTo` may be written with, as its `position` spells them (SimWalk#270).
+    enum ScrollPosition: String, CaseIterable, Sendable {
+        case top
+    }
+
     /// The name each case is written under — the only key its JSON object carries (`{"tab":{"label":"Progress"}}`).
-    static let caseNames = ["tab", "tap", "type", "longPress", "swipe", "scrollTo", "tapPoint", "drag", "systemTap", "openURL", "back"]
+    internal static let caseNames = ["tab", "tap", "type", "longPress", "swipe", "scrollTo", "tapPoint", "drag", "systemTap", "openURL", "back"]
 
     /// Decodes strictly rather than relying on synthesis, so a step naming a key its case does not take (SimWalk#10's sibling hole, one vocabulary over) is a decode failure instead of a silently ignored field.
     ///
     /// **The outer object is now `AnyCodingKey`, not a fixed case-name key (round 2, finding 2).** The container used to be keyed by an enum naming only the five cases, so its own `allKeys` silently dropped anything else — `{"tab":{"label":"You"},"expect":"x"}` decoded as a plain `tab` step, the spec's own wording ("`expect` … on a walkbook step") having led an author to put it exactly where it was invisible. Reading every key first is what lets `expect` there be reported at all, and what lets `{"tabb":…}` name the key and its nearest match instead of just "exactly one of tab, tap, …".
-    public init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws {
         let outer = try decoder.container(keyedBy: AnyCodingKey.self)
         try StrictKeyDecoding.checkUnknownKeys(in: outer, allowing: Self.caseNames, decoder: decoder)
         // Unknown keys may have been recorded rather than thrown (a `WalkbookProblemSink` is installed),
@@ -573,8 +592,10 @@ extension Walkbook.RouteStep {
             try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label"], decoder: decoder)
             self = try .tab(label: Self.label(in: payload, decoder: decoder))
         case "tap":
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label"], decoder: decoder)
-            self = try .tap(label: Self.label(in: payload, decoder: decoder))
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "unchanged"], decoder: decoder)
+            let label = try Self.label(in: payload, decoder: decoder)
+            let unchanged = try payload.decodeIfPresent(Bool.self, forKey: AnyCodingKey("unchanged")) ?? false
+            self = unchanged ? .tapUnchanged(label: label) : .tap(label: label)
         case "type":
             try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "text", "replace"], decoder: decoder)
             self = try .type(
@@ -596,8 +617,11 @@ extension Walkbook.RouteStep {
                 direction: StrictKeyDecoding.required(String.self, forKey: AnyCodingKey("direction"), in: payload, decoder: decoder, placeholder: "")
             )
         case "scrollTo":
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label"], decoder: decoder)
-            self = try .scrollTo(label: Self.label(in: payload, decoder: decoder))
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "position"], decoder: decoder)
+            self = try .scrollTo(
+                label: Self.label(in: payload, decoder: decoder),
+                position: payload.decodeIfPresent(String.self, forKey: AnyCodingKey("position"))
+            )
         case "tapPoint":
             // `label` is optional here and only here: its presence is what makes `at` a point within an
             // element rather than one on the screen. `at` stays a plain array so a walkbook built or decoded
@@ -634,12 +658,18 @@ extension Walkbook.RouteStep {
     }
 
     /// Encodes as synthesis did before `atLaunch` (SimWalk#46), which synthesis would write on every `systemTap` as `false`: here it is written only when true, so every walkbook and manifest without the declaration is byte-identical to one written before it existed.
-    public func encode(to encoder: Encoder) throws {
+    func encode(to encoder: Encoder) throws {
         var outer = encoder.container(keyedBy: AnyCodingKey.self)
         var payload = outer.nestedContainer(keyedBy: AnyCodingKey.self, forKey: AnyCodingKey(caseName))
         switch self {
-        case let .tab(label), let .tap(label), let .scrollTo(label):
+        case let .tab(label), let .tap(label):
             try payload.encode(label, forKey: AnyCodingKey("label"))
+        case let .tapUnchanged(label):
+            try payload.encode(label, forKey: AnyCodingKey("label"))
+            try payload.encode(true, forKey: AnyCodingKey("unchanged"))
+        case let .scrollTo(label, position):
+            try payload.encode(label, forKey: AnyCodingKey("label"))
+            try payload.encodeIfPresent(position, forKey: AnyCodingKey("position"))
         case let .type(label, text, replace):
             try payload.encode(label, forKey: AnyCodingKey("label"))
             try payload.encode(text, forKey: AnyCodingKey("text"))
@@ -684,7 +714,7 @@ extension Walkbook.RouteStep {
     private var caseName: String {
         switch self {
         case .tab: "tab"
-        case .tap: "tap"
+        case .tap, .tapUnchanged: "tap"
         case .type: "type"
         case .longPress: "longPress"
         case .swipe: "swipe"
@@ -801,7 +831,7 @@ public extension Walkbook.CaptureState {
 }
 
 public extension Walkbook.Screen {
-    private static let knownKeys = ["id", "route", "states", "settle", "motion", "measure", "budgets", "expect", "expectMenu", "fixedAppearance", "notes", "figures"]
+    private static let knownKeys = ["id", "route", "states", "settle", "motion", "measure", "budgets", "expect", "expectMenu", "expectValues", "fixedAppearance", "notes", "figures"]
 
     /// Decodes strictly rather than relying on synthesis (round 2, finding 2): `{"expects": "…"}` on a screen — the spec's own wording, misspelled — used to decode cleanly with `expect` left `nil`, turning the check silently off on the one screen an author meant to turn it on for.
     init(from decoder: Decoder) throws {
@@ -821,6 +851,7 @@ public extension Walkbook.Screen {
         budgets = try container.decodeIfPresent(Walkbook.Budgets.self, forKey: AnyCodingKey("budgets"))
         expect = try container.decodeIfPresent(String.self, forKey: AnyCodingKey("expect"))
         expectMenu = try container.decodeIfPresent([String].self, forKey: AnyCodingKey("expectMenu"))
+        expectValues = try container.decodeIfPresent([Walkbook.ExpectedValue].self, forKey: AnyCodingKey("expectValues"))
         fixedAppearance = try container.decodeIfPresent(Walkbook.Theme.self, forKey: AnyCodingKey("fixedAppearance"))
         notes = try container.decodeIfPresent(String.self, forKey: AnyCodingKey("notes"))
         figures = try container.decodeIfPresent([Walkbook.Figure].self, forKey: AnyCodingKey("figures"))

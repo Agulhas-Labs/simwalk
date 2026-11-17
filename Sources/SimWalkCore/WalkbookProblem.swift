@@ -30,6 +30,8 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
     case longPressSecondsOutOfRange(screenID: String, index: Int, stepIndex: Int, seconds: Double)
     /// A `swipe` step names a direction that is not up, down, left or right (SimWalk#198).
     case unknownSwipeDirection(screenID: String, index: Int, stepIndex: Int, value: String)
+    /// A `scrollTo` step names a position that is not `top` (SimWalk#270).
+    case unknownScrollPosition(screenID: String, index: Int, stepIndex: Int, value: String)
     /// A `tapPoint` step's `at` is not two numbers — an x and a y — so there is no point to tap (SimWalk#29).
     case malformedTapPoint(screenID: String, index: Int, stepIndex: Int, count: Int)
     /// A `tapPoint` step names an element and a point outside its frame — a coordinate outside 0…1 — so the touch would land on whatever is drawn beside it.
@@ -86,6 +88,14 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
     case blankExpectMenuLabel(screenID: String, index: Int, position: Int)
     /// A screen's `expectMenu` holds a label padded with whitespace, which an exact match can never satisfy.
     case paddedExpectMenuLabel(screenID: String, index: Int, position: Int, value: String)
+    /// A screen states `expectValues` as an empty list, which checks nothing and reads as though it does (SimWalk#259).
+    case emptyExpectValues(screenID: String, index: Int)
+    /// An `expectValues` entry's label is blank, which no element carries.
+    case blankExpectValueLabel(screenID: String, index: Int, position: Int)
+    /// An `expectValues` entry's label is padded with whitespace, which an exact match can never satisfy.
+    case paddedExpectValueLabel(screenID: String, index: Int, position: Int, value: String)
+    /// An `expectValues` entry's value is empty or whitespace; the capture records an empty value as none, so it can never pass.
+    case blankExpectValue(screenID: String, index: Int, position: Int)
     /// A key inside the walkbook, a screen, a state or a route step that none of this format recognises — `path` locates it (`screens[0].states[1]`, empty at the walkbook's own top level) and `key` names what was found there.
     ///
     /// Reported beside every other problem rather than the decode failure it used to be aborting the whole load before they could be listed (SimWalk#10, round 2) — see `WalkbookProblemSink`.
@@ -165,6 +175,8 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
             "\(Self.subject(screenID, index)) route step \(stepIndex) long-presses for \(Walkbook.RouteStep.rendered([seconds])) s — a hold shorter than 0.5 s is a tap and one longer than 5 s is a wait, so `seconds` is from 0.5 to 5"
         case let .unknownSwipeDirection(screenID, index, stepIndex, value):
             "\(Self.subject(screenID, index)) route step \(stepIndex) swipes '\(value)' — one of \(Walkbook.RouteStep.SwipeDirection.allCases.map(\.rawValue).joined(separator: ", "))"
+        case let .unknownScrollPosition(screenID, index, stepIndex, value):
+            "\(Self.subject(screenID, index)) route step \(stepIndex) scrolls to position '\(value)' — one of \(Walkbook.RouteStep.ScrollPosition.allCases.map(\.rawValue).joined(separator: ", "))"
         case let .malformedTapPoint(screenID, index, stepIndex, count):
             "\(Self.subject(screenID, index)) route step \(stepIndex) taps at \(count) number\(count == 1 ? "" : "s") — `at` is a point, written as two: [x, y]"
         case let .tapPointOutsideElement(screenID, index, stepIndex, label, point):
@@ -221,6 +233,14 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
             "\(Self.subject(screenID, index)) states expectMenu label \(position + 1) as an empty string — no menu item carries it, so the check can never pass"
         case let .paddedExpectMenuLabel(screenID, index, position, value):
             "\(Self.subject(screenID, index)) states expectMenu label \(position + 1) as '\(value)', padded with whitespace — no menu item's label will ever carry it, so an exact match can never pass"
+        case let .emptyExpectValues(screenID, index):
+            "\(Self.subject(screenID, index)) states expectValues as an empty list — a check against no values passes everything, which is what an absent `expectValues` already says honestly"
+        case let .blankExpectValueLabel(screenID, index, position):
+            "\(Self.subject(screenID, index)) states expectValues entry \(position + 1) with an empty label — no element carries it, so the check can never pass"
+        case let .paddedExpectValueLabel(screenID, index, position, value):
+            "\(Self.subject(screenID, index)) states expectValues entry \(position + 1) with the label '\(value)', padded with whitespace — no element's label or identifier will ever carry it, so an exact match can never pass"
+        case let .blankExpectValue(screenID, index, position):
+            "\(Self.subject(screenID, index)) states expectValues entry \(position + 1) with an empty value — a capture records an element with no value as having none, so the check can never pass"
         case let .unknownKey(path, key, suggestion):
             "unknown key '\(key)'\(path.isEmpty ? "" : " at \(path)")\(Self.meantInstead(suggestion))"
         case let .misplacedKey(path, key, belongsOn):
@@ -280,8 +300,8 @@ public enum WalkbookProblem: Equatable, Sendable, CustomStringConvertible {
         case .undecodable:
             nil
         case .blankWalkName, .blankAppBundleID, .noScreens, .blankScreenID, .duplicateScreenID, .collidingScreenIDs, .emptyRoute,
-             .blankRouteStepLabel, .blankTypedText, .longPressSecondsOutOfRange, .unknownSwipeDirection, .malformedTapPoint, .tapPointOutsideElement, .tapPointOffScreen, .tapPointFractionalWithoutLabel, .malformedDragPoint, .dragPointOutsideElement, .dragPointOffScreen, .dragPointFractionalWithoutLabel, .dragHoldOutOfRange, .dragSecondsOutOfRange, .noCaptureStates, .duplicateCaptureState, .unknownDynamicTypeSize, .unknownLocale,
-             .emptyLaunchCondition, .blankLaunchCondition, .animationsInStateEnvironment, .unknownPermission, .locationOutOfRange, .nonPositiveSettle, .emptyBudgets, .negativeBudget, .measureIterationsOutOfRange, .blankExpect, .paddedExpect, .emptyExpectMenu, .blankExpectMenuLabel, .paddedExpectMenuLabel, .unknownKey, .misplacedKey, .mangledExpect, .placeholderInTabStep,
+             .blankRouteStepLabel, .blankTypedText, .longPressSecondsOutOfRange, .unknownSwipeDirection, .unknownScrollPosition, .malformedTapPoint, .tapPointOutsideElement, .tapPointOffScreen, .tapPointFractionalWithoutLabel, .malformedDragPoint, .dragPointOutsideElement, .dragPointOffScreen, .dragPointFractionalWithoutLabel, .dragHoldOutOfRange, .dragSecondsOutOfRange, .noCaptureStates, .duplicateCaptureState, .unknownDynamicTypeSize, .unknownLocale,
+             .emptyLaunchCondition, .blankLaunchCondition, .animationsInStateEnvironment, .unknownPermission, .locationOutOfRange, .nonPositiveSettle, .emptyBudgets, .negativeBudget, .measureIterationsOutOfRange, .blankExpect, .paddedExpect, .emptyExpectMenu, .blankExpectMenuLabel, .paddedExpectMenuLabel, .emptyExpectValues, .blankExpectValueLabel, .paddedExpectValueLabel, .blankExpectValue, .unknownKey, .misplacedKey, .mangledExpect, .placeholderInTabStep,
              .placeholderInSystemTapStep, .ownerInSystemTapStep, .atLaunchAfterFirstStep, .unopenableURL, .emptyOracleCommand, .unknownPrivacyService, .privacyGrantedAndRevoked, .privacyGrantUndoneByReset, .figuresWithoutOracle, .emptyFigures,
              .blankFigureField, .emptyFigureWindows, .duplicateFigureID, .figureElementPlaceholders, .unsupportedOnDevice:
             nil

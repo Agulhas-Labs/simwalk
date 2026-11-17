@@ -14,7 +14,7 @@ public struct SettledCapture {
     public let screenshot: Data
     /// The app's tree, of the same moment as the picture where `didSettle`.
     public let tree: AXNode
-    /// Whether the tree held still with more than the app's chrome in it and bracketed the picture; `false` for a screen still moving when the budget ran out, or still bare when the content wait did (SimWalk#81), captured and flagged.
+    /// Whether the tree held still with more than the app's chrome in it and bracketed the picture; `false` for a screen still moving when the budget ran out, or still bare, or still showing a spinner, when the content wait ran out (SimWalk#81, #267), captured and flagged.
     public let didSettle: Bool
     /// How long after the source began watching the kept picture was taken, by the source's own `elapsed()` — the moment the figures in it were on screen.
     ///

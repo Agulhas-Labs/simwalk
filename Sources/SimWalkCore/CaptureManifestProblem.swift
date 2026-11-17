@@ -50,6 +50,10 @@ public enum CaptureManifestProblem: Equatable, Sendable, CustomStringConvertible
     case artefactMissing(screenID: String, stateSlug: String, expectedPath: String)
     /// A capture states a path that is not the one the layout derives for it — a dark capture pointing at the light screenshot, or a path climbing out of the bundle entirely.
     case misfiledArtefact(screenID: String, stateSlug: String, stated: String, expected: String)
+    /// An unreachable screen names a last-state directory other than the one the layout derives for it (SimWalk#281).
+    case misfiledUnreachedDirectory(screenID: String, stated: String, expected: String)
+    /// An unreachable screen claims the state its route stopped in, and a file of it is not in the bundle (SimWalk#281).
+    case unreachedArtefactMissing(screenID: String, expectedPath: String)
     /// Two screen records share an id, so a reader cannot tell which one an artefact belongs to.
     case duplicateScreenID(id: String, occurrences: Int)
     /// Screen records with different ids that file under one directory — distinct to a reader, one directory to the filesystem.
@@ -123,6 +127,10 @@ public enum CaptureManifestProblem: Equatable, Sendable, CustomStringConvertible
             "screen '\(screenID)' state '\(stateSlug)' claims \(expectedPath), which is not in the bundle"
         case let .misfiledArtefact(screenID, stateSlug, stated, expected):
             "screen '\(screenID)' state '\(stateSlug)' claims \(stated) where the layout files it at \(expected) — a path is derived, never stated"
+        case let .misfiledUnreachedDirectory(screenID, stated, expected):
+            "screen '\(screenID)' claims its last state at \(stated) where the layout files it at \(expected) — a path is derived, never stated"
+        case let .unreachedArtefactMissing(screenID, expectedPath):
+            "screen '\(screenID)' claims its last state captured, and \(expectedPath) is not in the bundle"
         case let .duplicateScreenID(id, occurrences):
             "screen id '\(id)' appears \(occurrences) times — a reader cannot tell which record an artefact belongs to"
         case let .collidingScreenIDs(slug, ids):

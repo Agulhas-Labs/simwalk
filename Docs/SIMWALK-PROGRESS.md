@@ -7,18 +7,18 @@ A long walk or live session writes two small JSON files you can read while it ru
 | File | Path | Written |
 |---|---|---|
 | Progress | `~/.simwalk/progress/<session>.json` | during a run, atomically |
-| Result | `~/.simwalk/progress/<session>.result.json` | once, when the run ends |
+| Result | `~/.simwalk/progress/<handle>.result.json` | once, when the run ends |
 
 `<session>` is the value of the `CLAUDE_CODE_SESSION_ID` environment variable. A run without one, such as a human's CLI call, uses `default`. Files are per session, never per project, so parallel sessions in sibling worktrees do not share one. The directory is the one that holds the usage log (`~/.simwalk/`). `SIMWALK_USAGE_LOG` moves the log, and the progress directory moves with it.
 
-Two runs alive at once never share a file (SimWalk#83). Each run takes a lock on `<session>.lock` for as long as it lives. A run that finds it held takes the next free slot: `<session>.2.json` and `<session>.2.result.json`, then `.3`, and so on. A session id never contains a dot, so a slot never names another session's file. The system drops the lock when the process dies, so a killed run does not block a slot. Slots are reused, so the directory holds a few files per session, not a pair per run.
+Two runs alive at once never share a file (SimWalk#83). Each run takes a lock on `<session>.lock` for as long as it lives. A run that finds it held takes the next free slot: `<session>.2.json`, then `.3`, and so on. A session id never contains a dot, so a slot never names another session's file. The system drops the lock when the process dies, so a killed run does not block a slot. Slots are reused, so the directory holds a few progress files per session. The result file is not per slot but per walk: it is named by the walk's handle (§2), `<stem>@<pid>-<startedAtMs>.result.json`, so a later run that reuses the slot never overwrites the result of an earlier one. A walk that writes its result deletes result files in the directory that were last modified more than 7 days ago.
 
 A live session (`tool: "session"`) starts at slot 2. Slot 1 stays free for a walk.
 
 To find the right files:
 
 - The `walk` answer ends with a `result: <path>` line, and the progress file's `resultPath` names the result file.
-- To find every live run of a session, glob `<session>.*.json` and drop every match that ends in `.result.json`. That glob also matches result files.
+- To find every live run of a session, glob `<session>.json` and `<session>.*.json` and drop every match that ends in `.result.json`: a result file is named by its walk's handle, and the second glob matches the result files of runs in slot 2 and above.
 - A live session holds its slot until it ends, or until it has been idle past its timeout.
 
 ## 2. Progress schema (`schemaVersion` 1)
@@ -98,7 +98,7 @@ case, in precedence order (rows 1–12), is in `Docs/Reference.md`; it is not re
 
 ## 4. Result schema (`schemaVersion` 1)
 
-`<session>.result.json` is a compact summary of a finished walk, built for rendering a list of its steps. It is capped at 16 KiB.
+`<handle>.result.json` is a compact summary of a finished walk, built for rendering a list of its steps. It is capped at 16 KiB.
 
 ```json
 {
@@ -123,7 +123,7 @@ case, in precedence order (rows 1–12), is in `Docs/Reference.md`; it is not re
 ```
 
 - `verdict` is `passed`, `failed` or `refused`. A step's `outcome` is `passed` or `failed`. `kind` is the failure's outcome name, as in the `matches` list above.
-- `expected` and `actual` are the screen identifiers the walkbook expected and the ones the screen showed (`unexpectedScreen`). An `unreachable` failure has the last route step it was reaching for as `expected`, and no `actual`. The whole route it tried is in `reason`. `screenshotPath` is the capture of what the screen actually showed, as an absolute path. There is no reference screenshot and no diff percentage, because a walk has no reference.
+- `expected` and `actual` are the screen identifier the walkbook expected and, per mismatched capture, the screen identifiers the screen showed (`unexpectedScreen`): each entry is the path to the deepest identifier, outer to inner, joined by ` > ` (`parent > controls`), a single identifier when none nests, or `null` for a capture carrying none. An `unreachable` failure has the last route step it was reaching for as `expected`, and no `actual`. The whole route it tried is in `reason`. `screenshotPath` is the capture of what the screen actually showed, as an absolute path. There is no reference screenshot and no diff percentage, because a walk has no reference.
 - `timings` is the progress file's `summary`, final. On a `walk --parallel` it carries `parallel`, as §2 describes.
 - `steps` lists every screen in walkbook order. When the 16 KiB cap bites, passed steps are dropped from the end first, then failed ones. `truncated.omittedSteps` counts both. A dropped failed step stays in full in `failures`.
 - If the file is still over the cap, each failure's `reason`, `expected` and each `actual` entry are clipped to 512 characters, ending in `…`. `truncated.clippedFailures` counts the failures changed. An older file may omit it, so read a missing value as 0. Entries in `failures` are never dropped, so a walk with enough failures can pass 16 KiB.

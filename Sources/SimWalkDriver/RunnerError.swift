@@ -10,6 +10,8 @@ public enum RunnerError: Error, Equatable, CustomStringConvertible {
     case buildFailed(reason: String)
     /// `status` is what `xcodebuild` exited with, where a simulator walk's runner ran and exited non-zero; `nil` where nothing exited.
     case walkFailed(reason: String, status: Int32? = nil)
+    /// A simulator walk's or dry run's runner whose test passed and whose one failure was `xcodebuild` saving its result bundle (SimWalk#289); `reason` is the save's own, cut short.
+    case resultBundleNotSaved(reason: String)
     /// A device walk's measure run (`testMeasure`) did not complete; the walk goes on without its record.
     case measureFailed(reason: String)
 
@@ -19,6 +21,8 @@ public enum RunnerError: Error, Equatable, CustomStringConvertible {
             "the walk runner could not be built:\n  \(reason)"
         case let .walkFailed(reason, _):
             "the walk did not complete:\n  \(reason)"
+        case let .resultBundleNotSaved(reason):
+            "the runner's test passed, but xcodebuild could not save its result bundle: \(reason)"
         case let .measureFailed(reason):
             "the measure run did not complete: \(reason)"
         }
@@ -28,6 +32,12 @@ public enum RunnerError: Error, Equatable, CustomStringConvertible {
     public var isTestFailure: Bool {
         guard case let .walkFailed(_, status) = self else { return false }
         return status == 65
+    }
+
+    /// The save failure's reason when this is ``resultBundleNotSaved(reason:)``: the one runner failure that does not qualify a walk's answer.
+    public var resultBundleNotSavedReason: String? {
+        guard case let .resultBundleNotSaved(reason) = self else { return nil }
+        return reason
     }
 }
 

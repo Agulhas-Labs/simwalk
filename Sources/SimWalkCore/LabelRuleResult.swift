@@ -14,11 +14,22 @@ public struct LabelRuleResult: Equatable, Sendable {
     public var findings: [LabelFinding]
     /// How many captures the rule could not check, for a rule that needs more than the tree (a screenshot it could not read); the answer says so beside the count.
     public var unchecked: Int
+    /// How many of the `unchecked` captures had a readable screenshot that recognition failed on; the rest had no screenshot to read.
+    public var recognitionFailed: Int
+    /// The cause of the first recognition failure, for the answer to name; none when recognition never failed.
+    public var recognitionFailure: String?
+    /// How many runs extend past the screen's width inside a horizontal scroller, which scrolls sideways by design, so the rule did not report them; the answer says so beside the count (SimWalk#287).
+    public var inHorizontalScroller: Int
+    /// The screen of each such run, in order and repeated, so a line can name the screens.
+    public var inHorizontalScrollerScreens: [String] = []
 
-    public init(examined: Int = 0, findings: [LabelFinding] = [], unchecked: Int = 0) {
+    public init(examined: Int = 0, findings: [LabelFinding] = [], unchecked: Int = 0, recognitionFailed: Int = 0, recognitionFailure: String? = nil, inHorizontalScroller: Int = 0) {
         self.examined = examined
         self.findings = findings
         self.unchecked = unchecked
+        self.recognitionFailed = recognitionFailed
+        self.recognitionFailure = recognitionFailure
+        self.inHorizontalScroller = inHorizontalScroller
     }
 
     /// Two results as one, in order.
@@ -26,5 +37,9 @@ public struct LabelRuleResult: Equatable, Sendable {
         examined += other.examined
         findings += other.findings
         unchecked += other.unchecked
+        recognitionFailed += other.recognitionFailed
+        recognitionFailure = recognitionFailure ?? other.recognitionFailure
+        inHorizontalScroller += other.inHorizontalScroller
+        inHorizontalScrollerScreens += other.inHorizontalScrollerScreens
     }
 }

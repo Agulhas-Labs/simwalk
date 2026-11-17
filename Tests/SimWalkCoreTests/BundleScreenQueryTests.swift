@@ -300,6 +300,22 @@ struct BundleScreenQueryTests {
         #expect(!answer.text.contains("before the tree settled"))
     }
 
+    /// A capture filed still showing a spinner is one qualification of its own, not also taken before the tree settled (SimWalk#267).
+    @Test
+    func aCaptureStillShowingASpinnerIsOneQualification() throws {
+        let directory = try TemporaryDirectory()
+        let bundle = try CaptureBundleFixture.writeWalk(in: directory, screens: [
+            CaptureBundleFixture.ScreenSpec(id: "today", captures: [
+                CaptureBundleFixture.Capture(screenID: "today", state: Walkbook.CaptureState(theme: .light), tree: Self.tree(identifier: "TodayScreen", labels: [("StaticText", "Today")]), settled: false, spinner: CaptureManifest.Spinner(label: nil)),
+            ]),
+        ])
+
+        let answer = try BundleScreenQuery(bundle).answer(step: "1")
+
+        #expect(answer.text.contains("qualified — 1 capture still showing a spinner"))
+        #expect(!answer.text.contains("before the tree settled"))
+    }
+
     /// The saving is priced against the one screenshot this answer reads, never its tree — a reader answering a text question opens the screenshot or reads the tree, never both (SimWalk#20 round 2, finding 2).
     @Test
     func theAnswerIsPricedAgainstTheScreenshotAloneNeverTheTree() throws {

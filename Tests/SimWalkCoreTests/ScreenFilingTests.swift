@@ -70,6 +70,26 @@ struct ScreenFilingTests {
         #expect(found == ["menus-screen"])
     }
 
+    /// SimWalk#259: the values check is chained in, so a node reading another value is filed as the mismatch.
+    @Test
+    func aValueThatDoesNotMatchIsFiledAsTheMismatch() {
+        let button = AXNode(type: "Button", frame: Self.frame, label: "Choosing a strategy", value: "Start")
+        let tree = AXNode(type: "Application", frame: Self.frame, children: [button])
+        let filing = ScreenFiling.decide(
+            trees: [tree],
+            evidence: [Self.evidence(.light, "light picture")],
+            expect: nil,
+            expectValues: [Walkbook.ExpectedValue(label: "Choosing a strategy", value: "Done")],
+            instead: .captured
+        )
+
+        #expect(filing.outcome == .unexpectedScreen(
+            expected: "values: Choosing a strategy = Done",
+            found: [nil],
+            reason: "'Choosing a strategy' reads 'Start', not 'Done'"
+        ))
+    }
+
     /// Both mismatching: `expect`'s expected and found lead, with the menu clause in the reason.
     @Test
     func anExpectMismatchLeadsAndTheMenuClauseRidesInItsReason() {

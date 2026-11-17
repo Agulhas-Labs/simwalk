@@ -114,6 +114,19 @@ struct WalkStatusReaderTests {
         #expect(await fixture.status(Self.handle) == replaced)
     }
 
+    /// A later run has taken the slot's progress file, but the walk's own result file, named by its handle, is still there: the handle is answered from it (SimWalk#262).
+    @Test
+    func row4AReplacedWalkIsAnsweredFromItsOwnResultFileWhenItHasOne() async throws {
+        let fixture = try Fixture()
+        let path = try fixture.writeResult(verdict: .passed, counts: WalkResult.Counts(planned: 3, passed: 3, failed: 0), named: "\(Self.handle).result.json")
+        try fixture.write(fixture.progress(phase: .running, pid: 4243))
+
+        let status = await fixture.status(Self.handle)
+
+        #expect(status.text == "walk: 'smoke'  app: com.example.app  device: iPhone 17 (26.0)\nok — 0 failed, 3 of 3 matched\nresult: \(path)")
+        #expect(!status.isError)
+    }
+
     @Test
     func row5ASessionIsNotAWalk() async throws {
         let fixture = try Fixture()
@@ -402,8 +415,8 @@ private extension WalkStatusReaderTests {
             try Data(text.utf8).write(to: progressDirectory.appendingPathComponent("s.json"))
         }
 
-        /// Writes `s.result.json` and returns its path.
-        func writeResult(verdict: WalkResult.Verdict, counts: WalkResult.Counts, failures: [WalkResult.Failure] = []) throws -> String {
+        /// Writes `name` (`s.result.json` unless given) and returns its path.
+        func writeResult(verdict: WalkResult.Verdict, counts: WalkResult.Counts, failures: [WalkResult.Failure] = [], named name: String = "s.result.json") throws -> String {
             let result = WalkResult(
                 schemaVersion: 1,
                 tool: "walk",
@@ -418,7 +431,7 @@ private extension WalkStatusReaderTests {
                 failures: failures,
                 truncated: WalkResult.Truncated(omittedSteps: 0)
             )
-            let url = progressDirectory.appendingPathComponent("s.result.json")
+            let url = progressDirectory.appendingPathComponent(name)
             try WalkResult.encoder().encode(result).write(to: url)
             return url.path
         }

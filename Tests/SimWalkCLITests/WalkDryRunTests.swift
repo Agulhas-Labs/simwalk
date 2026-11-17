@@ -74,6 +74,27 @@ struct WalkDryRunTests {
         #expect(entry.kind == .runnerFailed)
     }
 
+    /// SimWalk#289, as for a walk: a save failure over an unreadable report is refused with the reader's error, the save failure a line under it, no diagnosis asked.
+    @Test
+    func aSaveFailureOverAnUnreadableReportIsRefusedWithTheReadersError() throws {
+        let handback = DeviceHandback(accessibility: AccessibilityPreference.Restoration(udid: "UDID-1", state: .restored), appearance: .restored(.light))
+        let save = RunnerError.resultBundleNotSaved(reason: "mkstemp failed")
+        var diagnosed = false
+
+        let thrown = try #require(#expect(throws: WalkCommand.Refusal.self) {
+            try WalkDryRun.outcome(runnerFailure: save, handback: handback, diagnosingRunnerFailure: {
+                diagnosed = true
+                return nil
+            }, readingReport: {
+                throw RouteProbeError.missing(path: "/nowhere/probe.json", reason: "no such file")
+            })
+        })
+
+        #expect(thrown.underlying is RouteProbeError)
+        #expect(thrown.runnerDiagnosis == [String(describing: save)])
+        #expect(!diagnosed)
+    }
+
     /// No readable report is a refusal carrying the handback, and the runner's own failure is the answer when there was one.
     @Test
     func noReadableReportIsARefusalNamingTheRunnersFailure() throws {
@@ -131,6 +152,27 @@ struct WalkDryRunTests {
 
         #expect(thrown.description.contains("the runner's result bundle could not be read — the runner wrote no result bundle:"))
         #expect(thrown.description.contains(".xcresult"))
+    }
+
+    /// SimWalk#266, wired through `WalkDryRun.perform`: a runner that timed out launching the app and wrote nothing is run once more, and the report the second writes is the answer, with the note.
+    @Test
+    func adryRunWhoseRunnerTimedOutLaunchingRunsASecondRunnerAndSaysSo() throws {
+        let directory = try TemporaryDirectory()
+        let staged = directory.url.appendingPathComponent("staged-report.json")
+        let output = directory.url.appendingPathComponent("probe.json")
+        let appPath = try Self.fakeApp(in: directory)
+        try RouteProbeFixture.report(of: Self.book(), buildHash: AppBuildIdentity.hash(ofAppAt: appPath)).write(to: staged, of: Self.book())
+        let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: 65, retryWrites: staged, retryStatus: 0)
+        let command = try WalkCommand.parse([Self.walkbook(in: directory), "--output", output.path, "--device", "UDID-1", "--dry-run"])
+
+        let outcome = try WalkDryRun.perform(command, shell: WalkCommandTests.launchFailureShell(script), pause: { _ in }, now: script.now, nonce: { RouteProbeFixture.nonce }, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory))
+
+        let note = try #require(outcome.launchRetryNote)
+
+        #expect(script.calls.filter { $0.arguments.contains("test-without-building") }.count == 2)
+        #expect(note.contains("a second runner wrote this report"))
+        #expect(outcome.survivedRunnerFailure == nil)
+        #expect(outcome.answer().text.contains(note))
     }
 
     /// A dry run reaches the same `prepare` as a walk, and `WalkDryRun.perform` hands it `note`: an empty build directory is told as a cold build (SimWalk#98, #118).
@@ -235,6 +277,22 @@ struct WalkDryRunTests {
 
         #expect(outcome.launchConditionGaps == [RouteProbeSummary.LaunchConditionGap(screenID: "settings", axis: .locale, probed: "en", unprobed: ["de"])])
         #expect(outcome.answer().verdict.exitCode == AnswerVerdict.qualifiedExitCode)
+    }
+
+    /// SimWalk#289: a dry run whose runner's test passed and whose one failure was saving its result bundle exits 0, with one line saying so and how many routes resolved.
+    @Test
+    func adryRunWhoseOnlyFailureWasSavingItsResultBundleIsNotQualified() throws {
+        let directory = try TemporaryDirectory()
+        let appPath = try Self.fakeApp(in: directory)
+        let path = try Self.twoScreenWalkbook(in: directory)
+        let book = try WalkbookLoader.load(contentsOf: URL(fileURLWithPath: path))
+        let report = try RouteProbeFixture.report(of: book, buildHash: AppBuildIdentity.hash(ofAppAt: appPath))
+
+        let (outcome, _) = try Self.performDryRun(path, leaving: report, of: book, appPath: appPath, in: directory, runnerStatus: 65, runnerOutput: (WalkCommandTests.passedTestOutput, WalkCommandTests.resultBundleNotSaved))
+
+        #expect(outcome.survivedRunnerFailure == nil)
+        #expect(outcome.answer().verdict.exitCode == 0)
+        #expect(outcome.answer().residue.contains("result bundle not saved (mkstemp: No such file or directory); 2 of 2 routes resolved"))
     }
 
     /// `--screens` with `--dry-run`: the runner is handed the subset, and the report is held to the subset — a report of the whole walkbook is refused (SimWalk#36 item 3).
@@ -536,12 +594,14 @@ struct WalkDryRunTests {
         of book: Walkbook,
         appPath: String,
         in directory: TemporaryDirectory,
-        screens: [String] = []
+        screens: [String] = [],
+        runnerStatus: Int32 = 0,
+        runnerOutput: (standardOutput: String, standardError: String) = ("\n", "")
     ) throws -> (outcome: WalkDryRun.Outcome, script: WalkCommandTests.WalkScript) {
         let staged = directory.url.appendingPathComponent("staged-report.json")
         let output = directory.url.appendingPathComponent("probe.json")
         try report.write(to: staged, of: book)
-        let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: 0, writes: (staged, output))
+        let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: runnerStatus, runnerOutput: runnerOutput, writes: (staged, output))
         let narrowing = screens.isEmpty ? [] : ["--screens", screens.joined(separator: ",")]
         let command = try WalkCommand.parse([path, "--output", output.path, "--device", "UDID-1", "--dry-run"] + narrowing)
         let outcome = try WalkDryRun.perform(command, shell: Shell(script: script.run), pause: { _ in }, now: script.now, nonce: { RouteProbeFixture.nonce }, runner: { Self.runner }, builds: Self.builds(in: directory), leases: Self.leases(in: directory))

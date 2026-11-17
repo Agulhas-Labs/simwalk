@@ -3,6 +3,7 @@
 //
 
 import Foundation
+import SimWalkCore
 @testable import SimWalkDriver
 import SimWalkTestSupport
 import Testing
@@ -181,5 +182,21 @@ struct RunnerFailureDiagnosisTests {
         }
 
         #expect(reason.contains("boom"))
+    }
+
+    /// A runner that stopped on XCTest timing out synthesizing a gesture (SimWalk#274) says, under the failure, that the app had gone idle and the fault is the runner's or the device's; a launch timeout's lines say nothing of it.
+    @Test
+    func aSynthesisTimeoutAddsTheLineThatTheAppHadGoneIdle() {
+        let failure = #"Failed to press "home-parent-gate" Button for 3.5 seconds: Timed out while synthesizing event."#
+        let digest = RunnerActivityDigest(recentActivities: ["Wait for com.x to idle", "Synthesize event"], failure: failure, earlierFailures: 0, triageAttachments: [])
+        let diagnosis = RunnerFailureDiagnosis.digested(resultBundlePath: "/x.xcresult", digest: digest, hierarchy: .nothingAttached)
+        let launch = RunnerActivityDigest(recentActivities: [], failure: "Failed to launch com.x: Timed out attempting to launch app.", earlierFailures: 0, triageAttachments: [])
+        let launchDiagnosis = RunnerFailureDiagnosis.digested(resultBundlePath: "/x.xcresult", digest: launch, hierarchy: .nothingAttached)
+        let failureLine = diagnosis.lines.firstIndex(of: "failure: \(failure)")
+
+        #expect(diagnosis.isSynthesisTimeout)
+        #expect(!launchDiagnosis.isSynthesisTimeout)
+        #expect(failureLine.flatMap { diagnosis.lines.dropFirst($0 + 1).first } == "XCTest timed out synthesizing a gesture after the app went idle: the runner or the device, not the app — walk again")
+        #expect(!launchDiagnosis.lines.contains { $0.hasPrefix("XCTest timed out synthesizing") })
     }
 }

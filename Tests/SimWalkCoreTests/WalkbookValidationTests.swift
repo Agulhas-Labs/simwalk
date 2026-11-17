@@ -589,6 +589,26 @@ struct WalkbookValidationTests {
         #expect(problems.first?.description.contains("'sideways'") == true)
     }
 
+    /// A position other than `top` is a problem naming the value and `top`, from a file as well as a built walkbook (SimWalk#270).
+    @Test
+    func aScrollToAPositionOtherThanTopIsRefusedNamingTheValueAndTop() throws {
+        let json = #"{"name":"w","appBundleID":"com.apple.Health","screens":[{"id":"s","route":[{"scrollTo":{"label":"Row","position":"bottom"}}],"states":[{"theme":"light"}]}]}"#
+        let book = try JSONDecoder().decode(Walkbook.self, from: Data(json.utf8))
+        let problems = WalkbookLoader.problems(in: book)
+
+        #expect(problems == [.unknownScrollPosition(screenID: "s", index: 0, stepIndex: 0, value: "bottom")])
+        #expect(problems.first?.description.contains("'bottom'") == true)
+        #expect(problems.first?.description.contains("top") == true)
+    }
+
+    @Test
+    func aScrollToTheTopIsAccepted() {
+        var book = Self.valid()
+        book.screens[0].route = [.tab(label: "Today"), .scrollTo(label: "Row", position: "top")]
+
+        #expect(WalkbookLoader.problems(in: book).isEmpty)
+    }
+
     @Test(arguments: ["up", "down", "left", "right"])
     func aSwipeInEachDirectionIsAcceptedWithOrWithoutALabel(_ direction: String) {
         var book = Self.valid()

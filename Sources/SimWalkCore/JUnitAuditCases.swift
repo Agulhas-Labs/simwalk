@@ -53,6 +53,11 @@ public struct JUnitAuditCases {
                         cases.append(Self.uncheckedCase(rule, section))
                     }
                 }
+                if section.result.inHorizontalScroller > 0 {
+                    let count = section.result.inHorizontalScroller
+                    let runs = count == 1 ? "1 text run" : "\(count) text runs"
+                    cases.append(JUnitCase(classname: rule, name: "\(rule) in horizontal scroller", result: .skipped("\(runs) past the screen's width inside a horizontal scroller not checked — check \(count == 1 ? "it scrolls" : "they scroll") into view")))
+                }
             }
         }
         if let scan = report.appleAudit, scan.recorded > 0, report.rules.contains(where: \.isApple) {
@@ -81,7 +86,7 @@ public struct JUnitAuditCases {
 
     /// The captures a rule could not read a screenshot of, as one skipped case.
     private static func uncheckedCase(_ rule: String, _ section: LabelAuditSection) -> JUnitCase {
-        JUnitCase(classname: rule, name: "\(rule) not checked", result: .skipped("\(section.result.unchecked) of \(section.captureCount) captures not checked — no screenshot read"))
+        JUnitCase(classname: rule, name: "\(rule) not checked", result: .skipped("\(section.result.unchecked) of \(section.captureCount) captures not checked — \(section.uncheckedDetail)"))
     }
 
     private static func findingName(screen: String, states: [String], label: String?, type: String) -> String {

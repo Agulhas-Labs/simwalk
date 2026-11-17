@@ -7,11 +7,12 @@ import SwiftUI
 
 /// A generic subject for the walk's route steps and capture states: a home screen and the screens a URL can reach from it.
 ///
-/// `simwalk-fixture://detail` opens the detail screen and `simwalk-fixture://location` the location screen and `simwalk-fixture://banner` the banner screen; any other URL leaves the app on home. Home carries a horizontal run of three texts, which is what a `layoutDirection` state is judged by: right to left in tree order under `rtl`.
+/// `simwalk-fixture://detail` opens the detail screen and `simwalk-fixture://location` the location screen and `simwalk-fixture://banner` the banner screen and `simwalk-fixture://pulse` the pulse screen; any other URL leaves the app on home. Home carries a horizontal run of three texts, which is what a `layoutDirection` state is judged by: right to left in tree order under `rtl`.
 @main
 struct RouteFixtureApp: App {
     @UIApplicationDelegateAdaptor private var delegate: OrientationDelegate
     @State private var path: [Route] = []
+    @State private var strategyDone = false
 
     init() {
         if ProcessInfo.processInfo.arguments.contains("-RouteFixtureResetErased") {
@@ -42,6 +43,9 @@ struct RouteFixtureApp: App {
                     Text("Second")
                     Text("Third")
                 }
+                Button("Values") { path.append(.values) }
+                Button("Loading") { path.append(.loading) }
+                Button("Stalled") { path.append(.stalled) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityElement(children: .contain)
@@ -59,6 +63,16 @@ struct RouteFixtureApp: App {
                     LocationScreen()
                 case .banner:
                     BannerScreen()
+                case .pulse:
+                    PulseScreen()
+                case .values:
+                    ValuesList(path: $path, done: strategyDone)
+                case .strategy:
+                    StrategyDetail(path: $path, done: $strategyDone)
+                case .loading:
+                    LoadingScreen(loadsAfter: .seconds(3))
+                case .stalled:
+                    LoadingScreen(loadsAfter: nil)
                 }
             }
         }
@@ -86,6 +100,11 @@ private enum Route: Hashable {
     case detail
     case location
     case banner
+    case pulse
+    case values
+    case strategy
+    case loading
+    case stalled
 
     /// The screen `url` names, or `nil` for one the fixture does not route.
     init?(url: URL) {
@@ -97,8 +116,79 @@ private enum Route: Hashable {
             self = .location
         case "banner":
             self = .banner
+        case "pulse":
+            self = .pulse
         default:
             return nil
+        }
+    }
+}
+
+/// A list whose one row reads its state as an accessibility value, the shape `expectValues` checks (SimWalk#259): "Choosing a strategy" reads `Start` until the detail screen's `Save` marks it `Done`. Reached from home by tapping `Values`.
+///
+/// Every tap on this specimen navigates, because a value change alone does not count as a landed tap. The state is held in memory by the app, so a relaunch starts every walk at `Start`.
+private struct ValuesList: View {
+    @Binding var path: [Route]
+    let done: Bool
+
+    var body: some View {
+        List {
+            Button("Choosing a strategy") { path.append(.strategy) }
+                .accessibilityValue(done ? "Done" : "Start")
+        }
+        .accessibilityIdentifier("values-list")
+        .navigationTitle("Strategies")
+    }
+}
+
+/// The detail screen of the `ValuesList` row: `Save` marks it done and pops back to the list.
+private struct StrategyDetail: View {
+    @Binding var path: [Route]
+    @Binding var done: Bool
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("Choosing a strategy")
+            Button("Save") {
+                done = true
+                path.removeLast()
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("values-detail")
+        .navigationTitle("Strategy")
+    }
+}
+
+/// A sheet-like screen whose content follows a labelled loading state, the shape SimWalk#267 was found on: a title and a `ProgressView` labelled "Loading the answer…" until `loadsAfter` has passed, then two sentences and `Done`. `nil` never loads, for a capture that is still loading when the content wait runs out. Reached from home by tapping `Loading` or `Stalled`.
+///
+/// The screen's identifier is the same in both states, so `expect` passes on either: what tells them apart is what the capture holds, which is the point of the specimen.
+private struct LoadingScreen: View {
+    let loadsAfter: Duration?
+    @State private var loaded = false
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("Another way to see it")
+            if loaded {
+                Text("The answer is 15.5.")
+                Text("Add the whole numbers, then the tenths.")
+                Button("Done") {}
+            } else {
+                ProgressView {
+                    Text("Loading the answer…")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("loading-screen")
+        .navigationTitle("Explain")
+        .task {
+            guard let loadsAfter else { return }
+            try? await Task.sleep(for: loadsAfter)
+            loaded = true
         }
     }
 }
@@ -164,6 +254,75 @@ private struct BannerScreen: View {
             try? await Task.sleep(for: .seconds(3))
             showsBanner = true
         }
+    }
+}
+
+/// Three SwiftUI animations that keep running during a walk, which SimWalk's UIKit animations-off does not stop: buttons that pulse forever (SimWalk#252, #253, #258), answer tiles whose only effect is a trait change (#251), and a feedback panel that slides in on a spring (#255). `pulse.walkbook.json` walks them.
+///
+/// "Start" and "Far node" (below the fold) show a text when tapped; "4" and "6" select, which changes nothing but the `isSelected` trait; "Check" slides the panel in and its "Continue" changes the **container's** identifier to `route-pulse-done`, which is what `expect` reads (`ScreenIdentifierRule`).
+private struct PulseScreen: View {
+    @State private var started = false
+    @State private var farOpened = false
+    @State private var selected: Int?
+    @State private var showsPanel = false
+    @State private var done = false
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                pulsing("Start") { started = true }
+                if started {
+                    Text("Started").accessibilityIdentifier("pulse-started")
+                }
+                HStack(spacing: 16) {
+                    tile(4)
+                    tile(6)
+                }
+                Button("Check") {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { showsPanel = true }
+                }
+                .disabled(selected == nil)
+                Color.clear.frame(height: 900)
+                pulsing("Far node") { farOpened = true }
+                if farOpened {
+                    Text("Far node opened")
+                }
+            }
+            .padding()
+        }
+        .overlay(alignment: .bottom) {
+            if showsPanel {
+                VStack {
+                    Text("Correct")
+                    Button("Continue") { done = true }
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(.regularMaterial)
+                .transition(.move(edge: .bottom))
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(done ? "route-pulse-done" : "route-pulse")
+        .navigationTitle("Pulse")
+    }
+
+    /// A button that pulses forever.
+    private func pulsing(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.borderedProminent)
+            .phaseAnimator([1.0, 1.06]) { content, scale in
+                content.scaleEffect(scale)
+            } animation: { _ in
+                .easeInOut(duration: 0.6)
+            }
+    }
+
+    /// An answer tile; selecting it changes only its `isSelected` trait.
+    private func tile(_ value: Int) -> some View {
+        Button("\(value)") { selected = value }
+            .buttonStyle(.bordered)
+            .accessibilityAddTraits(selected == value ? .isSelected : [])
     }
 }
 

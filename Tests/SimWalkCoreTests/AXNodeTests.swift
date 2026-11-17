@@ -41,6 +41,57 @@ struct AXNodeTests {
         #expect(frame.maxY == 920)
     }
 
+    /// SimWalk#252: a SwiftUI pulse scales a button about 6% around its centre on every read, and the reads still name one steady frame; a spring sliding it in, or another size, does not.
+    @Test
+    func aframeScaledByAPulseIsSteadyAndOneThatSlidOrResizedIsNot() {
+        let button = AXNode.Frame(x: 163, y: 294, width: 77, height: 81)
+        let pulsed = AXNode.Frame(x: 160.7, y: 291.6, width: 81.6, height: 85.9)
+
+        #expect(button.isSteady(with: AXNode.Frame(x: 162, y: 293, width: 78, height: 82)))
+        #expect(button.isSteady(with: pulsed))
+        #expect(pulsed.isSteady(with: button))
+        #expect(!button.isSteady(with: AXNode.Frame(x: 163, y: 394, width: 77, height: 81)))
+        #expect(!button.isSteady(with: AXNode.Frame(x: 163, y: 294, width: 90, height: 81)))
+    }
+
+    /// A small element is held to the floor, not to a fraction of a few points that whole-point rounding alone would break.
+    @Test
+    func asmallFrameMayMoveByTheFloor() {
+        let dot = AXNode.Frame(x: 10, y: 10, width: 8, height: 8)
+
+        #expect(dot.isSteady(with: AXNode.Frame(x: 11, y: 9, width: 9, height: 9)))
+        #expect(!dot.isSteady(with: AXNode.Frame(x: 13, y: 10, width: 8, height: 8)))
+    }
+
+    /// SimWalk#252: the same screen under a pulse reports its largest shift; anything but a small frame move is not the same screen.
+    @Test
+    func steadyShiftIsTheLargestMoveOfTheSameElementsAndNilOtherwise() {
+        func screen(_ button: AXNode.Frame, label: String = "Play", extra: Bool = false) -> AXNode {
+            AXNode(
+                type: "Application",
+                frame: AXNode.Frame(x: 0, y: 0, width: 402, height: 874),
+                children: [AXNode(type: "Button", frame: button, label: label)]
+                    + (extra ? [AXNode(type: "StaticText", frame: button, label: "New")] : [])
+            )
+        }
+        let button = AXNode.Frame(x: 163, y: 294, width: 77, height: 81)
+
+        #expect(screen(button).steadyShift(to: screen(button)) == 0)
+        #expect(screen(button).steadyShift(to: screen(AXNode.Frame(x: 162, y: 293, width: 78, height: 82))) == 1)
+        #expect(screen(button).steadyShift(to: screen(AXNode.Frame(x: 263, y: 294, width: 77, height: 81))) == nil)
+        #expect(screen(button).steadyShift(to: screen(button, label: "Pause")) == nil)
+        #expect(screen(button).steadyShift(to: screen(button, extra: true)) == nil)
+    }
+
+    /// The size half lets the frame sit anywhere, as a scroll moves it.
+    @Test
+    func asteadySizeIgnoresWhereTheFrameSits() {
+        let row = AXNode.Frame(x: 0, y: 1400, width: 402, height: 60)
+
+        #expect(row.hasSteadySize(with: AXNode.Frame(x: 32, y: 700, width: 420, height: 63)))
+        #expect(!row.hasSteadySize(with: AXNode.Frame(x: 0, y: 1400, width: 402, height: 44)))
+    }
+
     /// An unlabelled element must decode as having no label rather than as carrying an empty string, or every consumer has to special-case `""` alongside `nil`.
     @Test
     func anAbsentLabelIsAbsentRatherThanEmpty() throws {

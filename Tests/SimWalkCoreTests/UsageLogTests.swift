@@ -65,6 +65,43 @@ struct UsageLogTests {
         #expect(recorded.hasPrefix("line one line two "))
     }
 
+    /// SimWalk#253: a session step's line carries the step as sent and the verdict, each one bounded line, under keys `step` and `verdict`.
+    @Test
+    func aSessionStepRecordsItsStepAndVerdictAsBoundedLines() throws {
+        let directory = try TemporaryDirectory()
+        let log = UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 0) })
+        let long = "ok — landed\n" + String(repeating: "x", count: 500)
+
+        log.record(tool: "session step", target: "s1", milliseconds: 1, succeeded: true, step: #"{"tap":{"label":"Next"}}"#, verdict: long)
+        log.record(tool: "session step", target: "s1", milliseconds: 1, succeeded: true, step: "a\nb" + String(repeating: "y", count: 500))
+
+        let lines = try Self.lines(of: log)
+        let entry = try JSONDecoder().decode(UsageLog.Entry.self, from: JSONSerialization.data(withJSONObject: lines[0]))
+        let verdict = try #require(lines[0]["verdict"] as? String)
+        let step = try #require(lines[1]["step"] as? String)
+
+        #expect(lines[0]["step"] as? String == #"{"tap":{"label":"Next"}}"#)
+        #expect(entry.step == #"{"tap":{"label":"Next"}}"#)
+        #expect(entry.verdict == verdict)
+        #expect(verdict.count == 200 && !verdict.contains("\n") && verdict.hasPrefix("ok — landed x"))
+        #expect(step.count == 200 && !step.contains("\n") && step.hasPrefix("a by"))
+        #expect(lines[1]["verdict"] == nil)
+    }
+
+    /// Every other tool's line is what it was before the members existed: neither key is written, so the bytes are the same.
+    @Test
+    func aCallThatIsNotASessionStepWritesTheLineItAlwaysDid() throws {
+        let directory = try TemporaryDirectory()
+        let log = UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 0) })
+
+        log.record(tool: "validate", target: "book.json", milliseconds: 5, succeeded: true)
+
+        let raw = try String(contentsOf: log.fileURL, encoding: .utf8)
+        #expect(raw == #"{"ms":5,"ok":true,"target":"book.json","tool":"validate","ts":"1970-01-01T00:00:00.000Z"}"# + "\n")
+        let entry = try JSONDecoder().decode(UsageLog.Entry.self, from: Data(raw.utf8))
+        #expect(entry.step == nil && entry.verdict == nil)
+    }
+
     @Test
     func aLogThatCannotBeWrittenFailsSilentlyRatherThanReachingTheCaller() {
         let log = UsageLog(directory: URL(fileURLWithPath: "/dev/null/simwalk"), now: { Date(timeIntervalSince1970: 0) })

@@ -23,7 +23,8 @@ public struct RouteTargetTracker {
     private let budget: TimeInterval
     private let lookup: TimeInterval
     private let interval: TimeInterval
-    private var previous: AXNode?
+    /// The first tree of the current quiet run, which each later read is held against (as `SettleTracker` does), so a pulse is still and a slow creep is not.
+    private var quietAnchor: AXNode?
     private var quietSoFar: TimeInterval = 0
     private var firstMatchedLiterally: TimeInterval?
 
@@ -52,12 +53,12 @@ public struct RouteTargetTracker {
 
     /// What the runner should do having just read `tree`, `elapsed` into the step.
     public mutating func next(tree: AXNode, elapsed: TimeInterval) -> Decision {
-        if let previous, tree == previous {
+        if let quietAnchor, quietAnchor.steadyShift(to: tree) != nil {
             quietSoFar += interval
         } else {
             quietSoFar = 0
+            quietAnchor = tree
         }
-        previous = tree
         let choice = RouteTarget.choose(labelled: label, in: tree, reaching: reach)
         if choice.isSettled || (choice.acceptsOnceStill && quietSoFar >= quiet) {
             return .act(choice)

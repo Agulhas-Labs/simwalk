@@ -146,9 +146,18 @@ private extension BundleLabels {
         return "\(screen.id): \(lead) a state with \(state)\(note)"
     }
 
+    /// The size the device was at, for a capture whose state sets none (SimWalk#288).
+    var deviceSize: String? {
+        bundle.manifest.device.contentSize
+    }
+
+    /// The size a capture was taken at as the claim names it: the state's own, else the device's marked as such.
+    func sizeName(of capture: CaptureManifest.StateCapture) -> String? {
+        capture.state.dynamicTypeSize ?? deviceSize.map { "\($0) (device)" }
+    }
+
     func level(of capture: CaptureManifest.StateCapture) -> Int? {
-        capture.state.dynamicTypeSize.flatMap { size in
-            let lowered = size.lowercased()
+        EffectiveTypeSize.name(dynamicTypeSize: capture.state.dynamicTypeSize, device: deviceSize).flatMap { lowered in
             guard lowered.hasPrefix(Self.textSizePrefix) else { return nil }
             return Self.accessibilityLevels[String(lowered.dropFirst(Self.textSizePrefix.count))]
         }
@@ -163,11 +172,11 @@ private extension BundleLabels {
         for screen in screens {
             let reaching = screen.captures.filter { (level(of: $0) ?? 0) >= Self.requiredLevel }
             if reaching.isEmpty {
-                let below = screen.captures.compactMap { capture in level(of: capture) == nil ? capture.state.dynamicTypeSize : capture.state.dynamicTypeSize.map { "\($0), below 200%" } }
+                let below = screen.captures.compactMap { capture in level(of: capture) == nil ? sizeName(of: capture) : sizeName(of: capture).map { "\($0), below 200%" } }
                 let note = below.isEmpty ? "" : " (captured at \(below.joined(separator: "; ")), not counted)"
                 report.missing.append(addState(screen, "\"dynamicTypeSize\": \"\(Self.requiredTextSize)\"", note: note))
             } else {
-                report.evidence.append("\(screen.id): \(reaching.compactMap(\.state.dynamicTypeSize).joined(separator: ", "))")
+                report.evidence.append("\(screen.id): \(reaching.compactMap { sizeName(of: $0) }.joined(separator: ", "))")
                 let audited = reaching.filter { capture in
                     capture.appleAudit.map { !unreadablePaths.contains($0.path) } == true && !failed.contains("\(screen.id)\u{1F}\(capture.state.slug)")
                 }
@@ -182,10 +191,12 @@ private extension BundleLabels {
         }
         // Recognition costs a Vision pass per capture, so it reads the accessibility-size captures, and the default-size ones only of a screen that has a finding there to compare against.
         let truncationRule = TruncatedTextAudit(recognizer: recognizer)
-        let accessibilityCaptures = captures.filter { LargeTypeOverflowAudit.isAccessibilitySize($0.stateSlug) }
+        let isAccessibility = { (slug: String) in EffectiveTypeSize.isAccessibility(stateSlug: slug, device: deviceSize) }
+        let isDefault = { (slug: String) in EffectiveTypeSize.isDefault(stateSlug: slug, device: deviceSize) }
+        let accessibilityCaptures = captures.filter { isAccessibility($0.stateSlug) }
         var truncatedText = truncationRule.evaluate(accessibilityCaptures)
         let screensWithFindings = Set(truncatedText.findings.map(\.screenID))
-        truncatedText.findings += truncationRule.evaluate(captures.filter { LargeTypeOverflowAudit.isDefaultSize($0.stateSlug) && screensWithFindings.contains($0.screenID) }).findings
+        truncatedText.findings += truncationRule.evaluate(captures.filter { isDefault($0.stateSlug) && screensWithFindings.contains($0.screenID) }).findings
         let overflow = LabelAuditSection(
             name: .largeTypeOverflow,
             noun: LargeTypeOverflowAudit.findingNoun,
@@ -208,9 +219,9 @@ private extension BundleLabels {
         // Text that reads truncated at the default size too was not cut by the larger type: it is a manual line, not a fail.
         var byDesign: [(screen: String, labels: [String])] = []
         for row in truncation.distinct {
-            let states = row.states.filter(LargeTypeOverflowAudit.isAccessibilitySize)
+            let states = row.states.filter(isAccessibility)
             guard !states.isEmpty else { continue }
-            if row.states.contains(where: LargeTypeOverflowAudit.isDefaultSize) {
+            if row.states.contains(where: isDefault) {
                 let label = "'\(AuditRowFormat.trim(row.label ?? ""))'"
                 if let index = byDesign.firstIndex(where: { $0.screen == row.screenID }) {
                     byDesign[index].labels.append(label)
@@ -226,14 +237,14 @@ private extension BundleLabels {
         }
         if let scan {
             for var row in AppleAuditSection(name: .appleDynamicType, scan: scan, listsUnreadable: false).distinct {
-                row.states = row.states.filter(LargeTypeOverflowAudit.isAccessibilitySize)
+                row.states = row.states.filter(isAccessibility)
                 if !row.states.isEmpty {
                     report.foldedFindings += row.count - 1
                     report.fails.append("\(row.screenID): \(AuditRuleName.appleDynamicType.rawValue) — \(row.text) [\(row.states.joined(separator: ", "))]")
                 }
             }
             let clipped = AppleAuditSection(name: .appleTextClipped, scan: scan, listsUnreadable: false).distinct.filter { row in
-                row.states.contains(where: LargeTypeOverflowAudit.isAccessibilitySize)
+                row.states.contains(where: isAccessibility)
             }
             if !clipped.isEmpty {
                 let clippedCount = clipped.reduce(0) { $0 + $1.count }
@@ -244,11 +255,19 @@ private extension BundleLabels {
                 report.manual.append("Apple's audit reports \(clippedCount) textClipped finding\(clippedCount == 1 ? "" : "s") at accessibility sizes on \(screenIDs.joined(separator: ", ")); its textClipped check proved unreliable, so check them by hand")
             }
         }
+        if overflow.result.inHorizontalScroller > 0 {
+            let count = overflow.result.inHorizontalScroller
+            var screenIDs: [String] = []
+            for id in overflow.result.inHorizontalScrollerScreens where !screenIDs.contains(id) {
+                screenIDs.append(id)
+            }
+            report.manual.append("\(count) text run\(count == 1 ? "" : "s") inside a horizontal scroller on \(screenIDs.joined(separator: ", ")) \(count == 1 ? "was" : "were") not checked against the screen's width; check \(count == 1 ? "it scrolls" : "they scroll") into view")
+        }
         report.manual.append("overlap between text elements that the accessibility tree does not show")
         if recognizer == nil {
             report.manual.append("whether text is drawn truncated: no text recognizer on this face, so truncatedText did not run")
         } else if truncatedText.unchecked > 0 {
-            report.manual.append("whether text is drawn truncated on \(truncatedText.unchecked) capture\(truncatedText.unchecked == 1 ? "" : "s"): no readable screenshot")
+            report.manual.append("whether text is drawn truncated on \(truncatedText.unchecked) capture\(truncatedText.unchecked == 1 ? "" : "s"): \(truncation.uncheckedDetail)")
         }
         if !unchecked.isEmpty {
             report.manual.append("Apple's Dynamic Type check on \(unchecked.joined(separator: ", ")): its audit did not check the large-type capture (walk with --apple-audit)")

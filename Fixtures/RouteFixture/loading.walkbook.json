@@ -1,0 +1,22 @@
+{
+  "name": "route-fixture-loading",
+  "appBundleID": "dev.simwalk.route-fixture",
+  "screens": [
+    {
+      "id": "loading",
+      "expect": "loading-screen",
+      "route": [
+        { "tap": { "label": "Loading" } }
+      ],
+      "states": [{ "theme": "light" }]
+    },
+    {
+      "id": "stalled",
+      "expect": "loading-screen",
+      "route": [
+        { "tap": { "label": "Stalled" } }
+      ],
+      "states": [{ "theme": "light" }]
+    }
+  ]
+}

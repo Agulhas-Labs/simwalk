@@ -117,6 +117,18 @@ struct MeasureOptInTests {
         #expect(try MeasureOptIn.walkNote(for: Self.book(""), screens: []) == nil)
     }
 
+    /// `--screens plain,about` is two screens, so the measured one among them is noted (SimWalk#269 review).
+    @Test
+    func aSimulatorWalkNoteHonoursACommaSeparatedScreensValue() throws {
+        let measured = Walkbook.Screen(id: "about", route: [.tab(label: "About")], states: [Walkbook.CaptureState(theme: .light)], measure: Walkbook.Measure(iterations: 3))
+        let plain = Walkbook.Screen(id: "plain", route: [.tab(label: "Plain")], states: [Walkbook.CaptureState(theme: .light)])
+        var book = try Self.book("")
+        book.screens = [plain, measured]
+
+        #expect(MeasureOptIn.walkNote(for: book, screens: ["plain,about"]) == "measure: device only, not run (about)")
+        #expect(MeasureOptIn.walkNote(for: book, screens: ["plain"]) == nil)
+    }
+
     @Test
     func theDeviceOnlyNoteNamesTheMeasuredScreensAndIsAbsentWithoutAny() throws {
         let measured = try Self.book(#","measure":true"#)

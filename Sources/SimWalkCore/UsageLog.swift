@@ -74,27 +74,36 @@ public struct UsageLog: Sendable {
     /// `parallel` is a `--parallel` walk's per-shard breakdown, written on the `walk.parallel` line `walkShards` adds beside the CLI's `walk` record; absent on every other line.
     ///
     /// `kind` says why a failed call failed — `nil` for a call that succeeded, where a kind means nothing, and for a failure whose site has not been mapped to one (``UsageFailureKind``). Read off the thrown error at the call site (``UsageFailureKind/of(_:)``) or stated directly, never inferred here: this type only ever writes what it is told.
-    public func record(tool: String, target: String?, milliseconds: Int, succeeded: Bool, err: String? = nil, saving: ContextSaving? = nil, session: String? = nil, kind: UsageFailureKind? = nil, parallel: ParallelTimings? = nil) {
+    ///
+    /// `step` and `verdict` are a live session step's own record (SimWalk#253): the route step as sent, and the first line of the answer the caller saw. An answer lost to a pipe could not be reconstructed from a line that held neither. Both are bounded and flattened to one line exactly as `err` is, and a call that is not a session step passes neither, so its line is unchanged. `verdict` is only for a call that produced an answer; a refusal's first line is already `err`.
+    public func record(tool: String, target: String?, milliseconds: Int, succeeded: Bool, err: String? = nil, saving: ContextSaving? = nil, session: String? = nil, kind: UsageFailureKind? = nil, parallel: ParallelTimings? = nil, step: String? = nil, verdict: String? = nil) {
         let entry = Entry(
             timestamp: Timestamp.string(from: now()),
             tool: tool,
             target: target,
             milliseconds: milliseconds,
             succeeded: succeeded,
-            error: err.map { String($0.prefix(Self.errorLimit)).replacingOccurrences(of: "\n", with: " ") },
+            error: err.map(Self.oneLine),
             session: session,
             screenshots: saving.map(\.screenshotTokens.count),
             imageTokens: saving.map { $0.screenshotTokens.reduce(0, +) },
             treeBytes: saving?.treeBytes,
             answerBytes: saving?.servedBytes,
             kind: kind,
-            parallel: parallel
+            parallel: parallel,
+            step: step.map(Self.oneLine),
+            verdict: verdict.map(Self.oneLine)
         )
         let encoder = JSONEncoder()
         // Paths are most of what a log line carries, and an escaped one is unreadable when triaging.
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         guard let line = try? encoder.encode(entry) else { return }
         append(line + Data("\n".utf8))
+    }
+
+    /// `text` cut to ``errorLimit`` with its newlines flattened, so a field that holds a caller's or the runner's words stays one line of the log.
+    private static func oneLine(_ text: String) -> String {
+        String(text.prefix(errorLimit)).replacingOccurrences(of: "\n", with: " ")
     }
 
     /// One bounded line: enough to group failures by reason, never enough to turn the log into the payload it is recording.
@@ -175,6 +184,14 @@ public extension UsageLog {
         /// Where a `--parallel` walk's time went, per shard; absent on every line but the `walk.parallel` one, and on every line written before this field existed.
         public var parallel: ParallelTimings?
 
+        /// The route step a live session step sent, as JSON on one bounded line; absent on every other call (SimWalk#253).
+        ///
+        /// Recorded because an answer lost to `| tail` left nothing to say which step it had been, and a log that names neither the step nor how it ended cannot be replayed afterwards.
+        public var step: String?
+
+        /// The first line of the answer a session step produced, `ok — …` or `qualified — …`, bounded; absent where no answer was produced (the refusal's reason is `error`) and on every other call (SimWalk#253).
+        public var verdict: String?
+
         public init(
             timestamp: String,
             tool: String,
@@ -188,7 +205,9 @@ public extension UsageLog {
             treeBytes: Int? = nil,
             answerBytes: Int? = nil,
             kind: UsageFailureKind? = nil,
-            parallel: ParallelTimings? = nil
+            parallel: ParallelTimings? = nil,
+            step: String? = nil,
+            verdict: String? = nil
         ) {
             self.timestamp = timestamp
             self.tool = tool
@@ -203,6 +222,8 @@ public extension UsageLog {
             self.answerBytes = answerBytes
             self.kind = kind
             self.parallel = parallel
+            self.step = step
+            self.verdict = verdict
         }
 
         /// Decodes leniently over `kind`: a value this build's `UsageFailureKind` has no case for must not fail the whole line.
@@ -224,6 +245,8 @@ public extension UsageLog {
             treeBytes = try container.decodeIfPresent(Int.self, forKey: .treeBytes)
             answerBytes = try container.decodeIfPresent(Int.self, forKey: .answerBytes)
             parallel = try container.decodeIfPresent(ParallelTimings.self, forKey: .parallel)
+            step = try container.decodeIfPresent(String.self, forKey: .step)
+            verdict = try container.decodeIfPresent(String.self, forKey: .verdict)
             if container.contains(.kind), try !container.decodeNil(forKey: .kind) {
                 let stringKind = try? container.decode(String.self, forKey: .kind)
                 let rawKind = stringKind ?? Self.nonStringKindText(in: container)
@@ -279,5 +302,7 @@ extension UsageLog.Entry {
         case answerBytes = "outBytes"
         case kind
         case parallel
+        case step
+        case verdict
     }
 }
