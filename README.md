@@ -30,7 +30,8 @@ The usual tools each fall short.
 - **Accessibility problems turn up late.** `simwalk bundle audit` checks every capture for controls with no
   label, SF Symbol names read out as labels, duplicate labels, tap targets under 44 pt, reading order that
   does not match the layout, text that overflows at accessibility sizes, text drawn truncated with an
-  ellipsis (read from the screenshot), and tappable rows that are not exposed as controls.
+  ellipsis or broken mid-word, inside or outside the accessibility tree (read from the screenshot), and
+  tappable rows that are not exposed as controls.
 - **A coding agent that looks at screenshots pays thousands of tokens per screen.** SimWalk gives it the
   screen as text, a fraction of a screenshot's size, and most answers state how many tokens that saved.
 - **Parallel runs fight over one simulator.** A lease gives each walk, agent or CI job a device of its own.
@@ -124,7 +125,7 @@ accessibility: the XCUITest session switched com.apple.Accessibility Accessibili
 
 animations: UIKit off in the app under walk (SwiftUI animations still run); --animations keeps them
 result: ~/.simwalk/progress/<handle>.result.json
-~66k tokens saved — 9 screenshots (~4.1k each at the 2576 px cap) and 122 kB of accessibility trees at 4 bytes a token, against 1.5 kB served. A floor: only what this answer stood in for is counted.
+~36k tokens saved — 9 screenshots (~4.1k each at the 2576 px cap), against 1.5 kB served at 4 bytes a token. A floor: only what this answer stood in for is counted.
 ```
 
 - The first line says what was measured: the app and its build, the walkbook's hash, the runner that drove
@@ -133,8 +134,8 @@ result: ~/.simwalk/progress/<handle>.result.json
 - The second line is the verdict. `ok` means every screen was captured. If something needs your attention
   it starts with `qualified`, and names every reason.
 - Then one line per screen, with the states captured and the route that reached it.
-- The last line is the size. Those nine screenshots and 122 kB of accessibility trees came to 1.5 kB of
-  text, about 66k tokens saved. The 1.5 kB answer costs less than one of the screenshots.
+- The last line is the size. Those nine screenshots came to 1.5 kB of
+  text, about 36k tokens saved. The 1.5 kB answer costs less than one of the screenshots.
 
 The walk wrote a capture bundle, the folder `run.simwalk`. It holds full-length screenshots stitched across
 scrolling, the accessibility tree with the frame of each piece of text, and a manifest.
@@ -293,7 +294,7 @@ SimWalk does not replace what you already use to drive an app. It checks what th
 ## For coding agents
 
 `simwalk mcp` is an MCP server on stdio. It has eight tools for Claude Code: `walk`, `validate`, `inspect`, `audit`, `diff`,
-`oracle`, `session` and `mirror`; a bounded client (any other) gets a ninth, `walk_status`. Each returns the same text as the CLI command of that name. The tools are
+`oracle`, `session` and `mirror`; a bounded client (any other) gets a ninth, `walk_status`. Each returns the same text as the matching CLI command; the MCP `inspect` is `simwalk bundle inspect` (and `bundle screen` with `step`), not the live `simwalk inspect`. The tools are
 described in [Using SimWalk from a coding agent (MCP)](Docs/Reference.md#using-simwalk-from-a-coding-agent-mcp).
 
 `simwalk inspect --app <bundle id>` reads the screen the app is on now, as text. This took 12 seconds, which
@@ -342,8 +343,8 @@ verbs are `read`, `tap`, `swipe`, `scroll`, `menu` and `burst`. It never types.
 
 SimWalk runs on Apple Silicon Macs only, and needs Xcode. The walk runner is an XCUITest bundle. The
 binary builds it from source with `xcodebuild` the first time a walk needs it, and pairs it with that
-binary. That includes after an upgrade, with no step to re-run. SimWalk is tested on macOS 27.0.1 with
-Xcode 27.1 and iOS 27.0 simulators. `mirror` needs a Mac with iPhone Mirroring.
+binary. That includes after an upgrade, with no step to re-run. SimWalk is tested on macOS 27.2.1 with
+Xcode 27.2 and iOS 27.0 and 27.2 simulators. `mirror` needs a Mac with iPhone Mirroring.
 
 Homebrew:
 
@@ -363,7 +364,9 @@ things.
 - The MCP server, at user scope.
 - A segment in the status line (`simwalk statusline` prints it; see
   [The status line](Docs/Reference.md#the-status-line)).
-- A `PreToolUse` hook. In a repo that has walkbooks, it refuses some of the agent's own
+- A `PreToolUse` hook, which runs before each Bash call and each call to an Xcode build MCP server's tools.
+  In a repo that has walkbooks (in `Walkbooks/` or `Docs/Walkbooks/`, at the working directory or the
+  repository root), it refuses some of the agent's own
   `xcrun simctl io … screenshot`, `simctl ui … appearance` and a third-party simulator CLI's `tap` calls,
   and points the agent at the `simwalk walk` that captures every screen instead. It never refuses the
   first such call in a context, refuses at most once per 30 minutes, and lets the same command through
@@ -383,9 +386,10 @@ another MCP client, such as Cursor, run `simwalk mcp` as a stdio server.
 `install-hook` does) and Cursor (the MCP server in `mcp.json` and the `preToolUse` hook in `hooks.json`,
 beside whatever else they hold). Codex is skipped. Without a terminal, pass `--yes` (every agent found),
 `--all`, or `--agent claude|cursor|codex`. `install-hook` stays for Claude Code alone. `simwalk uninstall` takes
-SimWalk back out of both, leaving other tools' entries alone. Afterwards
-`install` runs the other Fieldwork tools' installs (sift) once, into the same agents, so one command sets
-the family up. `--dry-run` shows what would change in each agent, and in the other tools, and writes nothing.
+SimWalk back out of both, leaving other tools' entries alone. Afterwards, when
+[SwiftSure](https://github.com/Agulhas-Labs/swift-sure) is installed (a Swift code index for agents from the
+same family, whose command is `sift`), `install` runs its `sift install --agent <a>… --yes` once, into the
+same agents, so one command sets both up. Where `sift` is not found, nothing runs. `--dry-run` shows what would change in each agent, and in the other tools, and writes nothing.
 
 `simwalk doctor` then checks that each agent is wired end to end: the registration, the registered binary, each
 hook fed a payload of that agent's shape, and the server's tool list, one line per check (`--json` for one
@@ -399,7 +403,8 @@ Swift 6.2 toolchain; the package itself declares macOS 13 and iOS 17 as its floo
 
 Every command exits 0 when the answer is clean. It exits 2 when the answer is qualified: it worked, and
 something needs your attention, such as a screen it could not reach, a diff that found changes, or a
-figure that did not match. It exits 1 when it refused. Gate CI on these. `simwalk mirror` also exits 3 when
+figure that did not match. It exits 1 when it refused, and 64 on a usage error (an unknown flag or
+value), before any work. Gate CI on these. `simwalk mirror` also exits 3 when
 the Mirroring window was not frontmost. Nothing was done, so retry.
 
 ## Limits

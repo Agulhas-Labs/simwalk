@@ -201,6 +201,7 @@ private extension BundleLabels {
             name: .largeTypeOverflow,
             noun: LargeTypeOverflowAudit.findingNoun,
             examinedNoun: LargeTypeOverflowAudit.examinedNoun,
+            examinedScope: LargeTypeOverflowAudit.examinedScope,
             clause: LargeTypeOverflowAudit.findingClause,
             result: LargeTypeOverflowAudit().evaluate(captures),
             captureCount: captures.count
@@ -212,6 +213,7 @@ private extension BundleLabels {
             name: .truncatedText,
             noun: TruncatedTextAudit.findingNoun,
             examinedNoun: TruncatedTextAudit.examinedNoun,
+            examinedAdjective: TruncatedTextAudit.examinedAdjective,
             clause: TruncatedTextAudit.findingClause,
             result: truncatedText,
             captureCount: accessibilityCaptures.count

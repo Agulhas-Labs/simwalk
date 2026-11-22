@@ -125,7 +125,227 @@ struct TruncatedTextAuditTests {
     func aLineOutsideTheElementsFrameIsNotAttributedToIt() {
         let result = Self.evaluate([Self.line("Notific…", y: 0.5), Self.line("Notific…", x: 0.9)])
 
+        // Lines outside every element are drawn text of their own, never the title's.
+        #expect(!result.findings.contains { $0.type == "StaticText" })
+        #expect(result.findings.map(\.type) == [TruncatedTextAudit.drawnTextType, TruncatedTextAudit.drawnTextType])
+    }
+
+    /// `capture()`'s screen, light, with `children` beside its title, read as `lines`.
+    private static func evaluate(_ lines: [MirrorTextLine], beside children: [AXNode], rootLabel: String? = nil) -> LabelRuleResult {
+        let title = AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 100, width: 150, height: 20), label: "Notifications")
+        let screen = AXNode(type: "Application", frame: AXNode.Frame(x: 0, y: 0, width: 400, height: 800), label: rootLabel, children: [title] + children)
+        return withScreenshot { url in
+            let capture = BundleAuditScope.Capture(screenID: "progress", stateSlug: "light", tree: screen, screenshotURL: url)
+            return TruncatedTextAudit(recognizer: FakeRecognizer(recognised: lines)).evaluate([capture])
+        }
+    }
+
+    /// A button at y 200-260 of the 800-pt screen, labelled `label`.
+    private static func button(_ label: String) -> AXNode {
+        AXNode(type: "Button", frame: AXNode.Frame(x: 20, y: 200, width: 100, height: 60), label: label)
+    }
+
+    @Test
+    func aHiddenRowsLineCutShortWithNoElementFires() {
+        let result = Self.evaluate([Self.line("Notifications"), Self.line("Pre vi…", y: 0.5)], beside: [])
+
+        #expect(result.findings.count == 1)
+        let finding = result.findings.first
+        #expect(finding?.type == "drawn text")
+        #expect(finding?.label == "Pre vi…")
+        #expect(finding?.note == "(no accessibility element) cut short with an ellipsis")
+        #expect(finding?.frame == AXNode.Frame(x: 40, y: 392, width: 80, height: 16))
+        #expect(result.examined == 1)
+        #expect(result.drawnLinesOutside == 1)
+    }
+
+    @Test
+    func aLineCentredInAnElementWhoseLabelHoldsItWholeIsNotAFinding() {
+        let column = AXNode(type: "Other", frame: AXNode.Frame(x: 0, y: 380, width: 200, height: 40), label: "Week: Pre vi…, 75 percent")
+
+        let result = Self.evaluate([Self.line("Pre vi…", y: 0.5)], beside: [column])
+
         #expect(result.findings.isEmpty)
+        #expect(result.drawnLinesOutside == 1)
+    }
+
+    @Test
+    func aLineCentredInAnElementWhoseLabelDoesNotHoldItStillFires() {
+        let column = AXNode(type: "Other", frame: AXNode.Frame(x: 0, y: 380, width: 200, height: 40), label: "Previous week, 75 percent")
+
+        let result = Self.evaluate([Self.line("Pre vi…", y: 0.5)], beside: [column])
+
+        #expect(result.findings.map(\.label) == ["Pre vi…"])
+    }
+
+    @Test
+    func aLowConfidenceLineCutShortWithNoElementIsNotAFinding() {
+        let misread = MirrorTextLine(text: "Step 2 …", centreX: 0.2, centreY: 0.5, width: 0.2, height: 0.02, confidence: 0.3)
+        let result = Self.evaluate([Self.line("Notifications"), misread], beside: [])
+
+        #expect(result.findings.isEmpty)
+        #expect(result.drawnLinesOutside == 1)
+    }
+
+    @Test
+    func anEllipsisAloneOutsideTheTreeIsNotAFinding() {
+        let result = Self.evaluate([Self.line("…", y: 0.5), Self.line("Week 3", y: 0.6)], beside: [])
+
+        #expect(result.findings.isEmpty)
+        #expect(result.drawnLinesOutside == 2)
+    }
+
+    @Test
+    func aButtonsLabelBrokenMidWordFires() {
+        let result = Self.evaluate([Self.line("Contr", y: 0.27), Self.line("ols", y: 0.3)], beside: [Self.button("Controls")])
+
+        #expect(result.findings.count == 1)
+        #expect(result.findings.first?.type == "Button")
+        #expect(result.findings.first?.note == "breaks mid-word: \"Contr / ols\"")
+        #expect(result.examined == 2)
+        #expect(result.drawnLinesOutside == 0)
+    }
+
+    @Test
+    func aHyphenatedBreakIsNotAFinding() {
+        let result = Self.evaluate([Self.line("Con-", y: 0.27), Self.line("trols", y: 0.3)], beside: [Self.button("Controls")])
+
+        #expect(result.findings.isEmpty)
+    }
+
+    @Test
+    func aBreakBetweenWordsIsNotAFinding() {
+        let result = Self.evaluate([Self.line("Controls", y: 0.27), Self.line("and more", y: 0.3)], beside: [Self.button("Controls and more")])
+
+        #expect(result.findings.isEmpty)
+    }
+
+    @Test
+    func twoPiecesOfOneRowAreNotABreak() {
+        let result = Self.evaluate([Self.line("Contr", x: 0.1, y: 0.3), Self.line("ols", x: 0.25, y: 0.3)], beside: [Self.button("Controls")])
+
+        #expect(result.findings.isEmpty)
+    }
+
+    @Test
+    func aButtonDrawnWithAnEllipsisFires() {
+        let result = Self.evaluate([Self.line("Contr…", y: 0.3)], beside: [Self.button("Controls")])
+
+        #expect(result.findings.map(\.note) == ["reads \"Contr…\""])
+        #expect(result.findings.first?.type == "Button")
+    }
+
+    /// Three text elements below the screen's bottom edge are counted, not judged.
+    @Test
+    func textElementsOffScreenAreCountedNotJudgedAndQualifyTheVerdictAndHeading() {
+        let below = (0 ..< 3).map { AXNode(type: "StaticText", frame: AXNode.Frame(x: 20, y: 900 + Double($0) * 30, width: 100, height: 20), label: "Row \($0)") }
+        let result = Self.evaluate([Self.line("Notifications")], beside: below)
+        let section = LabelAuditSection(
+            name: .truncatedText,
+            noun: TruncatedTextAudit.findingNoun,
+            examinedNoun: TruncatedTextAudit.examinedNoun,
+            examinedAdjective: TruncatedTextAudit.examinedAdjective,
+            clause: TruncatedTextAudit.findingClause,
+            result: result,
+            captureCount: 1
+        )
+
+        #expect(result.examined == 1)
+        #expect(result.offScreen == 3)
+        #expect(section.verdictClauses == ["truncatedText judged 1 of 4 text runs; 3 off screen, not judged"])
+        #expect(section.lines == ["[truncatedText] clean — 1 on-screen text run and 0 drawn lines outside it examined across 1 capture; 3 off screen, not judged"])
+    }
+
+    @Test
+    func largeTypeOverflowsHeadingSaysItCountsOnScreenOrOff() {
+        let section = LabelAuditSection(
+            name: .largeTypeOverflow,
+            noun: LargeTypeOverflowAudit.findingNoun,
+            examinedNoun: LargeTypeOverflowAudit.examinedNoun,
+            examinedScope: LargeTypeOverflowAudit.examinedScope,
+            clause: LargeTypeOverflowAudit.findingClause,
+            result: LabelRuleResult(examined: 1012),
+            captureCount: 4
+        )
+
+        #expect(section.lines == ["[largeTypeOverflow] clean — 1012 text runs examined across 4 captures, on screen or off"])
+    }
+
+    /// A recognised line `width` wide, centred at `x`, `y` (fractions of the 400 x 800 screen).
+    private static func wide(_ text: String, x: Double = 0.5, y: Double, width: Double) -> MirrorTextLine {
+        MirrorTextLine(text: text, centreX: x, centreY: y, width: width, height: 0.02, confidence: 1)
+    }
+
+    @Test
+    func fourColumnLabelsDrawnOnTwoLinesAreFourFindingsEachNamingItsColumn() {
+        let columns = ["This week, 60 percent", "Last week, 40 percent", "Previous week, 75 percent", "Some time ago, 20 percent"].enumerated().map { index, label in
+            AXNode(type: "Other", frame: AXNode.Frame(x: 40 + Double(index) * 80, y: 380, width: 80, height: 40), label: label)
+        }
+        let lines = [Self.wide("3 2 Pre So", y: 0.475, width: 0.8), Self.wide("w… w… vi… fa…", y: 0.5, width: 0.8)]
+
+        let result = Self.evaluate(lines, beside: columns)
+
+        #expect(result.findings.map(\.label) == ["3 w…", "2 w…", "Pre vi…", "So fa…"])
+        #expect(result.findings.map(\.note) == columns.compactMap(\.label).map { "(no accessibility element of its own; inside '\($0)') cut short with an ellipsis" })
+        #expect(Set(result.findings.map(\.frame.x)).count == 4)
+    }
+
+    @Test
+    func aCutShortLineWithNothingAboveItIsOneFindingWithoutAColumn() {
+        let result = Self.evaluate([Self.wide("Pre vi…", y: 0.5, width: 0.2)], beside: [])
+
+        #expect(result.findings.map(\.label) == ["Pre vi…"])
+        #expect(result.findings.first?.note == "(no accessibility element) cut short with an ellipsis")
+    }
+
+    @Test
+    func aLineAboveWithADifferentWordCountIsNotQuotedAsTheFirstLine() {
+        let lines = [Self.wide("Mon Tue Wed", y: 0.475, width: 0.7), Self.wide("ab… cd…", y: 0.5, width: 0.7)]
+
+        let result = Self.evaluate(lines, beside: [])
+
+        #expect(result.findings.map(\.label) == ["ab…", "cd…"])
+    }
+
+    @Test
+    func aHeadingAboveALoneCutShortLineIsNotItsFirstLine() {
+        let lines = [Self.wide("Today", y: 0.475, width: 0.2), Self.wide("Running a lon…", y: 0.5, width: 0.4)]
+
+        let result = Self.evaluate(lines, beside: [])
+
+        #expect(result.findings.map(\.label) == ["Running a lon…"])
+    }
+
+    @Test
+    func aCutShortRowAboveIsNotQuotedAsTheFirstLine() {
+        let lines = [Self.wide("Set… Gen…", y: 0.475, width: 0.4), Self.wide("Pri… Acc…", y: 0.5, width: 0.4)]
+
+        let result = Self.evaluate(lines, beside: [])
+
+        #expect(result.findings.map(\.label) == ["Set…", "Gen…", "Pri…", "Acc…"])
+    }
+
+    @Test
+    func theApplicationCoveringTheScreenIsNotNamedAsTheContainer() {
+        let result = Self.evaluate([Self.wide("Pre vi…", y: 0.5, width: 0.2)], beside: [], rootLabel: "Example App")
+
+        #expect(result.findings.first?.note == "(no accessibility element) cut short with an ellipsis")
+    }
+
+    @Test
+    func theHeadingCountsTheDrawnLinesOutsideTheRuns() {
+        let result = Self.evaluate([Self.line("Notifications"), Self.line("Week 3", y: 0.5), Self.line("Week 2", y: 0.6)], beside: [])
+        let section = LabelAuditSection(
+            name: .truncatedText,
+            noun: TruncatedTextAudit.findingNoun,
+            examinedNoun: TruncatedTextAudit.examinedNoun,
+            examinedAdjective: TruncatedTextAudit.examinedAdjective,
+            clause: TruncatedTextAudit.findingClause,
+            result: result,
+            captureCount: 1
+        )
+
+        #expect(section.lines == ["[truncatedText] clean — 1 on-screen text run and 2 drawn lines outside it examined across 1 capture"])
     }
 
     @Test

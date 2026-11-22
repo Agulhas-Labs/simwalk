@@ -46,22 +46,24 @@ public extension TranscriptScan {
 
     /// The argument vectors a shell command hands this tool — one per invocation, each the words after the binary, verb first, as the shell will split them.
     ///
-    /// The test for an invocation is ``invokesThisTool(_:)``'s, the binary in command position with one of its own verbs after it; this is the same test keeping the words it found. The `PreToolUse` hook matches a call to its process on them (SimWalk#14), so they stop where the process's `argv` would: at the end of the command, and at a redirection, which the shell takes for itself. A leading `~/` is expanded as the shell would expand it. What the shell rewrites beyond that — a variable, a glob — is kept as written and so matches no process, which leaves the call untagged rather than tagged wrongly.
+    /// The test for an invocation is ``invokesThisTool(_:)``'s, the binary in command position with one of its own verbs after it; this is the same test keeping the words it found. The `PreToolUse` hook matches a call to its process on them (SimWalk#14), so they stop where the process's `argv` would: at the end of the command, and at a redirection, which the shell takes for itself. A leading `~/` is expanded as the shell would expand it, and so is a `$NAME` or `${NAME}` an earlier command of the same line set (`U=x; …`, `U=x && …`, `export U=x; …`), by the same expansion the hand-driving nudge uses (SimWalk#293). A `NAME=value` prefix on the call itself is not, since the shell expands the words before it applies the prefix. What the shell rewrites beyond that — a variable set anywhere else, a glob — is kept as written and so matches no process, which leaves the call untagged rather than tagged wrongly.
     static func invocations(in command: String) -> [[String]] {
         let tokens = shellTokens(of: command)
+        var variables: [String: String] = [:]
         return commandPositions(in: tokens).compactMap { index in
-            guard let candidate = wordToken(at: index, in: tokens), namesTheBinary(candidate),
-                  let verb = wordToken(at: index + 1, in: tokens), invocationVerbs.contains(verb)
-            else {
-                return nil
-            }
-            var arguments: [String] = []
-            var position = index + 1
+            var words: [String] = []
+            var position = index
             while let word = wordToken(at: position, in: tokens), !isRedirection(word) {
-                arguments.append(expandingTilde(word))
+                words.append(word)
                 position += 1
             }
-            return arguments
+            if HandDrivingNudge.setVariables(words, in: &variables) {
+                return nil
+            }
+            guard let candidate = words.first, namesTheBinary(candidate), let verb = words.dropFirst().first, invocationVerbs.contains(verb) else {
+                return nil
+            }
+            return words.dropFirst().map { expandingTilde(HandDrivingNudge.expanding($0, with: variables)) }
         }
     }
 

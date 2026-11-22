@@ -11,7 +11,7 @@ import Foundation
 /// **The shape is the shared answer contract** (SwiftSure's answer contract, Docs/AnswerContract.md in github.com/Agulhas-Labs/swift-sure): the header names the build, the plan, the device and how much of the bundle settled; the verdict names every qualification before the counters; the residue carries the screens and their evidence; the last line prices what the answer stood in for. Nothing that is empty is printed as a heading, so a clean walk's report is the header, the verdict, its screens and the saving.
 public struct CaptureBundleSummary {
     private let bundle: CaptureBundle
-    private let qualifications: [String]
+    private let qualifiedBy: [String]
     private let notes: [String]
 
     /// - Parameters:
@@ -20,7 +20,7 @@ public struct CaptureBundleSummary {
     ///   - notes: lines printed under the residue that qualify nothing: what the walk left the device set to, and the detail behind a stated qualification.
     public init(_ bundle: CaptureBundle, qualifiedBy qualifications: [String] = [], notes: [String] = []) {
         self.bundle = bundle
-        self.qualifications = qualifications
+        qualifiedBy = qualifications
         self.notes = notes
     }
 
@@ -68,8 +68,23 @@ public struct CaptureBundleSummary {
     ///
     /// One pass over the screens, classifying each once, and the switch is exhaustive rather than a set of filters — so a sixth `ScreenOutcome` is a compile error here instead of a screen that silently counts towards nothing. The qualifications lead because they are the numbers that can go down (contract §2), and a count that only rises reads as success whatever the truth is; the ones that are zero are not printed at all (§3), where the old tally spelled out four zeroes on every clean walk.
     private func verdict() -> AnswerVerdict {
+        let (counts, stated) = tally()
+        return AnswerVerdict.reporting(
+            qualifications: stated,
+            detail: "\(counts.captured) of \(bundle.manifest.screens.count) screens captured · \(counts.captures) capture\(counts.captures == 1 ? "" : "s")"
+        )
+    }
+
+    /// Every qualification the verdict line states, in its order: the bundle's own, then the run's (`qualifiedBy`).
+    ///
+    /// The one list the verdict line and a walk's result file both carry, so a face that reads only the file never answers `ok` for a walk this answers `qualified`.
+    public var qualifications: [String] {
+        tally().stated
+    }
+
+    private func tally() -> (counts: Counts, stated: [String]) {
         let screens = bundle.manifest.screens
-        var counts = (captured: 0, unreachable: 0, snapshotBlind: 0, buildMismatch: 0, captureFailed: 0, stateNotApplied: 0, unexpectedScreen: 0, captures: 0)
+        var counts = Counts()
         for screen in screens {
             switch screen.outcome {
             case .captured:
@@ -101,11 +116,8 @@ public struct CaptureBundleSummary {
             AnswerVerdict.qualification(counts.captureFailed, "screen", "that failed mid-capture"),
             AnswerVerdict.qualification(counts.stateNotApplied, "screen", "refused, state not applied"),
             AnswerVerdict.qualification(counts.unexpectedScreen, "screen", "not the screen its walkbook expected"),
-        ].compactMap(\.self) + qualifications
-        return AnswerVerdict.reporting(
-            qualifications: stated,
-            detail: "\(counts.captured) of \(screens.count) screens captured · \(counts.captures) capture\(counts.captures == 1 ? "" : "s")"
-        )
+        ].compactMap(\.self) + qualifiedBy
+        return (counts, stated)
     }
 
     /// What settling was actually measured against, stated on every bundle rather than only when something went wrong.
@@ -369,5 +381,12 @@ public struct CaptureBundleSummary {
     /// Printed on the screen's own line rather than in the settle line above, because that line states one number for the walk and a screen that paid for more has to say so where a reader is already looking at it.
     private static func ownSettle(_ screen: CaptureManifest.ScreenRecord) -> String {
         screen.settleQuietMilliseconds.map { " · settle \($0)ms" } ?? ""
+    }
+}
+
+private extension CaptureBundleSummary {
+    /// How many screens, and captures, fell in each class: what the verdict's qualifications and its detail are both read from.
+    struct Counts {
+        var captured = 0, unreachable = 0, snapshotBlind = 0, buildMismatch = 0, captureFailed = 0, stateNotApplied = 0, unexpectedScreen = 0, captures = 0
     }
 }

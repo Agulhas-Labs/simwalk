@@ -25,6 +25,7 @@ public actor SimWalkMCPServer {
     /// The client's name from `initialize` (or `SIMWALK_MCP_CLIENT`), which decides the mode.
     private var clientName: String?
     private let clientOverride: String?
+    private let guidePaths: MCPGuidePaths
     let budget: MCPCallBudget
     /// Seconds on a monotonic clock, and a suspension of so many seconds: every bounded wait goes through these, so a test never sleeps.
     private let clock: @Sendable () -> TimeInterval
@@ -43,9 +44,11 @@ public actor SimWalkMCPServer {
         session: String?,
         answering: @escaping AnswerProvider,
         environment: [String: String] = [:],
+        guidePaths: MCPGuidePaths = MCPGuidePaths(),
         clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         sleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) }
     ) {
+        self.guidePaths = guidePaths
         self.clock = clock
         self.sleep = sleep
         clientOverride = environment["SIMWALK_MCP_CLIENT"]
@@ -128,9 +131,7 @@ private extension SimWalkMCPServer {
                 "capabilities": ["tools": [String: Any]()],
                 "serverInfo": ["name": SimWalkPaths.binaryName, "version": SimWalkVersion.current],
             ]
-            if mode == .bounded {
-                result["instructions"] = MCPInstructions.text
-            }
+            result["instructions"] = MCPInstructions.text(for: mode, paths: guidePaths)
             emit(resultID: id, result: result)
         case "notifications/initialized", InFlightRequest.cancelledMethod:
             // A cancel was acted on as it was read (`InFlightRequest`); by the time it is handled here, the call it named has been answered or dropped.

@@ -150,6 +150,24 @@ struct WalkCommandTests {
         try Self.expectQualifiedExit(reporting: outcome, in: directory)
     }
 
+    /// The result file carries what the answer's verdict line names (a bounded client reads the file alone): the survived runner failure is among the outcome's qualifications, and `finish` writes them.
+    @Test
+    func aSurvivedRunnerFailureIsAWalkQualificationTheResultFileCarries() throws {
+        let directory = try TemporaryDirectory()
+        let bundle = try Self.bundle(in: directory)
+        let outcome = try WalkCommand.outcome(runnerFailure: Self.wedged, handback: Self.cleanHandback) { bundle }
+        let resultURL = directory.url.appendingPathComponent("s.result.json")
+        let telemetry = WalkTelemetry(writer: ProgressWriter(url: directory.url.appendingPathComponent("s.json"), clock: { Date() }, pid: 1), resultURL: resultURL)
+        telemetry.begin(tool: "walk")
+
+        telemetry.finish(walk: outcome.bundle, logPath: nil, qualifications: outcome.qualifications)
+
+        #expect(outcome.qualifications.contains("a runner failure this bundle survived"))
+        let result = try WalkResult.decoder().decode(WalkResult.self, from: Data(contentsOf: resultURL))
+        #expect(result.qualifications.contains("a runner failure this bundle survived"))
+        #expect(result.verdict == .passed)
+    }
+
     /// And a runner failure that left nothing readable behind is answered with the runner's own error, not with the bundle reader's — "the walk could not run" explains "there is no bundle here", and the reverse explains nothing.
     @Test
     func arunnerFailureThatWroteNoBundleIsAnsweredWithTheRunnersOwnError() {

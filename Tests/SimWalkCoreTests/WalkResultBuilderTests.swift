@@ -21,6 +21,16 @@ struct WalkResultBuilderTests {
         #expect(result.truncated == WalkResult.Truncated(omittedSteps: 0))
     }
 
+    /// The walk-level qualifications ride the result as given; the verdict still speaks for the screens alone.
+    @Test
+    func theWalksQualificationsAreStoredAndLeaveTheVerdictToTheScreens() {
+        let result = WalkResultBuilder().build(manifest: Self.manifest([Self.captured("home")]), bundleURL: Self.bundleURL, timings: PhaseTimings(bootMs: 1), logPath: nil, qualifications: ["a runner failure this bundle survived"])
+
+        #expect(result.qualifications == ["a runner failure this bundle survived"])
+        #expect(result.verdict == .passed)
+        #expect(Self.build([Self.captured("home")]).qualifications.isEmpty)
+    }
+
     @Test
     func anUnreachableScreenFailsWithTheRouteItTriedAsItsReason() throws {
         let screen = CaptureManifest.ScreenRecord(

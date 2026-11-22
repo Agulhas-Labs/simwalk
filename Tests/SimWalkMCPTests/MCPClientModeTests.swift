@@ -95,12 +95,50 @@ struct MCPClientModeTests {
         return try #require(responses.first?["result"] as? [String: Any], sourceLocation: sourceLocation)
     }
 
+    private static let paths = MCPGuidePaths(guide: "/home/u/.claude/rules/simwalk.md", reference: "/opt/share/simwalk/Docs/Reference.md")
+
     @Test
-    func claudeCodeInitializeResultHasNoInstructions() async throws {
+    func claudeCodeInitializeResultCarriesAShortPointerNamingTheGuideAndReference() {
+        let text = MCPInstructions.text(for: .blocking, paths: Self.paths)
+
+        #expect(text.utf8.count <= 600)
+        #expect(text.contains("Before first use, read the guide: /home/u/.claude/rules/simwalk.md"))
+        #expect(text.contains("Every verb and walkbook key: /opt/share/simwalk/Docs/Reference.md"))
+        #expect(text.contains("instead of screenshots or simctl by hand"))
+    }
+
+    @Test
+    func claudeCodeIsSentTheInstructionsOnInitialize() async throws {
         let result = try await Self.initializeResult("claude-code-2.1.302-initialize")
 
-        #expect(result["instructions"] == nil)
-        #expect(Set(result.keys) == ["protocolVersion", "capabilities", "serverInfo"])
+        #expect(try #require(result["instructions"] as? String) == MCPInstructions.text(for: .blocking, paths: MCPGuidePaths()))
+        #expect(Set(result.keys) == ["protocolVersion", "capabilities", "serverInfo", "instructions"])
+    }
+
+    @Test
+    func claudeCodePointsAtGitHubWhenNeitherFileExists() {
+        let text = MCPInstructions.text(for: .blocking, paths: MCPGuidePaths())
+
+        #expect(!text.contains("read the guide"))
+        #expect(text.hasSuffix("Every verb and walkbook key: Docs/Reference.md at github.com/Agulhas-Labs/simwalk"))
+    }
+
+    @Test
+    func aBoundedClientNamesTheLocalReferenceWhenFoundAndGitHubOtherwise() {
+        #expect(MCPInstructions.text(for: .bounded, paths: Self.paths).hasSuffix("Full guide: /opt/share/simwalk/Docs/Reference.md"))
+        #expect(MCPInstructions.text(for: .bounded, paths: MCPGuidePaths()) == Self.cursorInstructions)
+    }
+
+    @Test
+    func guidePathsAreOnlyThoseReadableWithTheShippedReferenceFirst() {
+        let rule = URL(fileURLWithPath: "/r/simwalk.md")
+        let shipped = URL(fileURLWithPath: "/p/share/simwalk")
+        let checkout = URL(fileURLWithPath: "/c")
+        let both = MCPGuidePaths.resolve(rule: rule, shippedDirectory: shipped, checkout: checkout, isReadable: { _ in true })
+        let checkoutOnly = MCPGuidePaths.resolve(rule: rule, shippedDirectory: shipped, checkout: checkout, isReadable: { $0.hasPrefix("/c") })
+
+        #expect(both == MCPGuidePaths(guide: "/r/simwalk.md", reference: "/p/share/simwalk/Docs/Reference.md"))
+        #expect(checkoutOnly == MCPGuidePaths(guide: nil, reference: "/c/Docs/Reference.md"))
     }
 
     @Test

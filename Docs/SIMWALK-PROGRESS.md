@@ -35,7 +35,7 @@ To find the right files:
   "app": "com.example.App",
   "currentStep": { "index": 4, "total": 12, "action": "walk login", "screen": "login" },
   "matches": { "planned": 12, "passed": 3, "failed": 0, "pending": 9 },
-  "lastScreenshotPath": "/abs/path/Out.simwalk/screens/home/light/screenshot.png",
+  "lastScreenshotPath": "/abs/path/Out.simwalk/screens/home/light/screen.png",
   "summary": { "bootMs": 8200, "installMs": 900, "buildMs": 31000, "runMs": null },
   "logPath": "/Users/…/.simwalk/usage.jsonl",
   "resultPath": null,
@@ -66,7 +66,7 @@ Every key except `schemaVersion`, `tool`, `phase`, `pid`, `startedAt` and `updat
 - Each write is atomic: the tool writes a temp file in the same directory, then renames it. A reader sees the old file or the new one, never a torn one. Do not write these files yourself.
 - Writes are throttled to one per 500 ms. Every phase change, every finished screen, completion and failure are always written.
 - One writer at a time. The tool writes `booting` to `launching`. The runner writes `running` and each finished screen, so the step moves on the moment a screen ends. The tool then reads the file back and writes `matching`, then `done` or `failed`.
-- The final phase is `done` only when every screen passed. A walk with a failed screen, or one that was refused, ends `failed`. Read `verdict` in the result file for the reason.
+- The final phase is `done` only when every screen passed. A walk with a failed screen, or one that was refused, ends `failed`. Read `verdict` in the result file for the reason. A walk whose screens all passed but whose run carries `qualifications` ends `done` and is answered `qualified`.
 - At the end the result file is written first, and `resultPath` is set in the same write that makes the phase final.
 - An error that ends the run writes `failed` with an `error` message.
 - A cancelled run writes `failed` with `error: "cancelled"`. It does so for a client's cancel request on the MCP server, and for SIGTERM or SIGINT on the CLI (SimWalk#83, SimWalk#85). Once cancelled, the file stays `failed` and `cancelled`, even if the runner writes again. To carry the cancel to the runner, the tool first creates an empty marker beside the file, `<progress>.cancel` (for example `<session>.json.cancel`). No `*.json` glob matches it (SimWalk#87, SimWalk#89). The screen counts stay in the file.
@@ -111,18 +111,18 @@ case, in precedence order (rows 1–12), is in `Docs/Reference.md`; it is not re
   "timings": { "bootMs": 8200, "installMs": 900, "buildMs": 31000, "runMs": 52000, "totalMs": 95000 },
   "counts": { "planned": 12, "passed": 11, "failed": 1 },
   "steps": [
-    { "index": 1, "screen": "home", "outcome": "passed", "screenshotPath": "/abs/…/screenshot.png" },
+    { "index": 1, "screen": "home", "outcome": "passed", "screenshotPath": "/abs/…/screen.png" },
     { "index": 4, "screen": "login", "outcome": "failed", "kind": "unexpectedScreen", "reason": "…" }
   ],
   "failures": [
     { "index": 4, "screen": "login", "kind": "unexpectedScreen", "reason": "…",
-      "expected": "login", "actual": ["welcome"], "screenshotPath": "/abs/…/screenshot.png" }
+      "expected": "login", "actual": ["welcome"], "screenshotPath": "/abs/…/screen.png" }
   ],
   "truncated": { "omittedSteps": 0, "clippedFailures": 0 }
 }
 ```
 
-- `verdict` is `passed`, `failed` or `refused`. A step's `outcome` is `passed` or `failed`. `kind` is the failure's outcome name, as in the `matches` list above.
+- `verdict` is `passed`, `failed` or `refused`. A step's `outcome` is `passed` or `failed`. `kind` is the failure's outcome name, as in the `matches` list above. `qualifications` is the CLI answer's verdict-line list, in its order: the captures' clauses (for example `1 capture holding the app's chrome and nothing else`), the screens' (`1 screen unreachable`) and the run's (`a runner failure this bundle survived`). It is absent when there are none.
 - `expected` and `actual` are the screen identifier the walkbook expected and, per mismatched capture, the screen identifiers the screen showed (`unexpectedScreen`): each entry is the path to the deepest identifier, outer to inner, joined by ` > ` (`parent > controls`), a single identifier when none nests, or `null` for a capture carrying none. An `unreachable` failure has the last route step it was reaching for as `expected`, and no `actual`. The whole route it tried is in `reason`. `screenshotPath` is the capture of what the screen actually showed, as an absolute path. There is no reference screenshot and no diff percentage, because a walk has no reference.
 - `timings` is the progress file's `summary`, final. On a `walk --parallel` it carries `parallel`, as §2 describes.
 - `steps` lists every screen in walkbook order. When the 16 KiB cap bites, passed steps are dropped from the end first, then failed ones. `truncated.omittedSteps` counts both. A dropped failed step stays in full in `failures`.

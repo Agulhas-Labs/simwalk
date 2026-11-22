@@ -31,6 +31,10 @@ public struct LargeTypeOverflowAudit: PerTreeLabelAuditRule {
         "text run"
     }
 
+    public static var examinedScope: String {
+        ", on screen or off"
+    }
+
     /// Points of slack, so an edge that lands on the boundary by rounding is not an overflow.
     private static let tolerance = 1.0
 

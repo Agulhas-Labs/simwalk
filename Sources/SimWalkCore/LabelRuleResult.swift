@@ -22,6 +22,10 @@ public struct LabelRuleResult: Equatable, Sendable {
     public var inHorizontalScroller: Int
     /// The screen of each such run, in order and repeated, so a line can name the screens.
     public var inHorizontalScrollerScreens: [String] = []
+    /// How many recognised lines lie outside every text run, for the rule that examines them too (`truncatedText`); none for a rule that does not, whose heading then counts only what it examined.
+    public var drawnLinesOutside: Int?
+    /// How many text-carrying elements the rule did not judge because they are not wholly on screen, for the rule that judges only what the capture shows (`truncatedText`); the verdict and the heading say so, so an audit that skipped most of a tall screen never reads clean.
+    public var offScreen: Int = 0
 
     public init(examined: Int = 0, findings: [LabelFinding] = [], unchecked: Int = 0, recognitionFailed: Int = 0, recognitionFailure: String? = nil, inHorizontalScroller: Int = 0) {
         self.examined = examined
@@ -41,5 +45,9 @@ public struct LabelRuleResult: Equatable, Sendable {
         recognitionFailure = recognitionFailure ?? other.recognitionFailure
         inHorizontalScroller += other.inHorizontalScroller
         inHorizontalScrollerScreens += other.inHorizontalScrollerScreens
+        offScreen += other.offScreen
+        if let outside = other.drawnLinesOutside {
+            drawnLinesOutside = (drawnLinesOutside ?? 0) + outside
+        }
     }
 }

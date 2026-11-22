@@ -29,6 +29,10 @@ public struct WalkResult: Codable, Equatable, Sendable {
     /// Every screen that did not pass — never dropped, whatever the cap; past it, only the long `reason`/`expected`/`actual` text is clipped (`truncated.clippedFailures`), and the result can still ship over the cap.
     public var failures: [Failure]
     public var truncated: Truncated
+    /// The CLI answer's verdict-line list, in its order: the captures' clauses, the screens' and the run's (`a runner failure this bundle survived`).
+    ///
+    /// `verdict` speaks for the screens alone, so a walk whose screens all passed can still carry these. Written only when there are some; a file written before the field reads as none.
+    public var qualifications: [String] = []
 
     /// The encoder the result file is written with: the progress file's — compact, sorted keys, unescaped slashes — so the same run's bytes are the same bytes.
     public static func encoder() -> JSONEncoder {
@@ -47,6 +51,49 @@ public struct WalkResult: Codable, Equatable, Sendable {
 }
 
 public extension WalkResult {
+    /// The keys, spelled out so the coding methods below can leave `qualifications` out when it is empty.
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, tool, verdict, walkName, app, device, bundlePath, logPath, timings, counts, steps, failures, truncated, qualifications
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        tool = try container.decode(String.self, forKey: .tool)
+        verdict = try container.decode(Verdict.self, forKey: .verdict)
+        walkName = try container.decode(String.self, forKey: .walkName)
+        app = try container.decode(String.self, forKey: .app)
+        device = try container.decode(WalkProgress.Device.self, forKey: .device)
+        bundlePath = try container.decode(String.self, forKey: .bundlePath)
+        logPath = try container.decodeIfPresent(String.self, forKey: .logPath)
+        timings = try container.decode(PhaseTimings.self, forKey: .timings)
+        counts = try container.decode(Counts.self, forKey: .counts)
+        steps = try container.decode([Step].self, forKey: .steps)
+        failures = try container.decode([Failure].self, forKey: .failures)
+        truncated = try container.decode(Truncated.self, forKey: .truncated)
+        qualifications = try container.decodeIfPresent([String].self, forKey: .qualifications) ?? []
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(tool, forKey: .tool)
+        try container.encode(verdict, forKey: .verdict)
+        try container.encode(walkName, forKey: .walkName)
+        try container.encode(app, forKey: .app)
+        try container.encode(device, forKey: .device)
+        try container.encode(bundlePath, forKey: .bundlePath)
+        try container.encodeIfPresent(logPath, forKey: .logPath)
+        try container.encode(timings, forKey: .timings)
+        try container.encode(counts, forKey: .counts)
+        try container.encode(steps, forKey: .steps)
+        try container.encode(failures, forKey: .failures)
+        try container.encode(truncated, forKey: .truncated)
+        if !qualifications.isEmpty {
+            try container.encode(qualifications, forKey: .qualifications)
+        }
+    }
+
     /// The walk's verdict: `refused` when any screen refused on a build mismatch, else `failed` when any screen did not pass, else `passed`.
     enum Verdict: String, Codable, Equatable, Sendable {
         case passed

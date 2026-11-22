@@ -34,7 +34,8 @@ struct HomeDirectoriesTests {
 
     @Test
     func accountHomeIsTheAccountsWhateverTheEnvironmentSays() {
-        #expect(HomeDirectories.account().path == FileManager.default.homeDirectoryForCurrentUser.path + "/.simwalk")
+        #expect(HomeDirectories.account().path == Self.accountHome + "/.simwalk")
+        #expect(HomeDirectories.diagnosticReports().path == Self.accountHome + "/Library/Logs/DiagnosticReports")
     }
 
     @Test

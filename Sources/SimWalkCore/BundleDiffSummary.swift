@@ -63,6 +63,6 @@ public struct BundleDiffSummary {
     private var weighing: ContextSaving? {
         let weighed = [ContextSaving.weighing(reference), ContextSaving.weighing(run)].compactMap(\.self)
         guard !weighed.isEmpty else { return nil }
-        return ContextSaving(screenshotTokens: weighed.flatMap(\.screenshotTokens), treeBytes: weighed.reduce(0) { $0 + $1.treeBytes }, servedBytes: 0)
+        return ContextSaving(screenshotTokens: weighed.flatMap(\.screenshotTokens), screenshotIdentities: weighed.flatMap(\.screenshotIdentities), treeBytes: weighed.reduce(0) { $0 + $1.treeBytes }, servedBytes: 0)
     }
 }

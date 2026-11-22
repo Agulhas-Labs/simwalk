@@ -42,6 +42,41 @@ struct RepositoryWalkbooksTests {
         #expect(RepositoryWalkbooks.exist(from: root.path) == false)
     }
 
+    /// A walkbook in a root `Walkbooks/` is found from the root and from a subdirectory.
+    @Test
+    func aRootWalkbooksFolderIsFoundFromTheRootAndBelow() throws {
+        let scratch = try TemporaryDirectory()
+        let root = try Self.repo(in: scratch, folders: ["Walkbooks"])
+        let below = root.appendingPathComponent("Sources/App", isDirectory: true)
+        try FileManager.default.createDirectory(at: below, withIntermediateDirectories: true)
+
+        #expect(RepositoryWalkbooks.candidates(from: root.path) == ["Walkbooks/x.json"])
+        #expect(RepositoryWalkbooks.candidates(from: below.path) == ["../../Walkbooks/x.json"])
+    }
+
+    /// Both folders are listed, `Walkbooks` first, and a folder reached from the working directory and from the root is listed once.
+    @Test
+    func bothFoldersAreListedWithoutDuplicates() throws {
+        let scratch = try TemporaryDirectory()
+        let root = try Self.repo(in: scratch, folders: ["Walkbooks", "Docs/Walkbooks"])
+        let below = root.appendingPathComponent("Sources", isDirectory: true)
+        try FileManager.default.createDirectory(at: below, withIntermediateDirectories: true)
+
+        #expect(RepositoryWalkbooks.candidates(from: root.path) == ["Walkbooks/x.json", "Docs/Walkbooks/x.json"])
+        #expect(RepositoryWalkbooks.candidates(from: below.path) == ["../Walkbooks/x.json", "../Docs/Walkbooks/x.json"])
+    }
+
+    private static func repo(in scratch: TemporaryDirectory, folders: [String]) throws -> URL {
+        let root = scratch.url.appendingPathComponent("repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        for name in folders {
+            let folder = root.appendingPathComponent(name, isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data(walkbook.utf8).write(to: folder.appendingPathComponent("x.json"))
+        }
+        return root
+    }
+
     static var walkbook: String {
         """
         {"name": "x", "appBundleID": "com.example.app", "screens": [

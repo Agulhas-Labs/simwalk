@@ -5,15 +5,15 @@
 import Foundation
 import SimWalkCore
 
-/// The walkbooks a repository keeps where the agent guide says a repository keeps them — `Docs/Walkbooks/*.json` — found from a session's working directory (SimWalk#12).
+/// The walkbooks a repository keeps where the agent guide says a repository keeps them — `Walkbooks/*.json` or `Docs/Walkbooks/*.json` — found from a session's working directory (SimWalk#12).
 ///
-/// **Two places, because a session stands anywhere in a repository.** The working directory's own `Docs/Walkbooks`, and the one at the root of the git working tree it is in, found by walking up to the nearest `.git` — a file in a worktree, a directory in a checkout — rather than by running `git`, since this is read before every shell call a session makes and on every status-line render. Nothing above the working tree is looked at: a walkbook in a parent repository is not this repository's.
+/// **Two places, because a session stands anywhere in a repository.** The working directory's own walkbook folders (``directories``), and the ones at the root of the git working tree it is in, found by walking up to the nearest `.git` — a file in a worktree, a directory in a checkout — rather than by running `git`, since this is read before every shell call a session makes and on every status-line render. Nothing above the working tree is looked at: a walkbook in a parent repository is not this repository's.
 ///
 /// Each path is spelled relative to the working directory, `..` and all, because it is handed back as the argument of a `simwalk walk` the session will run from there.
 public struct RepositoryWalkbooks {
-    /// The directory a walkbook is kept in, relative to a repository's root.
-    public static var directory: String {
-        "Docs/Walkbooks"
+    /// The directories a walkbook is kept in, relative to a repository's root, in the order they are listed.
+    public static var directories: [String] {
+        ["Walkbooks", "Docs/Walkbooks"]
     }
 
     /// Every `*.json` in the walkbook directories that serve `workingDirectory`, in name order, each spelled relative to it — whether or not it loads.
@@ -24,11 +24,16 @@ public struct RepositoryWalkbooks {
         // entirely, and the load in ``loaded(from:)`` would fail silently (SimWalk#37 item 1).
         let base = URL(fileURLWithPath: workingDirectory, isDirectory: true).resolvingSymlinksInPath()
         var found: [String] = []
+        var seen: Set<String> = []
         for (depth, root) in roots(from: base) {
-            let folder = root.appendingPathComponent(directory, isDirectory: true)
-            let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
-            let prefix = String(repeating: "../", count: depth)
-            found += names.sorted().filter { $0.hasSuffix(".json") }.map { prefix + directory + "/" + $0 }
+            for directory in directories {
+                let folder = root.appendingPathComponent(directory, isDirectory: true)
+                // A folder reached twice (a working directory that is the root, a case-insensitive volume) lists once.
+                guard seen.insert(folder.resolvingSymlinksInPath().standardizedFileURL.path.lowercased()).inserted else { continue }
+                let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+                let prefix = String(repeating: "../", count: depth)
+                found += names.sorted().filter { $0.hasSuffix(".json") }.map { prefix + directory + "/" + $0 }
+            }
         }
         return found
     }

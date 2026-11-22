@@ -10,20 +10,20 @@ import Testing
 
 /// One line of somebody's screen, so what it says has to be exactly true: it counts every call the session made, prices only the calls it can attribute, and says nothing at all when there is nothing to say.
 struct StatuslineReportTests {
-    /// The two ways of reaching the tool are both counted, and only the one that recorded a session is priced — so the count is honest about the shell call while the saving does not claim for it.
+    /// Both ways of reaching the tool record the session, so both are counted from the session's rows — a walk through the MCP face and an inspect from a shell — and the saving is the rows' total.
     @Test
-    func anmcpCallIsPricedAndAShellCallIsCountedWithoutBeingPriced() throws {
+    func anmcpCallAndAShellCallAreBothCountedFromTheSessionsRows() throws {
         let scratch = try Scratch()
         try TranscriptFixture.append([
             TranscriptFixture.toolUse("mcp__simwalk__walk", ["walkbook": "example.json"]),
             TranscriptFixture.toolUse("Bash", ["command": "simwalk bundle inspect out.simwalk"]),
         ], to: scratch.transcript)
         scratch.log.record(tool: "walk", target: "example.json", milliseconds: 9, succeeded: true, saving: Self.saving, session: scratch.session)
-        scratch.log.record(tool: "walk", target: "torn.json", milliseconds: 2, succeeded: false, err: "no such file", session: scratch.session, kind: .inputRefused)
+        scratch.log.record(tool: "bundle inspect", target: "torn.simwalk", milliseconds: 2, succeeded: false, err: "no such file", session: scratch.session, kind: .inputRefused)
 
         let segment = scratch.report.segment(transcriptPath: scratch.transcript.path)
 
-        #expect(segment == "simwalk ~17k tokens saved · 2 calls · 1 refused")
+        #expect(segment == "simwalk ~7.9k tokens saved · 2 calls · 1 refused")
     }
 
     /// The count is named after the verb only when every counted call was that verb, because a walk is the expensive thing and the word a reader takes at face value.
@@ -228,6 +228,7 @@ struct StatuslineReportTests {
     func asecondRenderCountsWhatWasAppendedSinceTheFirst() throws {
         let scratch = try Scratch()
         try TranscriptFixture.append([TranscriptFixture.toolUse("mcp__simwalk__walk", ["walkbook": "a.json"])], to: scratch.transcript)
+        scratch.log.record(tool: "walk", target: "a.json", milliseconds: 9, succeeded: true, session: scratch.session)
         #expect(scratch.report.segment(transcriptPath: scratch.transcript.path) == "simwalk 1 walk")
 
         try TranscriptFixture.append([TranscriptFixture.toolUse("mcp__simwalk__walk", ["walkbook": "b.json"])], to: scratch.transcript)
@@ -235,8 +236,23 @@ struct StatuslineReportTests {
 
         let cached = scratch.cacheDirectory.appendingPathComponent("\(scratch.session).json")
 
-        #expect(scratch.report.segment(transcriptPath: scratch.transcript.path) == "simwalk ~17k tokens saved · 2 walks")
+        #expect(scratch.report.segment(transcriptPath: scratch.transcript.path) == "simwalk ~7.9k tokens saved · 2 walks")
         #expect(FileManager.default.fileExists(atPath: cached.path))
+    }
+
+    /// A capture is priced once in the session's total however many calls stood in for it, and the second render does not count again what the first had already claimed — the claimed identities are carried in the cached state (SimWalk#293 F2).
+    @Test
+    func anAuditOverTheWalksCapturesAddsNothingAcrossTwoRenders() throws {
+        let scratch = try Scratch()
+        try TranscriptFixture.append([TranscriptFixture.toolUse("mcp__simwalk__walk", ["walkbook": "a.json"])], to: scratch.transcript)
+        scratch.log.record(tool: "walk", target: "a.json", milliseconds: 9, succeeded: true, saving: Self.identifiedSaving, session: scratch.session)
+        #expect(scratch.report.segment(transcriptPath: scratch.transcript.path) == "simwalk ~7.9k tokens saved · 1 walk")
+
+        scratch.log.record(tool: "bundle audit", target: "out.simwalk", milliseconds: 3, succeeded: true, saving: Self.identifiedSaving, session: scratch.session)
+        scratch.log.record(tool: "bundle screen", target: "out.simwalk", milliseconds: 3, succeeded: true, saving: Self.identifiedSaving, session: scratch.session)
+
+        // The same screenshots, so no tokens are added; the two answers' served bytes are charged.
+        #expect(scratch.report.segment(transcriptPath: scratch.transcript.path) == "simwalk ~7.5k tokens saved · 3 calls")
     }
 
     /// **A cached count means whatever the rule that counted it meant.** Only the bytes appended since the last render are ever scanned, so a state written under an older rule would carry its wrong calls for the life of the session — which is why a version it does not recognise is discarded rather than migrated, and why bumping that version is part of changing what a call *is*.
@@ -438,7 +454,41 @@ struct StatuslineReportTests {
         #expect(scratch.report.segment(transcriptPath: scratch.transcript.path) == nil)
     }
 
-    /// One weighing, reused: two screenshots at the iPhone 17 figure and 40 kB of trees, against an 800-byte answer — 8,140 + 10,000 − 200 tokens.
+    /// **One figure per session in both places.** One log, two sessions' rows — MCP-shaped and command-line-shaped, a failure, a refusal and a repeat read — and a transcript that counts a different number of calls: the status line's saving, count, failures and refusals are `simwalk usage --session`'s for that session, because both read the same rows through one summary (SimWalk#293 F2).
+    @Test
+    func theStatusLineAndUsageForASessionPrintTheSameFigures() throws {
+        let scratch = try Scratch()
+        let other = "session-\(UUID().uuidString)"
+        // The transcript knows of one shell call only, as a Claude Code that tags nothing in the shell would show it.
+        try TranscriptFixture.append([TranscriptFixture.toolUse("mcp__simwalk__walk", ["walkbook": "a.json"])], to: scratch.transcript)
+        let log = scratch.log
+        log.record(tool: "walk", target: "a.json", milliseconds: 9, succeeded: true, saving: Self.identifiedSaving, session: scratch.session)
+        log.record(tool: "bundle audit", target: "out.simwalk", milliseconds: 3, succeeded: true, saving: Self.identifiedSaving, session: other)
+        log.record(tool: "bundle screen", target: "out.simwalk", milliseconds: 3, succeeded: true, saving: Self.identifiedSaving, session: scratch.session)
+        log.record(tool: UsageLog.parallelTool, target: "a.json", milliseconds: 9, succeeded: true, session: scratch.session)
+        log.record(tool: "bundle inspect", target: "out.simwalk", milliseconds: 3, succeeded: false, err: "the bundle is damaged", session: scratch.session, kind: .runnerFailed)
+        log.record(tool: "bundle inspect", target: "missing", milliseconds: 1, succeeded: false, err: "no such file", session: scratch.session, kind: .inputRefused)
+
+        let segment = try #require(scratch.report.segment(transcriptPath: scratch.transcript.path))
+        let usage = try UsageReport.render(fileURL: log.fileURL, session: scratch.session).text
+
+        // 4 calls, not the transcript's 1 and not the other session's row.
+        #expect(segment.hasSuffix("4 calls · 1 failed · 1 refused"))
+        let saved = try #require(segment.split(separator: " ").dropFirst().first.map(String.init))
+        #expect(saved.hasPrefix("~"))
+        #expect(usage.contains("session \(scratch.session)"))
+        #expect(usage.contains("calls: 4"))
+        #expect(usage.contains("1 failure across 4 calls"))
+        #expect(usage.contains("1 input refusal"))
+        #expect(usage.contains("measured savings — \(saved) tokens saved"))
+    }
+
+    /// The same two screenshots, identified, as a walk and every later call over its bundle would weigh them.
+    private static var identifiedSaving: ContextSaving {
+        ContextSaving(screenshotTokens: [4070, 4070], screenshotIdentities: ["aaaaaaaaaaaa", "bbbbbbbbbbbb"], treeBytes: 40000, servedBytes: 800)
+    }
+
+    /// One weighing, reused: two screenshots at the iPhone 17 figure and 40 kB of trees that are not priced, against an 800-byte answer — 8,140 − 200 tokens.
     private static var saving: ContextSaving {
         ContextSaving(screenshotTokens: [4070, 4070], treeBytes: 40000, servedBytes: 800)
     }

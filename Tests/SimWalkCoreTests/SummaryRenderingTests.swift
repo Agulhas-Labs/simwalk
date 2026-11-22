@@ -288,6 +288,24 @@ struct SummaryRenderingTests {
         #expect(!rendered.contains("browse [dark]"))
     }
 
+    /// The summary's `qualifications` is the verdict line's list, the bundle's own first and the run's after.
+    @Test
+    func theQualificationsListIsTheVerdictLinesInItsOrder() {
+        var manifest = CaptureBundleTests.manifest()
+        manifest.screens = [
+            CaptureManifest.ScreenRecord(
+                id: "browse",
+                outcome: .captured,
+                routeTaken: [.tab(label: "Browse")],
+                captures: [CaptureManifest.StateCapture(screenID: "browse", state: Walkbook.CaptureState(theme: .light), axTreeSettled: true, axTreeHasContent: false)]
+            ),
+        ]
+        let summary = CaptureBundleSummary(CaptureBundle(url: URL(fileURLWithPath: "/tmp/example.simwalk"), manifest: manifest), qualifiedBy: ["a runner failure this bundle survived"])
+
+        #expect(summary.qualifications == ["1 capture holding the app's chrome and nothing else", "a runner failure this bundle survived"])
+        #expect(summary.render().contains(summary.qualifications.joined(separator: "; ")))
+    }
+
     /// One bare capture, filed unsettled as well, is one qualification in the verdict, and the warning's advice states the cap rather than telling the reader to raise `settle` unconditionally.
     @Test
     func aBareCaptureIsOneQualificationInTheVerdict() {

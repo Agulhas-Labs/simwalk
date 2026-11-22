@@ -280,6 +280,19 @@ struct WalkStatusReaderTests {
         #expect(!status.isError)
     }
 
+    /// A walk whose screens all passed but whose run survived a runner failure is answered as the CLI answered it.
+    @Test
+    func row8APassedWalkWithQualificationsIsQualifiedNamingThem() async throws {
+        let fixture = try Fixture()
+        let path = try fixture.writeResult(verdict: .passed, counts: WalkResult.Counts(planned: 1, passed: 1, failed: 0), qualifications: ["a runner failure this bundle survived"])
+        try fixture.write(fixture.progress(phase: .done, resultPath: path))
+
+        let status = await fixture.status(Self.handle)
+
+        #expect(status.text == "walk: 'smoke'  app: com.example.app  device: iPhone 17 (26.0)\nqualified — a runner failure this bundle survived · 0 failed, 1 of 1 matched\nresult: \(path)")
+        #expect(!status.isError)
+    }
+
     @Test
     func row8ARefusedWalkCarriesTheFirstFailuresReasonAndIsAnError() async throws {
         let fixture = try Fixture()
@@ -416,7 +429,7 @@ private extension WalkStatusReaderTests {
         }
 
         /// Writes `name` (`s.result.json` unless given) and returns its path.
-        func writeResult(verdict: WalkResult.Verdict, counts: WalkResult.Counts, failures: [WalkResult.Failure] = [], named name: String = "s.result.json") throws -> String {
+        func writeResult(verdict: WalkResult.Verdict, counts: WalkResult.Counts, failures: [WalkResult.Failure] = [], qualifications: [String] = [], named name: String = "s.result.json") throws -> String {
             let result = WalkResult(
                 schemaVersion: 1,
                 tool: "walk",
@@ -429,7 +442,8 @@ private extension WalkStatusReaderTests {
                 counts: counts,
                 steps: [],
                 failures: failures,
-                truncated: WalkResult.Truncated(omittedSteps: 0)
+                truncated: WalkResult.Truncated(omittedSteps: 0),
+                qualifications: qualifications
             )
             let url = progressDirectory.appendingPathComponent(name)
             try WalkResult.encoder().encode(result).write(to: url)

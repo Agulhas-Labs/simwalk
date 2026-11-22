@@ -74,19 +74,20 @@ struct ContextSavingTests {
     /// An answer longer than what it stood in for saved nothing; it did not save a negative amount, and the line says so in words rather than in a minus sign.
     @Test
     func ananswerThatCostMoreThanItReplacedSavesNothingRatherThanANegativeAmount() {
-        let saving = ContextSaving(screenshotTokens: [], treeBytes: 400, servedBytes: 40000)
+        let saving = ContextSaving(screenshotTokens: [100], treeBytes: 400, servedBytes: 40000)
 
         #expect(saving.savedTokens == 0)
         #expect(saving.line.hasPrefix("no tokens saved — "))
     }
 
-    /// Both halves of the arithmetic ride beside the figure: the pixel cap for the screenshots, the byte ratio for the trees, and what the answer itself cost.
+    /// Both halves of the arithmetic ride beside the figure: the pixel cap for the screenshots, the byte ratio for what the answer cost — and the tree, which is not priced, is not in it however large (SimWalk#293 F2).
     @Test
-    func thecontextLineCarriesTheArithmeticForEachHalf() {
+    func thecontextLineCarriesTheArithmeticForEachHalfAndNeverPricesTheTree() {
         let saving = ContextSaving(screenshotTokens: [4070, 4070, 4070], treeBytes: 43890, servedBytes: 718)
 
-        #expect(saving.replacedTokens == 3 * 4070 + 43890 / 4)
-        #expect(saving.line == "~23k tokens saved — 3 screenshots (~4.1k each at the 2576 px cap) and 43 kB of accessibility trees at 4 bytes a token, against 718 B served. A floor: only what this answer stood in for is counted.")
+        #expect(saving.replacedTokens == 3 * 4070)
+        #expect(saving.savedTokens == 3 * 4070 - 718 / 4)
+        #expect(saving.line == "~12k tokens saved — 3 screenshots (~4.1k each at the 2576 px cap), against 718 B served at 4 bytes a token. A floor: only what this answer stood in for is counted.")
     }
 
     /// A weighing with no tree — every `bundle screen` answer — still converts its served bytes to tokens, so the byte ratio rides beside the served figure instead of vanishing with the trees clause that used to carry it (SimWalk#20 round 3, finding 5).
@@ -104,8 +105,6 @@ struct ContextSavingTests {
         let saving = ContextSaving(screenshotTokens: [4070, 120], treeBytes: 0, servedBytes: 100)
 
         #expect(saving.line.contains("2 screenshots (~4.2k in total at the 2576 px cap)"))
-        // Nothing that weighed nothing is printed as a heading over nothing.
-        #expect(!saving.line.contains("accessibility trees"))
     }
 
     /// A bundle on disk is weighed as a reader would find it: every screenshot by its pixels, every tree by its bytes.
@@ -121,6 +120,39 @@ struct ContextSavingTests {
 
         #expect(saving.screenshotTokens == [4070, 4070])
         #expect(saving.treeBytes > 0)
+    }
+
+    /// A bundle with trees and screenshots saves exactly its screenshots' tokens less what was served: the trees are recorded, never priced (SimWalk#293 F2).
+    @Test
+    func abundleWithTreesAndScreenshotsSavesExactlyTheScreenshotsLessWhatWasServed() throws {
+        let directory = try TemporaryDirectory()
+        let bundle = try CaptureBundleFixture.write(in: directory, captures: [
+            CaptureBundleFixture.Capture(screenID: "progress", state: Walkbook.CaptureState(theme: .light), tree: CaptureBundleFixture.plainScreen()),
+            CaptureBundleFixture.Capture(screenID: "progress", state: Walkbook.CaptureState(theme: .dark), tree: CaptureBundleFixture.plainScreen()),
+        ])
+
+        let saving = try #require(ContextSaving.weighing(bundle, servedBytes: 1200))
+
+        #expect(saving.treeBytes > 0)
+        #expect(saving.savedTokens == 2 * 4070 - 1200 / 4)
+        #expect(!saving.line.contains("accessibility"))
+    }
+
+    /// Each weighed screenshot carries an identity of its bytes — 12 hex digits — alike for identical pixels and apart for different ones, one per screenshot in the order of the tokens.
+    @Test
+    func eachWeighedScreenshotCarriesAnIdentityOfItsBytes() throws {
+        let directory = try TemporaryDirectory()
+        let bundle = try CaptureBundleFixture.write(in: directory, captures: [
+            CaptureBundleFixture.Capture(screenID: "progress", state: Walkbook.CaptureState(theme: .light), tree: CaptureBundleFixture.plainScreen()),
+            CaptureBundleFixture.Capture(screenID: "progress", state: Walkbook.CaptureState(theme: .dark), tree: CaptureBundleFixture.plainScreen()),
+        ])
+
+        let saving = try #require(ContextSaving.weighing(bundle))
+
+        #expect(saving.screenshotIdentities.count == saving.screenshotTokens.count)
+        #expect(saving.screenshotIdentities.allSatisfy { $0.count == 12 && $0.allSatisfy(\.isHexDigit) })
+        let first = try #require(bundle.manifest.screens.first?.captures.first)
+        #expect(ContextSaving.weighing(bundle, capture: first)?.screenshotIdentities == [saving.screenshotIdentities[0]])
     }
 
     /// `bundle screen` reads one capture, not a bundle's worth, and pricing it against every screenshot the bundle holds would claim a saving on captures it never opened — and its tree is left out entirely, not merely divided down, because a reader answering a text question opens the screenshot or reads the tree, never both (SimWalk#20 round 2, finding 2).
@@ -165,6 +197,6 @@ struct ContextSavingTests {
     func alogsTotalsPriceAcallExactlyAsItsAnswerDid() {
         let saving = ContextSaving(screenshotTokens: [4070, 4070, 4070], treeBytes: 43890, servedBytes: 718)
 
-        #expect(ContextSaving.saved(imageTokens: 3 * 4070, treeBytes: 43890, servedBytes: 718) == saving.savedTokens)
+        #expect(ContextSaving.saved(imageTokens: 3 * 4070, servedBytes: 718) == saving.savedTokens)
     }
 }

@@ -3,8 +3,10 @@
 //
 
 import ArgumentParser
+import Fieldwork
 import Foundation
 import SimWalkCore
+import SimWalkDriver
 import SimWalkMCP
 
 /// `simwalk mcp` — the MCP stdio server, for a coding agent rather than a person.
@@ -37,8 +39,19 @@ struct MCPCommand: AsyncParsableCommand {
             // and a call recorded with no session is simply a call no status line claims.
             session: ProcessInfo.processInfo.environment["CLAUDE_CODE_SESSION_ID"],
             answering: { try MCPToolRunner.answer(tool: $0, arguments: $1, cancellation: $2, started: $3) },
-            environment: ProcessInfo.processInfo.environment
+            environment: ProcessInfo.processInfo.environment,
+            guidePaths: Self.guidePaths(environment: ProcessInfo.processInfo.environment)
         )
         await server.run()
+    }
+
+    /// Where the guide and `Docs/Reference.md` are for this process, resolved once: the installed rule, then the tree beside a packaged binary or the checkout a development build was compiled from.
+    private static func guidePaths(environment: [String: String]) -> MCPGuidePaths {
+        MCPGuidePaths.resolve(
+            rule: AgentPaths.claudeRule(named: FieldworkTool.simwalk.installedRuleName, environment: environment),
+            shippedDirectory: ShippedRunner.directory(besideExecutable: URL(fileURLWithPath: ExecutablePath.current)),
+            checkout: RunnerProject.compiledCheckout,
+            isReadable: { FileManager.default.isReadableFile(atPath: $0) }
+        )
     }
 }

@@ -136,7 +136,7 @@ public struct BundleAuditSummary {
     private var labelSections: [LabelAuditSection] {
         report.rules.compactMap { name in
             guard let rule = name.labelRule, let result = report.labelResults[name] else { return nil }
-            return LabelAuditSection(name: name, noun: type(of: rule).findingNoun, examinedNoun: type(of: rule).examinedNoun, clause: type(of: rule).findingClause, result: result, captureCount: report.captureCount, notApplicable: report.notApplicable[name], bundlePath: bundle.url.path, screenPositions: screenPositions)
+            return LabelAuditSection(name: name, noun: type(of: rule).findingNoun, examinedNoun: type(of: rule).examinedNoun, examinedAdjective: type(of: rule).examinedAdjective, examinedScope: type(of: rule).examinedScope, clause: type(of: rule).findingClause, result: result, captureCount: report.captureCount, notApplicable: report.notApplicable[name], bundlePath: bundle.url.path, screenPositions: screenPositions)
         }
     }
 

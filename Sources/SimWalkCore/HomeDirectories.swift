@@ -8,7 +8,7 @@ import Foundation
 #if os(macOS)
 /// Where the user's home, this tool's home and sift's home are, resolved from an injected environment so a test harness can run the whole install inside a scratch directory.
 ///
-/// **This is the one place `homeDirectoryForCurrentUser` is read**, because it ignores `HOME`: every path built from the user's home goes through here, and the machine-wide coordination state through ``account()``. A relative or empty variable is ignored, as sift ignores a relative `SIFT_HOME`.
+/// **This is the one place the account's home is read**, from the password database: `homeDirectoryForCurrentUser` ignores `HOME` but follows `CFFIXED_USER_HOME`, so it is not the account's under a harness that sets that. Every path built from the user's home goes through here, and the machine-wide coordination state through ``account()``. A relative or empty variable is ignored, as sift ignores a relative `SIFT_HOME`.
 public struct HomeDirectories {
     /// The variable that moves `~/.simwalk`.
     public static var simwalkVariable: String {
@@ -25,17 +25,25 @@ public struct HomeDirectories {
         if let path = absolute(environment["CFFIXED_USER_HOME"]) ?? absolute(environment["HOME"]) {
             return URL(fileURLWithPath: path, isDirectory: true)
         }
+        return accountHome()
+    }
+
+    /// The account's own home directory, from the password database, which no environment variable moves (`CFFIXED_USER_HOME` included).
+    public static func accountHome() -> URL {
+        if let entry = getpwuid(getuid()), let directory = entry.pointee.pw_dir {
+            return URL(fileURLWithPath: String(cString: directory), isDirectory: true)
+        }
         return FileManager.default.homeDirectoryForCurrentUser
     }
 
-    /// `<account home>/.simwalk`, where state that coordinates processes across the machine lives (leases, live sessions, the Mirroring lock): no environment variable moves it, so a process under a scratch `HOME` still sees the user's device leases.
+    /// `<account home>/.simwalk`, where state that coordinates processes across the machine lives (leases, live sessions, the Mirroring lock): no environment variable moves it, `CFFIXED_USER_HOME` included, so a process under a scratch home still sees the user's device leases.
     public static func account() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".simwalk", isDirectory: true)
+        accountHome().appendingPathComponent(".simwalk", isDirectory: true)
     }
 
     /// `<account home>/Library/Logs/DiagnosticReports`, where the Mac writes its crash reports, a simulator app's among them (SimWalk#243): the system writes them there whatever `HOME` says.
     public static func diagnosticReports() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DiagnosticReports", isDirectory: true)
+        accountHome().appendingPathComponent("Library/Logs/DiagnosticReports", isDirectory: true)
     }
 
     /// `SIMWALK_HOME` when it is an absolute path, else `<user home>/.simwalk`.

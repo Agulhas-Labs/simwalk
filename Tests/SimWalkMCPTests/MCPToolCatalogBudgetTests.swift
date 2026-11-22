@@ -8,9 +8,9 @@ import Testing
 
 /// The text `tools/list` spends in every session is held to a budget, so a later addition that grows it fails here rather than waiting for the next measurement (Brief, J13).
 struct MCPToolCatalogBudgetTests {
-    private static let replyBytes = 12000
+    private static let replyBytes = 12900
     private static let toolDescriptionCharacters = 400
-    private static let propertyDescriptionCharacters = 120
+    private static let propertyDescriptionCharacters = 285
 
     private static let clients = ["claude-code-2.1.302-initialize", "cursor-1.0.0-initialize"]
 

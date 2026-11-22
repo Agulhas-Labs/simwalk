@@ -28,6 +28,9 @@ struct UsageCommand: ParsableCommand {
     )
     var since: UsageWindow?
 
+    @Option(name: .long, help: "Only the calls one Claude Code session made, by its session id: the figures the status line prints for that session. Composes with --since; the header names the session.")
+    var session: String?
+
     @Flag(name: .long, help: "Print failure reasons as recorded, and the log's own path in full. Redaction — the default — covers only those two; tool names and an unrecognised failure kind's raw value are never pseudonymised.")
     var unredact = false
 
@@ -49,7 +52,7 @@ struct UsageCommand: ParsableCommand {
             // `Redactor.standard(saltFile:)` is built here but not called here — `render`'s `redactor`
             // parameter is an autoclosure, so this expression, salt file included, only runs if a reason
             // is actually about to be printed redacted.
-            try UsageReport.render(fileURL: fileURL, window: since, redacting: !unredact, redactor: unredact ? nil : Redactor.standard(saltFile: resolvedSaltFile))
+            try UsageReport.render(fileURL: fileURL, window: since, session: session, redacting: !unredact, redactor: unredact ? nil : Redactor.standard(saltFile: resolvedSaltFile))
         }
     }
 

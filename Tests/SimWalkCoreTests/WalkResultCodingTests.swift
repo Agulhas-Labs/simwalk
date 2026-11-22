@@ -81,6 +81,21 @@ struct WalkResultCodingTests {
         #expect(written == published)
     }
 
+    /// The walk-level qualifications are written only when there are some, and a file written before the field decodes as none.
+    @Test
+    func qualificationsAreEncodedOnlyWhenNonEmptyAndAMissingKeyDecodesToNone() throws {
+        var result = Self.exampleValue()
+        let bare = try #require(JSONSerialization.jsonObject(with: WalkResult.encoder().encode(result)) as? NSDictionary)
+        #expect(bare["qualifications"] == nil)
+        #expect(try WalkResult.decoder().decode(WalkResult.self, from: Data(Self.specExample.utf8)).qualifications == [])
+
+        result.qualifications = ["a runner failure this bundle survived"]
+        let encoded = try WalkResult.encoder().encode(result)
+        let written = try #require(JSONSerialization.jsonObject(with: encoded) as? NSDictionary)
+        #expect(written["qualifications"] as? [String] == ["a runner failure this bundle survived"])
+        #expect(try WalkResult.decoder().decode(WalkResult.self, from: encoded) == result)
+    }
+
     /// What the builder writes for a passed screen and a wrong one, byte for byte: compact, sorted keys, unescaped slashes, `null` inside `actual`.
     @Test
     func aBuiltResultEncodesToTheGolden() throws {

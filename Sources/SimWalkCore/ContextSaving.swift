@@ -2,25 +2,32 @@
 // Copyright © Agulhas Labs
 //
 
+import CryptoKit
 import Foundation
 
 /// What one answer stood in for, priced in the context it kept out of the window.
 ///
-/// The claim a resolved observation makes is that a reader did not have to open the raw material, so the honest way to state its worth is to weigh the raw material it stood in for and subtract what the answer itself cost. Both halves are measured — the screenshots by their pixels (``ImageTokenEstimate``), the accessibility trees by their bytes (``TokenEstimate``), the answer by its own bytes — and neither is modelled.
+/// The claim a resolved observation makes is that a reader did not have to open the raw material, so the honest way to state its worth is to weigh the raw material it stood in for and subtract what the answer itself cost. Both halves are measured — the screenshots by their pixels (``ImageTokenEstimate``) and the answer by its own bytes (``TokenEstimate``) — and neither is modelled. **The accessibility tree is not priced**: no reader opens a raw tree instead of an answer, the alternative is the screenshot, so a tree's bytes were never reading avoided. Their size is still recorded (`treeBytes`) as a fact about the capture.
 ///
 /// **It is a floor, and every rendering says so.** Only what *this* answer stood in for is counted: not the walk that produced the bundle, not the reading a caller would have done around it, and not any answer that weighed nothing. Where nothing could be weighed there is no value at all rather than a saving of zero — an absence and a zero are different claims, and only one of them is true of an answer that stands in for nothing.
 public struct ContextSaving: Equatable, Sendable {
     /// What each screenshot this answer stands in for would have cost to look at.
     public let screenshotTokens: [Int]
 
-    /// The bytes of accessibility tree this answer stands in for.
+    /// What each of those screenshots looks like to a reader, one per entry of ``screenshotTokens`` and in the same order.
+    ///
+    /// The first 12 hex digits of the SHA-256 of the screenshot file's bytes, so identical pixels are the same thing to look at whichever bundle or re-walk they sit in. Empty where there is no file to identify (a live screen), and then nothing is deduplicated.
+    public let screenshotIdentities: [String]
+
+    /// The bytes of accessibility tree this answer sits over, recorded and never priced.
     public let treeBytes: Int
 
     /// The bytes of the answer itself — what was spent instead.
     public let servedBytes: Int
 
-    public init(screenshotTokens: [Int], treeBytes: Int, servedBytes: Int) {
+    public init(screenshotTokens: [Int], screenshotIdentities: [String] = [], treeBytes: Int, servedBytes: Int) {
         self.screenshotTokens = screenshotTokens
+        self.screenshotIdentities = screenshotIdentities.count == screenshotTokens.count ? screenshotIdentities : []
         self.treeBytes = treeBytes
         self.servedBytes = max(0, servedBytes)
     }
@@ -30,34 +37,37 @@ public struct ContextSaving: Equatable, Sendable {
     /// An artefact that cannot be read — a screenshot that is not a PNG this understands, a tree whose size the filesystem will not report — is left out rather than guessed at, which keeps the figure a floor by the same rule that chose every constant behind it. A bundle holding no readable artefact at all weighs nothing, and an answer over it says nothing about a saving.
     public static func weighing(_ bundle: CaptureBundle, servedBytes: Int = 0, fileManager: FileManager = .default) -> ContextSaving? {
         var screenshots: [Int] = []
+        var identities: [String] = []
         var trees = 0
         for capture in bundle.manifest.screens.flatMap(\.captures) {
             let weighed = Self.weighed(capture, in: bundle, fileManager: fileManager)
-            if let tokens = weighed.screenshotTokens {
-                screenshots.append(tokens)
+            if let screenshot = weighed.screenshot {
+                screenshots.append(screenshot.tokens)
+                identities.append(screenshot.identity)
             }
             trees += weighed.treeBytes
         }
-        guard !screenshots.isEmpty || trees > 0 else { return nil }
-        return ContextSaving(screenshotTokens: screenshots, treeBytes: trees, servedBytes: servedBytes)
+        guard !screenshots.isEmpty else { return nil }
+        return ContextSaving(screenshotTokens: screenshots, screenshotIdentities: identities, treeBytes: trees, servedBytes: servedBytes)
     }
 
     /// Weighs one capture — the screenshot a single-screen answer stands in for, never its tree — or answers `nil` when the screenshot could not be read.
     ///
     /// `bundle screen` reads one capture rather than a bundle's worth, and pricing it against every screenshot the bundle holds would claim a saving on captures it never opened (SimWalk#20) — the same floor rule as the whole-bundle weighing above, at the grain the caller actually asked about. **The tree is left out of the arithmetic entirely, not merely out of the bundle-wide total**: a reader answering a text question opens the screenshot or reads the tree, never both, so charging both would claim a saving nobody would actually have taken (SimWalk#20 round 2, §2).
     public static func weighing(_ bundle: CaptureBundle, capture: CaptureManifest.StateCapture, servedBytes: Int = 0, fileManager: FileManager = .default) -> ContextSaving? {
-        guard let tokens = weighed(capture, in: bundle, fileManager: fileManager).screenshotTokens else { return nil }
-        return ContextSaving(screenshotTokens: [tokens], treeBytes: 0, servedBytes: servedBytes)
+        let weighed = weighed(capture, in: bundle, fileManager: fileManager)
+        guard let screenshot = weighed.screenshot else { return nil }
+        return ContextSaving(screenshotTokens: [screenshot.tokens], screenshotIdentities: [screenshot.identity], treeBytes: 0, servedBytes: servedBytes)
     }
 
     /// The same weighing priced against an answer of `bytes`.
     public func served(_ bytes: Int) -> ContextSaving {
-        ContextSaving(screenshotTokens: screenshotTokens, treeBytes: treeBytes, servedBytes: bytes)
+        ContextSaving(screenshotTokens: screenshotTokens, screenshotIdentities: screenshotIdentities, treeBytes: treeBytes, servedBytes: bytes)
     }
 
     /// What the material this answer replaced would have cost.
     public var replacedTokens: Int {
-        screenshotTokens.reduce(0, +) + TokenEstimate.tokens(forBytes: treeBytes)
+        screenshotTokens.reduce(0, +)
     }
 
     /// What the answer cost instead.
@@ -67,28 +77,38 @@ public struct ContextSaving: Equatable, Sendable {
 
     /// The saving, which is never negative: an answer that cost more than what it stood in for saved nothing, and saying so is not the same as saying it cost the difference.
     public var savedTokens: Int {
-        Self.saved(imageTokens: screenshotTokens.reduce(0, +), treeBytes: treeBytes, servedBytes: servedBytes)
+        Self.saved(imageTokens: screenshotTokens.reduce(0, +), servedBytes: servedBytes)
     }
 
-    /// The same subtraction from totals alone — what a usage log can reconstruct, having recorded what each call weighed but not each screenshot separately.
+    /// The same subtraction from totals alone — what a usage log can reconstruct, having recorded what each call weighed.
     ///
     /// One generator for the arithmetic, so a line's own answer and the report over a month of them cannot come to price the same call differently.
-    public static func saved(imageTokens: Int, treeBytes: Int, servedBytes: Int) -> Int {
-        max(0, imageTokens + TokenEstimate.tokens(forBytes: treeBytes) - TokenEstimate.tokens(forBytes: servedBytes))
+    public static func saved(imageTokens: Int, servedBytes: Int) -> Int {
+        max(0, imageTokens - TokenEstimate.tokens(forBytes: servedBytes))
     }
 
     /// The last line of every answer that stood in for something: the figure, the arithmetic behind each half of it, and why it is a floor.
+    ///
+    /// It states what *this* answer stood in for; the totals over a log or a session count each screenshot once.
     public var line: String {
         "\(headline) — \(replaced), against \(served). A floor: only what this answer stood in for is counted."
     }
 }
 
 private extension ContextSaving {
-    /// One capture's screenshot tokens (`nil` when its screenshot cannot be read as a PNG this understands) and tree bytes (`0` when its tree's size cannot be read) — what both weighings above are built from, so a bundle-wide saving and a one-capture saving can never measure the same file two different ways.
-    static func weighed(_ capture: CaptureManifest.StateCapture, in bundle: CaptureBundle, fileManager: FileManager) -> (screenshotTokens: Int?, treeBytes: Int) {
-        let screenshotTokens = PNGSize(contentsOf: bundle.screenshotURL(for: capture)).map(ImageTokenEstimate.tokens(of:))
+    /// One capture's screenshot tokens and identity (`nil` when its screenshot cannot be read as a PNG this understands) and tree bytes (`0` when its tree's size cannot be read) — what both weighings above are built from, so a bundle-wide saving and a one-capture saving can never measure the same file two different ways.
+    static func weighed(_ capture: CaptureManifest.StateCapture, in bundle: CaptureBundle, fileManager: FileManager) -> (screenshot: (tokens: Int, identity: String)?, treeBytes: Int) {
+        let screenshotURL = bundle.screenshotURL(for: capture)
+        let screenshotTokens = PNGSize(contentsOf: screenshotURL).map(ImageTokenEstimate.tokens(of:))
+        let screenshot = screenshotTokens.flatMap { tokens in Self.identity(ofFileAt: screenshotURL).map { (tokens: tokens, identity: $0) } }
         let attributes = try? fileManager.attributesOfItem(atPath: bundle.axTreeURL(for: capture).path)
-        return (screenshotTokens, attributes?[.size] as? Int ?? 0)
+        return (screenshot, attributes?[.size] as? Int ?? 0)
+    }
+
+    /// The first 12 hex digits of the SHA-256 of the file's bytes.
+    static func identity(ofFileAt url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        return SHA256.hash(data: data).prefix(6).map { String(format: "%02x", $0) }.joined()
     }
 
     /// The figure the line leads with, or the honest absence of one.
@@ -96,9 +116,9 @@ private extension ContextSaving {
         savedTokens > 0 ? "\(TokenEstimate.short(savedTokens)) saved" : "no tokens saved"
     }
 
-    /// What was weighed, each half with the constant it was weighed by — and nothing at all for a half that weighed nothing.
+    /// What was weighed, with the constant it was weighed by.
     var replaced: String {
-        [screenshotsClause, treesClause].compactMap(\.self).joined(separator: " and ")
+        screenshotsClause ?? "0 screenshots"
     }
 
     var screenshotsClause: String? {
@@ -115,15 +135,10 @@ private extension ContextSaving {
         return "\(screenshotTokens.count) screenshots (\(TokenEstimate.magnitude(first)) each \(cap))"
     }
 
-    var treesClause: String? {
-        guard treeBytes > 0 else { return nil }
-        return TokenEstimate.basis(bytes: treeBytes, of: "accessibility trees")
-    }
-
-    /// The served figure, which is converted at the byte ratio too — so the ratio is stated beside it whenever the trees clause, which states it for both, is absent: a one-screen answer weighs no tree, and its served kB would otherwise become tokens at a ratio the line never gave.
+    /// The served figure, which is converted at the byte ratio too — so the ratio is stated beside it.
     var served: String {
         let bytes = ByteSize.short(servedBytes)
-        guard treesClause == nil, servedBytes > 0 else { return "\(bytes) served" }
+        guard servedBytes > 0 else { return "\(bytes) served" }
         return "\(bytes) served at \(TokenEstimate.bytesPerToken) bytes a token"
     }
 }

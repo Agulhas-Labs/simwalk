@@ -29,7 +29,8 @@ Read this when:
 - **If the tools aren't there**: no MCP tools, or no binary.
 
 Walkbook authoring detail: if the repo keeps its walkbooks somewhere with a README, read it first; then SimWalk's
-Docs/Reference.md ("Notes for writing walkbooks"). **Write `expect: "<identifier>"` on every screen
+Docs/Reference.md ("Notes for writing walkbooks"), installed beside the binary at
+`<prefix>/share/simwalk/Docs/Reference.md` (Homebrew: `$(brew --prefix)/share/simwalk/Docs/Reference.md`). **Write `expect: "<identifier>"` on every screen
 whose container carries an accessibility identifier**, or a route that left the app still records
 `captured`. No identifier: omit `expect`; never copy the title.
 
@@ -39,9 +40,10 @@ whose container carries an accessibility identifier**, or a route that left the 
 `output` must be a new or empty directory. **`dryRun: true` checks every screen's route still resolves, in
 seconds per screen, capturing nothing**: run it after app changes, before a full walk.
 
-**Text size: give a state `"dynamicTypeSize": "UICTContentSizeCategoryAccessibilityXL"`** (AX3) and the walk
+**Text size: give a state `"dynamicTypeSize": "UICTContentSizeCategoryAccessibilityXL"`** (AX3, the 200% minimum
+the large-type check needs; for "the largest text size" use `"UICTContentSizeCategoryAccessibilityXXXL"`, AX5) and the walk
 captures its screens at that size; `bundle audit --only largeTypeOverflow --only truncatedText` then checks
-the bundle for text past the screen's edge, overlapping or cut short. Use the state, not a wrapper around
+the bundle for text past the screen's edge, overlapping or cut short. An audit judges only the captured viewport: a `qualified` answer saying `off screen, not judged` means scroll to the rest (a `scrollTo` state per section) before calling the screen clean. Use the state, not a wrapper around
 `simctl ui … content_size`: a state is part of the walkbook, so the next walk reproduces it.
 
 While it runs, a walk writes `~/.simwalk/progress/<session>.json` (phase, step, timings); at the end, a
@@ -60,9 +62,7 @@ is cut off. **Beside other sessions, take a lease:**
 process (not the shell that ran the acquire) or `--ttl` (30m), whichever ends first, so acquire and walk may be separate calls;
 `lease list` names that process, which for Claude Code is its version number (`pid 61881 (2.1.311)`).
 
-**Driving the binary for anything but real use (a test, a review, a probe of a refusal): set
-`SIMWALK_USAGE_LOG=<scratch>/usage.jsonl`**, so the calls land in a log you own. **In a repo with
-walkbooks, driving the simulator by hand** (`simctl io … screenshot`, `simctl ui … appearance`, a third-party simulator CLI's `tap`)
+**In a repo with walkbooks (in `Walkbooks/` or `Docs/Walkbooks/`), driving the simulator by hand** (`simctl io … screenshot`, `simctl ui … appearance`, a third-party simulator CLI's `tap`)
 **is refused once per 30 minutes, never on a context's first such call** (that goes through, and so does its
 re-run): the second, different call is refused, naming the `simwalk walk` that captures every screen instead;
 for a one-off capture, run the simulator command it names again and it goes through. **For AX probing, read the tree instead of a
@@ -111,6 +111,6 @@ nothing — read again. **Save before
 
 The CLI answers identically: `simwalk validate <walkbook.json>`,
 `simwalk walk <walkbook.json> --output <dir.simwalk> [--dry-run] [--lease <token>]`,
-`simwalk bundle inspect|screen|audit|diff|oracle|coverage` (full listing in SimWalk's Docs/Reference.md).
+`simwalk bundle inspect|screen|audit|diff|oracle|coverage` (full listing in Docs/Reference.md, above).
 If the binary is missing too, that is not a problem to report or fix mid-task. Run `simwalk uninstall-hook`
 before deleting the binary.

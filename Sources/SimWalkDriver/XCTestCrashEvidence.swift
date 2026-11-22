@@ -16,9 +16,9 @@ public struct XCTestCrashEvidence: Sendable {
         self.directory = directory
     }
 
-    /// `~/Library/Logs/DiagnosticReports`, where macOS files a crash report, a simulator's included.
+    /// The account's `~/Library/Logs/DiagnosticReports` (``HomeDirectories/diagnosticReports()``), where macOS files a crash report, a simulator's included.
     public static var defaultDirectory: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DiagnosticReports", isDirectory: true)
+        HomeDirectories.diagnosticReports()
     }
 
     /// What `runnerFailure` comes to: classified only when it is a test failure (``RunnerError/isTestFailure``) and the run's result bundle is at `resultBundlePath`; ``XCTestCrashBlame/notApplicable`` otherwise.

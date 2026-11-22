@@ -23,6 +23,7 @@ public struct WalkResultBuilder {
         bundleURL: URL,
         timings: PhaseTimings,
         logPath: String?,
+        qualifications: [String] = [],
         verbose: Bool = false,
         byteLimit: Int = 16 * 1024
     ) -> WalkResult {
@@ -65,7 +66,8 @@ public struct WalkResultBuilder {
             counts: WalkResult.Counts(planned: matches.planned, passed: matches.passed, failed: matches.failed),
             steps: steps,
             failures: failures,
-            truncated: WalkResult.Truncated(omittedSteps: 0)
+            truncated: WalkResult.Truncated(omittedSteps: 0),
+            qualifications: qualifications
         )
         return verbose ? full : Self.fitting(full, within: byteLimit)
     }

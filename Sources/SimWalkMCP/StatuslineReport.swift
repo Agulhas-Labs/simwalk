@@ -33,7 +33,9 @@ public struct StatuslineReport {
     /// **The one exception to silence is a session that could have walked and has not** (SimWalk#12): where `workingDirectory` is served by a walkbook, no calls reads `0 walks · walkbook here`, because going around the tool is otherwise invisible. Checked with ``RepositoryWalkbooks/exist(from:)``, the same "loads as a walkbook" test the hook offers by (SimWalk#37 item 4) — a `*.json` that does not load is not offered by either.
     public func segment(transcriptPath: String, workingDirectory: String? = nil) -> String? {
         guard !StatuslineVisibility(cacheDirectory: cacheDirectory).isHidden else { return nil }
-        let (tally, usage) = measure(transcriptPath: transcriptPath)
+        let (transcriptTally, usage) = measure(transcriptPath: transcriptPath)
+        // The session's own rows in the usage log are the one source for the count, the saving, the failures and the refusals, so this line and `simwalk usage --session` print the same figures. The transcript's count stands in only for a session with no tagged row at all — a Claude Code whose shell calls carry no session.
+        let tally = usage.summary.calls > 0 ? SessionTally(calls: usage.summary.calls, walks: usage.summary.walks) : transcriptTally
         guard tally.calls > 0 else {
             guard let workingDirectory, RepositoryWalkbooks.exist(from: workingDirectory) else { return nil }
             return "\(SimWalkPaths.binaryName) 0 walks · walkbook here"
@@ -177,8 +179,12 @@ private extension StatuslineReport {
         /// Bumped to 3 when a shell command that merely *names* the binary stopped counting: a cache written before that holds calls the tool never made, and only bytes appended after it are ever scanned — so the wrong ones would sit in the total for the life of the session.
         ///
         /// Bumped to 4 when "refused" came to mean `input-refused` alone and "failed" became a count of its own: a cache written before that holds every failed call under `refusals`, so a session that crossed the deploy would go on showing three runner failures as "3 refused".
+        ///
+        /// Bumped to 5 when a screenshot came to be counted once and the accessibility tree stopped being priced: a cache written before that holds a saving counted under the old rule, and only appended lines are ever scanned.
+        ///
+        /// Bumped to 6 when the saving came to be computed once over the ledger's totals, every served byte charged: a cache written before that holds a sum of per-line savings, which a repeat read's bytes never reduced.
         static var currentVersion: Int {
-            4
+            6
         }
 
         var version = currentVersion

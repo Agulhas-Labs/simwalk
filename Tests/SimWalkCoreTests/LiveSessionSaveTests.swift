@@ -140,11 +140,26 @@ struct LiveSessionSaveTests {
         #expect(!FileManager.default.fileExists(atPath: into.path))
     }
 
-    /// A walkbook in a directory that does not exist is refused as not writable, naming the walkbook — not the lock file beside it that could not be made first.
+    /// A walkbook in a directory that does not exist is created with it, as `--into` says it is "created when it does not exist" (SimWalk#293).
     @Test
-    func aWalkbookInAMissingDirectoryIsRefusedByItsOwnPath() throws {
+    func aWalkbookInAMissingDirectoryIsCreatedWithItsDirectory() throws {
         let fixture = try Fixture(state: nil)
-        let into = fixture.directory.url.appendingPathComponent("missing", isDirectory: true).appendingPathComponent("live.walkbook.json")
+        let into = fixture.directory.url.appendingPathComponent("missing/deeper", isDirectory: true).appendingPathComponent("live.walkbook.json")
+
+        _ = try LiveSessionSave(screenID: "detail-live", expect: nil, since: nil).perform(sessionID: "s1", channel: fixture.channel, foundAppearance: .light, into: into)
+
+        let written = try WalkbookLoader.load(contentsOf: into)
+
+        #expect(written.screens.map(\.id) == ["detail-live"])
+    }
+
+    /// A directory that cannot be made (a file stands where it should be) is refused as not writable, naming the walkbook.
+    @Test
+    func aWalkbookWhoseDirectoryCannotBeMadeIsRefusedByItsOwnPath() throws {
+        let fixture = try Fixture(state: nil)
+        let blocker = fixture.directory.url.appendingPathComponent("blocker")
+        try Data().write(to: blocker)
+        let into = blocker.appendingPathComponent("live.walkbook.json")
 
         let error = #expect(throws: LiveSessionSaveError.self) {
             try LiveSessionSave(screenID: "detail-live", expect: nil, since: nil).perform(sessionID: "s1", channel: fixture.channel, foundAppearance: .light, into: into)

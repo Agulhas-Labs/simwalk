@@ -100,6 +100,12 @@ struct StrictKeyDecoding {
         "appearance": "theme",
         "dark": "theme",
         "light": "theme",
+        // Names an agent reached for in a trial (SimWalk#293): `hold` shares no run with `longPress`, so the generic measure pointed it at `scrollTo`.
+        "hold": "longPress",
+        "press": "longPress",
+        "longtap": "longPress",
+        "launcharguments": "arguments",
+        "args": "arguments",
     ]
 
     ///

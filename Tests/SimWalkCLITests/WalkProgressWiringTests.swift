@@ -76,6 +76,30 @@ struct WalkProgressWiringTests {
         #expect(final.app == "com.example.probe")
     }
 
+    /// A walk that survives a runner failure leaves a result file naming it, so a reader of the file alone (`walk_status`) answers as the CLI does.
+    @Test
+    func aSurvivedRunnerFailureIsNamedInTheResultFile() throws {
+        let walk = try Walk(runnerStatus: 65)
+
+        let outcome = try walk.perform(["--app-path", walk.appPath])
+
+        #expect(outcome.survivedRunnerFailure != nil)
+        let result = try WalkResult.decoder().decode(WalkResult.self, from: Data(contentsOf: walk.resultURL))
+        #expect(result.qualifications.contains("a runner failure this bundle survived"))
+    }
+
+    /// A capture holding only chrome qualifies the walk on the CLI's verdict line, so it qualifies the result file too: `walk_status` never answers `ok` for it.
+    @Test
+    func aBundleQualificationIsNamedInTheResultFile() throws {
+        let walk = try Walk(chromeOnlyCapture: true)
+
+        let outcome = try walk.perform(["--app-path", walk.appPath])
+
+        #expect(outcome.survivedRunnerFailure == nil)
+        let result = try WalkResult.decoder().decode(WalkResult.self, from: Data(contentsOf: walk.resultURL))
+        #expect(result.qualifications == ["1 capture holding the app's chrome and nothing else"])
+    }
+
     /// Each segment is timed on the host's clock alone: boot, install, the runner's build and its walk come out distinct, in the progress file's summary and in the result's timings both.
     @Test
     func eachSegmentIsTimedApartInTheSummaryAndTheResult() throws {
@@ -485,21 +509,23 @@ extension WalkProgressWiringTests {
         private let staged: URL
         private let appInstalled: Bool
         private let buildFails: Bool
+        private let runnerStatus: Int32
         private(set) var runnerEnvironments: [[String: String]] = []
         /// Held for the length of the test, so its backstop never stands in for how a run ended.
         private var telemetry: WalkTelemetry?
 
-        init(appInstalled: Bool = true, buildFails: Bool = false, twoScreens: Bool = false) throws {
+        init(appInstalled: Bool = true, buildFails: Bool = false, runnerStatus: Int32 = 0, twoScreens: Bool = false, chromeOnlyCapture: Bool = false) throws {
             directory = try TemporaryDirectory()
             self.appInstalled = appInstalled
             self.buildFails = buildFails
+            self.runnerStatus = runnerStatus
             appPath = try Self.fakeApp(in: directory)
             let book = directory.url.appendingPathComponent("book.json")
             try Data((twoScreens ? Self.twoScreenJSON : Self.oneScreenJSON).utf8).write(to: book)
             walkbookPath = book.path
             staged = try CaptureBundleFixture.write(
                 in: directory,
-                captures: [CaptureBundleFixture.Capture(screenID: "progress", state: Walkbook.CaptureState(theme: .light), tree: CaptureBundleFixture.plainScreen())]
+                captures: [CaptureBundleFixture.Capture(screenID: "progress", state: Walkbook.CaptureState(theme: .light), tree: CaptureBundleFixture.plainScreen(), hasContent: !chromeOnlyCapture)]
             ).url
             output = directory.url.appendingPathComponent("walked.\(CaptureBundleLayout.directoryExtension)")
             progressURL = ProgressLocation.progressURL(session: "wiring", in: directory.url)
@@ -542,7 +568,7 @@ extension WalkProgressWiringTests {
         }
 
         private func walk(_ command: WalkCommand, telemetry: WalkTelemetry?, animationsLibrary: WalkCommand.AnimationsLibrary? = nil) throws -> WalkCommand.Outcome {
-            let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: 0, writes: (staged, output))
+            let script = WalkCommandTests.WalkScript(appPath: appPath, runnerStatus: runnerStatus, writes: (staged, output))
             return try command.performWalk(shell: shell(script), pause: { _ in }, now: script.now, nonce: { "the-walks-own-nonce" }, runner: { Self.runner }, builds: builds, leases: leases, telemetry: telemetry, animationsLibrary: animationsLibrary)
         }
 

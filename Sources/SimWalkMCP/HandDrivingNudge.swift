@@ -33,7 +33,7 @@ public struct HandDrivingNudge {
         var lines = ["\(SimWalkPaths.binaryName): a walkbook here already drives this app, with a screenshot and an accessibility tree of every state:"]
         lines += shown.map { "  \(SimWalkPaths.binaryName) walk \($0.path)   (\(price($0)))" }
         if walkbooks.count > shown.count {
-            lines.append("  … and \(walkbooks.count - shown.count) more in \(RepositoryWalkbooks.directory)/")
+            lines.append("  … and \(walkbooks.count - shown.count) more in \(RepositoryWalkbooks.directories.map { "\($0)/" }.joined(separator: " or "))")
         }
         let reRun = letThrough.isEmpty
             ? "re-run the identical call: it goes through."
@@ -99,16 +99,26 @@ private extension HandDrivingNudge {
         var variables = variables
         var driving: [String] = []
         for words in TranscriptScan.commands(in: command) {
-            if words.allSatisfy(TranscriptScan.isAssignment) {
-                for word in words {
-                    let equals = word.firstIndex(of: "=") ?? word.endIndex
-                    variables[String(word[..<equals])] = expanding(String(word[word.index(after: equals)...]), with: variables)
-                }
+            if setVariables(words, in: &variables) {
                 continue
             }
             driving += drivingWords(words, variables: variables)
         }
         return driving
+    }
+}
+
+/// The variable handling ``TranscriptScan/invocations(in:)`` shares with the nudge (SimWalk#293), so it is not private to this file's helpers.
+extension HandDrivingNudge {
+    /// Whether `words` is a command that only sets variables — `NAME=value …`, or `export NAME=value …` — and if so, records them in `variables`, each value spelled out with the names set before it.
+    static func setVariables(_ words: [String], in variables: inout [String: String]) -> Bool {
+        let assignments = words.first == "export" ? Array(words.dropFirst()) : words
+        guard !assignments.isEmpty, assignments.allSatisfy(TranscriptScan.isAssignment) else { return false }
+        for word in assignments {
+            let equals = word.firstIndex(of: "=") ?? word.endIndex
+            variables[String(word[..<equals])] = expanding(String(word[word.index(after: equals)...]), with: variables)
+        }
+        return true
     }
 
     /// `word` with each `$NAME` or `${NAME}` in `variables` spelled out, and every other one left as written.
@@ -118,7 +128,9 @@ private extension HandDrivingNudge {
             (match.output.1 ?? match.output.2).flatMap { variables[String($0)] } ?? String(match.output.0)
         }
     }
+}
 
+private extension HandDrivingNudge {
     /// The `xcrun` flags that take a value of their own, so `--sdk iphonesimulator simctl …` still reaches `simctl`.
     static var xcrunFlagsTakingValue: Set<String> {
         ["--sdk", "--toolchain"]

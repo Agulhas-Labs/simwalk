@@ -89,6 +89,7 @@ public struct UsageLog: Sendable {
             imageTokens: saving.map { $0.screenshotTokens.reduce(0, +) },
             treeBytes: saving?.treeBytes,
             answerBytes: saving?.servedBytes,
+            priced: saving.flatMap(Self.priced(by:)),
             kind: kind,
             parallel: parallel,
             step: step.map(Self.oneLine),
@@ -141,6 +142,14 @@ public struct UsageLog: Sendable {
     }
 }
 
+extension UsageLog {
+    /// The `priced` wire value of a saving: `<identity>:<tokens>` per screenshot, or `nil` where the saving carries no identities.
+    static func priced(by saving: ContextSaving) -> [String]? {
+        guard !saving.screenshotIdentities.isEmpty else { return nil }
+        return zip(saving.screenshotIdentities, saving.screenshotTokens).map { "\($0):\($1)" }
+    }
+}
+
 public extension UsageLog {
     /// One recorded call — the line format `~/.simwalk/usage.jsonl` carries, kept as a type so a reader of the log and its writer cannot disagree about the keys.
     ///
@@ -170,6 +179,8 @@ public extension UsageLog {
         public var treeBytes: Int?
         /// The bytes the answer itself cost.
         public var answerBytes: Int?
+        /// The screenshots this answer priced, one `<identity>:<tokens>` per screenshot (see ``ContextSaving/screenshotIdentities``), so a total can count each capture once however many calls priced it; absent where the answer had no file to identify (a live screen) and on every line written before the field existed.
+        public var priced: [String]?
 
         /// Why the call failed, for a failed call whose site is mapped to one; absent for a call that succeeded, and on every line written before this field existed (``UsageFailureKind/inferred(fromErrorText:)`` reads those from ``error`` instead).
         ///
@@ -204,6 +215,7 @@ public extension UsageLog {
             imageTokens: Int? = nil,
             treeBytes: Int? = nil,
             answerBytes: Int? = nil,
+            priced: [String]? = nil,
             kind: UsageFailureKind? = nil,
             parallel: ParallelTimings? = nil,
             step: String? = nil,
@@ -220,6 +232,7 @@ public extension UsageLog {
             self.imageTokens = imageTokens
             self.treeBytes = treeBytes
             self.answerBytes = answerBytes
+            self.priced = priced
             self.kind = kind
             self.parallel = parallel
             self.step = step
@@ -244,6 +257,7 @@ public extension UsageLog {
             imageTokens = try container.decodeIfPresent(Int.self, forKey: .imageTokens)
             treeBytes = try container.decodeIfPresent(Int.self, forKey: .treeBytes)
             answerBytes = try container.decodeIfPresent(Int.self, forKey: .answerBytes)
+            priced = try container.decodeIfPresent([String].self, forKey: .priced)
             parallel = try container.decodeIfPresent(ParallelTimings.self, forKey: .parallel)
             step = try container.decodeIfPresent(String.self, forKey: .step)
             verdict = try container.decodeIfPresent(String.self, forKey: .verdict)
@@ -276,10 +290,10 @@ public extension UsageLog {
 
         /// What this call saved, or `nil` where it weighed nothing.
         ///
-        /// All three halves or none: a line carrying an answer's size but no denominator measured nothing, and pricing it as a saving of everything it served would be the arithmetic running backwards. Priced through ``ContextSaving/saved(imageTokens:treeBytes:servedBytes:)`` so a month of lines and the answers that wrote them cannot disagree.
+        /// Both halves or none: a line carrying an answer's size but no denominator measured nothing, and pricing it as a saving of everything it served would be the arithmetic running backwards. Priced through ``ContextSaving/saved(imageTokens:servedBytes:)`` so a line and the answer that wrote it cannot disagree. This is what *this* call stood in for; a total over many calls goes through ``SavingsLedger`` so a capture priced by several of them counts once.
         public var tokensSaved: Int? {
-            guard let imageTokens, let treeBytes, let answerBytes else { return nil }
-            return ContextSaving.saved(imageTokens: imageTokens, treeBytes: treeBytes, servedBytes: answerBytes)
+            guard let imageTokens, let answerBytes else { return nil }
+            return ContextSaving.saved(imageTokens: imageTokens, servedBytes: answerBytes)
         }
     }
 }
@@ -300,6 +314,7 @@ extension UsageLog.Entry {
         case imageTokens = "imgTokens"
         case treeBytes
         case answerBytes = "outBytes"
+        case priced
         case kind
         case parallel
         case step

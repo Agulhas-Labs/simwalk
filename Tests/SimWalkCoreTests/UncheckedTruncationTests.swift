@@ -39,7 +39,7 @@ struct UncheckedTruncationTests {
         let text = BundleAuditSummary(report, of: bundle).render()
 
         #expect(text.contains("1 capture not checked by truncatedText (recognition failed: busy)"), "\(text)")
-        #expect(text.contains("[truncatedText] clean — 1 text run examined across 2 captures; 1 capture not checked (recognition failed: busy)"), "\(text)")
+        #expect(text.contains("[truncatedText] clean — 1 on-screen text run and 0 drawn lines outside it examined across 2 captures; 1 capture not checked (recognition failed: busy)"), "\(text)")
     }
 
     @Test

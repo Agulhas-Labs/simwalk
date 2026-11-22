@@ -58,6 +58,35 @@ struct StrictKeyDecodingTests {
         #expect(sentence.contains("label"))
     }
 
+    /// Names an agent reached for in a trial (SimWalk#293): `hold` shared no run with `longPress`, so it was pointed at `scrollTo`.
+    @Test
+    func aStepKindAgentsGuessIsPointedAtLongPress() throws {
+        for guess in ["hold", "press", "longTap"] {
+            let json = #"{"\#(guess)":{"label":"Row"}}"#
+
+            let thrown = try #require(#expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(json.utf8))
+            })
+            let sentence = DecodingReason.sentence(for: thrown)
+
+            #expect(sentence.contains("did you mean 'longPress'?"), "\(guess): \(sentence)")
+        }
+    }
+
+    @Test
+    func aLaunchArgumentsStateKeyIsPointedAtArguments() throws {
+        for guess in ["launchArguments", "args"] {
+            let json = #"{"theme":"light","\#(guess)":["-x"]}"#
+
+            let thrown = try #require(#expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(Walkbook.CaptureState.self, from: Data(json.utf8))
+            })
+            let sentence = DecodingReason.sentence(for: thrown)
+
+            #expect(sentence.contains("did you mean 'arguments'?"), "\(guess): \(sentence)")
+        }
+    }
+
     /// `type` is the one step with two fields, so a typo on either has its own nearest match.
     @Test
     func amisspelledTypeStepTextFieldNamesTextAsTheNearestKey() throws {

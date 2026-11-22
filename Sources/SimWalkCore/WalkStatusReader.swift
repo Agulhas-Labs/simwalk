@@ -149,8 +149,8 @@ private extension WalkStatusReader {
         }
         let counts = "\(result.counts.failed) failed, \(result.counts.passed) of \(result.counts.planned) matched"
         let verdict: AnswerVerdict = switch result.verdict {
-        case .passed: .unqualified(counts)
-        case .failed: .qualified([], detail: counts)
+        case .passed where result.qualifications.isEmpty: .unqualified(counts)
+        case .passed, .failed: .qualified(result.qualifications, detail: counts)
         case .refused: .refused(result.failures.first?.reason ?? counts)
         }
         let header = "walk: '\(result.walkName)'  app: \(result.app)  device: \(result.device.name) (\(result.device.osVersion))"

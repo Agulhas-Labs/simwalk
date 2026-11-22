@@ -335,7 +335,8 @@ struct WalkCommand: ParsableCommand {
                 if prepared.outputSuffixAdded {
                     outcome.bundle = outcome.bundle.noting("output: \(prepared.outputURL.path) (suffix added)")
                 }
-                telemetry?.finish(walk: outcome.bundle, logPath: logFileURL.path)
+                // The summary's list, not the run's alone: the bundle's own qualifications (a chrome-only capture) are on the verdict line too.
+                telemetry?.finish(walk: outcome.bundle, logPath: logFileURL.path, qualifications: CaptureBundleSummary(outcome.bundle, qualifiedBy: outcome.qualifications).qualifications)
                 outcome.resultPath = telemetry?.writer.current.resultPath
                 return outcome
             } catch let error as ParallelWalkRefusal {
@@ -954,6 +955,11 @@ extension WalkCommand {
 
         /// The whole answer a caller reads: the bundle's, qualified by what the run knows and the file cannot.
         func answer() -> Answer {
+            CaptureBundleSummary(bundle, qualifiedBy: qualifications, notes: notes).answer()
+        }
+
+        /// What qualifies the walk as a whole beyond its bundle: the run's half of the list the answer's verdict line and the result file both carry (the bundle's half joins it in `CaptureBundleSummary.qualifications`).
+        var qualifications: [String] {
             // The handback's qualifications ride the verdict, not only the notes: a device left unable to run
             // the next accessibility suite, or in an appearance it was not found in, is exactly what an agent
             // reading the verdict line has to act on.
@@ -962,7 +968,7 @@ extension WalkCommand {
             for other in otherDevices {
                 qualifications += other.runQualifications.filter { !qualifications.contains($0) }
             }
-            return CaptureBundleSummary(bundle, qualifiedBy: qualifications + parallelQualifications, notes: notes).answer()
+            return qualifications + parallelQualifications
         }
 
         /// What qualifies this device's walk: a survived runner failure, the appearance retry, the handback and the setup.

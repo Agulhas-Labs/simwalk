@@ -11,6 +11,9 @@ struct LabelAuditSection {
     let name: AuditRuleName
     let noun: String
     let examinedNoun: String
+    /// The rule's word before the examined noun and its tail after the captures, when its count needs them (`on-screen`, `, on screen or off`).
+    var examinedAdjective = ""
+    var examinedScope = ""
     let clause: String
     let result: LabelRuleResult
     let captureCount: Int
@@ -31,7 +34,19 @@ struct LabelAuditSection {
         [
             AnswerVerdict.qualification(findingCount, noun, clause),
             AnswerVerdict.qualification(result.unchecked, "capture", "not checked by \(name.rawValue) (\(uncheckedDetail))"),
+            offScreenClause,
         ].compactMap(\.self)
+    }
+
+    /// The qualification for a rule that judged only what the captures show, when text-carrying elements lay off screen: how many it judged of how many, so the audit never reads clean over a screen it mostly did not see.
+    private var offScreenClause: String? {
+        guard result.offScreen > 0 else { return nil }
+        return "\(name.rawValue) judged \(result.examined) of \(result.examined + result.offScreen) \(examinedNoun)s; \(result.offScreen) off screen, not judged"
+    }
+
+    /// The heading's tail naming the elements not judged for lying off screen; empty for none.
+    private var offScreenSuffix: String {
+        result.offScreen == 0 ? "" : "; \(result.offScreen) off screen, not judged"
     }
 
     /// Why the unchecked captures were not checked: no screenshot, recognition failing (with its first cause), or the split of both.
@@ -62,10 +77,20 @@ struct LabelAuditSection {
         return count == 0 ? "" : "; \(count) \(examinedNoun)\(count == 1 ? "" : "s") past the screen's width inside a horizontal scroller, not reported"
     }
 
+    /// What the rule examined, as counted: its elements, and for a rule that also examines the drawn lines outside them, those too.
+    private var examinedCount: String {
+        let adjective = examinedAdjective.isEmpty ? "" : "\(examinedAdjective) "
+        let elements = "\(result.examined) \(adjective)\(examinedNoun)\(result.examined == 1 ? "" : "s")"
+        guard let outside = result.drawnLinesOutside else {
+            return elements
+        }
+        return "\(elements) and \(outside) drawn line\(outside == 1 ? "" : "s") outside \(result.examined == 1 ? "it" : "them")"
+    }
+
     /// The heading, its arithmetic, and the findings grouped under their screens.
     var lines: [String] {
-        let examined = "\(result.examined) \(examinedNoun)\(result.examined == 1 ? "" : "s") examined across \(captureCount) capture\(captureCount == 1 ? "" : "s")"
-        let unchecked = uncheckedSuffix + scrollerSuffix
+        let examined = "\(examinedCount) examined across \(captureCount) capture\(captureCount == 1 ? "" : "s")\(examinedScope)"
+        let unchecked = offScreenSuffix + uncheckedSuffix + scrollerSuffix
         if let notApplicable, findingCount == 0 {
             return ["[\(name.rawValue)] not applicable — \(notApplicable)\(unchecked)"]
         }

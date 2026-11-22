@@ -55,10 +55,10 @@ struct SessionStepCommand: ParsableCommand {
         do {
             routeStep = try JSONDecoder().decode(Walkbook.RouteStep.self, from: Data(step.utf8))
         } catch {
-            throw ValidationError("'\(step)' is not a walkbook route step (\(error)); write one as a walkbook does, e.g. {\"tap\":{\"label\":\"Next\"}}")
+            throw SessionStepRefusal(undecodable: step, because: error)
         }
         if let problem = WalkbookLoader.refusals(inSessionStep: routeStep).first {
-            throw ValidationError("'\(step)' would be refused by validate, so nothing was sent: \(problem)")
+            throw SessionStepRefusal(refused: step, because: problem)
         }
         guard let record = store.record(id: id) else {
             throw LiveSessionHostError.unknownSession(id: id)

@@ -53,6 +53,10 @@ public struct JUnitAuditCases {
                         cases.append(Self.uncheckedCase(rule, section))
                     }
                 }
+                if section.result.offScreen > 0 {
+                    let result = section.result
+                    cases.append(JUnitCase(classname: rule, name: "\(rule) off screen", result: .skipped("judged \(result.examined) of \(result.examined + result.offScreen) text runs; \(result.offScreen) off screen, not judged — scroll to the rest and audit again")))
+                }
                 if section.result.inHorizontalScroller > 0 {
                     let count = section.result.inHorizontalScroller
                     let runs = count == 1 ? "1 text run" : "\(count) text runs"

@@ -51,6 +51,38 @@ struct MCPToolCatalog {
         ]
     }
 
+    /// The `session` tool's `state`: every key a walkbook state takes, from `Walkbook.CaptureState.keys`, so an agent writes `arguments` (not `launchArguments`) and `theme` (required) first time (SimWalk#293).
+    static var sessionState: [String: Any] {
+        let described: [String: [String: Any]] = [
+            "theme": ["type": "string", "enum": ["light", "dark"]],
+            "dynamicTypeSize": ["type": "string", "description": "e.g. UICTContentSizeCategoryAccessibilityXL (AX3); UICTContentSizeCategoryAccessibilityXXXL is the largest."],
+            "locale": ["type": "string"],
+            "arguments": ["type": "array", "items": ["type": "string"]],
+            "environment": ["type": "object", "additionalProperties": ["type": "string"]],
+            "layoutDirection": ["type": "string", "enum": ["ltr", "rtl"]],
+            "location": ["type": "object", "properties": ["latitude": ["type": "number"], "longitude": ["type": "number"]], "required": ["latitude", "longitude"], "additionalProperties": false],
+            "resetPermissions": ["type": "array", "items": ["type": "string"]],
+            "orientation": ["type": "string", "enum": ["portrait", "landscape"]],
+        ]
+        var properties: [String: Any] = [:]
+        for key in Walkbook.CaptureState.keys {
+            properties[key] = described[key] ?? ["type": "string"]
+        }
+        return [
+            "type": "object",
+            "description": "start: a walkbook 'states' entry to launch under.",
+            "properties": properties,
+            "required": ["theme"],
+            "additionalProperties": false,
+        ]
+    }
+
+    /// The `session` tool's `step`: each kind and its keys, from `Walkbook.RouteStep.kinds`.
+    static var sessionStepDescription: String {
+        let kinds = Walkbook.RouteStep.kinds.map { "\($0.name){\($0.keys.joined(separator: ","))}" }
+        return "One key names the kind: \(kinds.joined(separator: ", "))."
+    }
+
     private static var blockingTools: [[String: Any]] {
         [
             [
@@ -166,7 +198,7 @@ struct MCPToolCatalog {
                         "app": ["type": "string", "description": "start: the bundle id of the installed app."],
                         "device": ["type": "string", "description": "start: UDID of a booted simulator that is yours, or a paired physical device (needs 'team'). Or 'lease'."],
                         "lease": ["type": "string", "description": "start: a lease token from `simwalk lease acquire`."],
-                        "state": ["type": "object", "description": "start: a walkbook 'states' entry to launch under."],
+                        "state": sessionState,
                         "team": ["type": "string", "description": "start, physical device only, and required there: the Apple signing team ID the runner is built under."],
                         "runnerBundleId": ["type": "string", "description": "start, physical device only: the runner's bundle id, if the default is not one your team can sign."],
                         "animations": ["type": "boolean", "description": "start: keep UIKit animations on (a simulator session switches them off by default)."],
@@ -175,7 +207,7 @@ struct MCPToolCatalog {
                         "screenshot": ["type": "boolean", "description": "read: also write a PNG (point scale, about 450 tokens to view); its path is on a 'screenshot:' line."],
                         "screenshotScale": ["type": "integer", "description": "read: pixels per point, 1, 2 or 3 (default 1); implies 'screenshot'."],
                         "screenshotOf": ["type": "string", "description": "read: crop to the element with this label plus 8 pt; implies 'screenshot'."],
-                        "step": ["type": "object", "description": "step: one walkbook route step, e.g. {\"tap\":{\"label\":\"Next\"}}."],
+                        "step": ["type": "object", "description": sessionStepDescription],
                         "guard": ["type": "string", "description": "step: the screen hash a read printed."],
                         "screen": ["type": "string", "description": "save: the id the saved screen takes."],
                         "into": ["type": "string", "description": "save: the walkbook to create or append the screen to (the whole file is re-encoded)."],

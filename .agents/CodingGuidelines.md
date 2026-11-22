@@ -7,7 +7,7 @@ line before the first assertion, no `print()` — the CLI writes through its exp
 
 ## Every answer takes the shared contract's shape
 
-The form an answer takes is not this repo's to invent. **The sift repository's `Docs/AnswerContract.md`
+The form an answer takes is not this repo's to invent. **SwiftSure's (sift's) `Docs/AnswerContract.md`
 is the specification** — one document, in one place, because a contract copied into two repositories is
 two contracts within a month — and every face here builds an ``Answer``: a header naming what the answer
 was measured against, an ``AnswerVerdict``, the residue, and what it stood in for.

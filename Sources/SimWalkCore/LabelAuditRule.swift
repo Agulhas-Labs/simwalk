@@ -20,6 +20,12 @@ public protocol LabelAuditRule: Sendable {
     /// What one examined thing is, singular — `control` unless the rule looks at something else (`text run`).
     static var examinedNoun: String { get }
 
+    /// What the heading says before the examined noun (`on-screen`, giving `16 on-screen text runs`); empty unless the rule judges only part of what it counts.
+    static var examinedAdjective: String { get }
+
+    /// What the heading says after `examined across N captures` about the extent of the count (`, on screen or off`); empty unless the count needs it.
+    static var examinedScope: String { get }
+
     /// The rule over every readable capture of a bundle.
     func evaluate(_ captures: [BundleAuditScope.Capture]) -> LabelRuleResult
 
@@ -30,6 +36,14 @@ public protocol LabelAuditRule: Sendable {
 public extension LabelAuditRule {
     static var examinedNoun: String {
         "control"
+    }
+
+    static var examinedAdjective: String {
+        ""
+    }
+
+    static var examinedScope: String {
+        ""
     }
 
     func notApplicableReason(over _: [BundleAuditScope.Capture], result _: LabelRuleResult) -> String {

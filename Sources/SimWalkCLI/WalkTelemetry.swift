@@ -117,9 +117,9 @@ final class WalkTelemetry {
     }
 
     /// Ends a walk with its result, built from the bundle it answered with: `done` when every screen passed, else `failed`.
-    func finish(walk bundle: CaptureBundle, logPath: String?) {
+    func finish(walk bundle: CaptureBundle, logPath: String?, qualifications: [String] = []) {
         stampTotal()
-        let result = WalkResultBuilder(tool: writer.current.tool).build(manifest: bundle.manifest, bundleURL: bundle.url, timings: timings, logPath: logPath, verbose: verbose)
+        let result = WalkResultBuilder(tool: writer.current.tool).build(manifest: bundle.manifest, bundleURL: bundle.url, timings: timings, logPath: logPath, qualifications: qualifications, verbose: verbose)
         let ending: ProgressWriter.Ending = result.verdict == .passed ? .done : .failed
         // The final bundle is the truth: an appearance retry can fold a screen the first pass refused, which the runner's counts never saw.
         writer.commit { [timings, counts = result.counts] in

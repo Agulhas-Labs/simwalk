@@ -46,6 +46,12 @@ public struct LiveSessionSave {
         let existing: Walkbook?
         // Resolved once: the lock and the write both take this one answer, so a link retargeted meanwhile cannot put them in different places.
         let target = try resolve(url)
+        // The walkbook is "created when it does not exist", and so is the directory it goes in: the lock below is on that directory, so it has to be there first (SimWalk#293).
+        do {
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        } catch {
+            throw LiveSessionSaveError.notWritable(path: url.path, reason: error.localizedDescription)
+        }
         do {
             existing = try ExclusiveFileLock(file: target.deletingLastPathComponent()).withLock {
                 let existing = FileManager.default.fileExists(atPath: target.path) ? try WalkbookLoader.load(contentsOf: target) : nil

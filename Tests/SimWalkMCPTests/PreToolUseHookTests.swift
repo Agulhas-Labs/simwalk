@@ -20,6 +20,26 @@ struct PreToolUseHookTests {
         #expect(invocations == [["walk", "Docs/My Book.json", "--only", "a,b"], ["validate", "b.json"]])
     }
 
+    /// SimWalk#293: a variable the same command line set is spelled out in the slip, as the process's `argv` will hold it, in every way a line sets one; `;` and `&&` each start a command of their own.
+    @Test(arguments: [
+        "U=X; simwalk walk w.json --udid $U",
+        "U=X && simwalk walk w.json --udid $U",
+        "export U=X; simwalk walk w.json --udid ${U}",
+        "U=\"X\"; simwalk walk w.json --udid $U",
+        "A=1; U=X && simwalk walk w.json --udid $U",
+    ])
+    func avariableTheSameCommandSetIsSpelledOutInTheSlip(command: String) {
+        #expect(TranscriptScan.invocations(in: command) == [["walk", "w.json", "--udid", "X"]])
+    }
+
+    /// A name the line never set, and one set on the call itself (which the shell expands first), stay as written: untagged rather than tagged wrongly.
+    @Test
+    func aVariableTheCommandDidNotSetStaysAsWritten() {
+        #expect(TranscriptScan.invocations(in: "simwalk walk w.json --udid $V") == [["walk", "w.json", "--udid", "$V"]])
+        #expect(TranscriptScan.invocations(in: "U=X simwalk walk w.json --udid $U") == [["walk", "w.json", "--udid", "$U"]])
+        #expect(TranscriptScan.invocations(in: "U=X; echo hi; simwalk walk --udid $V") == [["walk", "--udid", "$V"]])
+    }
+
     /// A slip is claimed by the call of its shape, once, and preferably by a call from the directory the hook saw.
     @Test
     func aslipIsClaimedOnceAndThisDirectorysFirst() throws {
@@ -70,6 +90,40 @@ struct PreToolUseHookTests {
         let underClaude = CallAttribution(directory: scratch.url.appendingPathComponent("callers"), environment: ["CLAUDECODE": "1"])
 
         #expect(underClaude.take(arguments: ["walk", "a.json"], workingDirectory: here) == "mine")
+    }
+
+    /// The process under Claude Code tags itself from `CLAUDE_CODE_SESSION_ID`, with no slip, and a slip from another session does not outrank it (SimWalk#293).
+    @Test
+    func theEnvironmentsSessionIsTakenWithOrWithoutASlip() throws {
+        let scratch = try TemporaryDirectory()
+        let here = scratch.url.path
+        let directory = scratch.url.appendingPathComponent("callers")
+        let environment = ["CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "env-session"]
+
+        #expect(CallAttribution(directory: directory, environment: environment).take(arguments: ["walk", "a.json"], workingDirectory: here) == "env-session")
+
+        Self.handle(CallAttribution(directory: directory), session: "other", command: "simwalk walk a.json", cwd: here)
+        let attribution = CallAttribution(directory: directory, environment: environment)
+
+        #expect(attribution.take(arguments: ["walk", "a.json"], workingDirectory: here) == "env-session")
+        #expect(CallAttribution(directory: directory, environment: ["CLAUDECODE": "1"]).take(arguments: ["walk", "a.json"], workingDirectory: here) == "other")
+    }
+
+    /// An invalid environment id falls back to the slip; outside Claude Code nothing is returned even with the id.
+    @Test
+    func anInvalidEnvironmentSessionFallsBackAndOutsideClaudeCodeIsNil() throws {
+        let scratch = try TemporaryDirectory()
+        let here = scratch.url.path
+        let directory = scratch.url.appendingPathComponent("callers")
+        Self.handle(CallAttribution(directory: directory), session: "other", command: "simwalk walk a.json", cwd: here)
+
+        let outside = CallAttribution(directory: directory, environment: ["CLAUDE_CODE_SESSION_ID": "env-session"])
+
+        #expect(outside.take(arguments: ["walk", "a.json"], workingDirectory: here) == nil)
+
+        let invalid = CallAttribution(directory: directory, environment: ["CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "../bad"])
+
+        #expect(invalid.take(arguments: ["walk", "a.json"], workingDirectory: here) == "other")
     }
 
     /// A slip past the claim window is never claimed.

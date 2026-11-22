@@ -14,24 +14,31 @@ public struct UsageReport {
     ///
     /// **The verdict word agrees with what the report found.** `ok` only when there is nothing to flag; a failure the tool owns, or a line this build could not decode, makes the report `qualified` and names it. `ok —` in front of ninety-nine failures read as a verdict the numbers did not support, and a report that states its own shortfall and then exits as though it had none is the shape this contract exists to refuse.
     ///
+    /// `session` narrows the report to the lines one Claude Code session wrote, composing with `window`: the figures the status line prints for that session, which reads the same rows through the same ``UsageSummary``. The header names the session.
+    ///
     /// `window` narrows the report to calls made since its start, and the header names it beside how many calls the whole log holds — a count read without its window is the misreading a window invites. `redactor` pseudonymises failure reasons; `nil` prints them as recorded, and the command line passes one unless it was asked for `--unredact`.
     ///
     /// **`redactor` is an autoclosure and is never forced unless a reason is actually about to be printed redacted.** A caller building it inline as `Redactor.standard(saltFile:)` — the command line's own call — must not create that file merely by calling this over a log with no failures, or with failures that carry no reason at all.
     ///
     /// `redacting` gates the header's log path independently of whether a `Redactor` ever gets built: an absolute path outside home routinely encodes a username or a review's own directory layout, and a log with nothing to redact must still not print it under `--unredact`'s default.
-    public static func render(fileURL: URL, window: UsageWindow? = nil, redacting: Bool = false, redactor makeRedactor: @autoclosure () -> Redactor? = nil) throws -> Answer {
+    public static func render(fileURL: URL, window: UsageWindow? = nil, session: String? = nil, redacting: Bool = false, redactor makeRedactor: @autoclosure () -> Redactor? = nil) throws -> Answer {
         let logged = try entries(at: fileURL)
         // A `--parallel` walk's breakdown line is part of its `walk` call, which has a line of its own: counted, it would be a second call, and a second failure when the walk failed.
         let read = (entries: logged.entries.filter { $0.tool != UsageLog.parallelTool }, malformed: logged.malformed)
-        let calls = window.map { window in read.entries.filter { window.contains($0) } } ?? read.entries
+        // One session's lines only, when asked: the same rows the status line reads, through the same ``UsageSummary``.
+        let sessionEntries = session.map { session in read.entries.filter { $0.session == session } } ?? read.entries
+        let calls = window.map { window in sessionEntries.filter { window.contains($0) } } ?? sessionEntries
         var header = "log: \(Self.reportedLogPath(fileURL, redacting: redacting))"
+        if let session {
+            header += "  session \(session)"
+        }
         // To the second, not the millisecond `Timestamp.string` carries: `window.start` is already floored
         // to that precision, so what a reader sees here is exactly what `contains` compared against, and
         // the report does not reveal the instant it ran down to a fraction nobody asked for.
         if let window {
             header += "  window: \(window.spelling) from \(Timestamp.wholeSecondString(from: window.start))"
         }
-        header += "  calls: \(calls.count)" + (window == nil ? "" : " of \(read.entries.count)")
+        header += "  calls: \(calls.count)" + (window == nil ? "" : " of \(sessionEntries.count)")
         let skipped = [AnswerVerdict.qualification(read.malformed, "malformed line", "skipped")].compactMap(\.self)
         guard !calls.isEmpty else {
             return Answer(
@@ -62,8 +69,9 @@ public struct UsageReport {
     ///
     /// A caller deliberately testing a refusal path getting refused is the tool working, not the tool failing, so ``UsageLog/Entry/isRefusal`` is not counted — but a reader may already have seen the larger number, so the verdict says how many it left out. The two halves are built apart and joined here, so the word in front of them is decided by the failures alone: `qualified` when there are any, and `ok` only over none.
     private static func verdict(over entries: [UsageLog.Entry], skipped: [String]) -> AnswerVerdict {
-        let failures = entries.filter(\.isFailure).count
-        let refusals = entries.filter(\.isRefusal).count
+        let summary = UsageSummary(entries)
+        let failures = summary.failures
+        let refusals = summary.refusals
         let tally = "\(failures) failure\(failures == 1 ? "" : "s") across \(entries.count) call\(entries.count == 1 ? "" : "s")"
         let excluded = refusals > 0 ? "\(refusals) input refusal\(refusals == 1 ? "" : "s"), not counted as failures" : nil
         guard failures > 0 else {
@@ -163,14 +171,15 @@ public struct UsageReport {
             return ["", "measured savings — nothing weighed: no call in this log recorded what it stood in for"]
         }
         let measuring = Set(measured.map(\.tool))
-        let saved = measured.reduce(0) { $0 + ($1.tokensSaved ?? 0) }
-        let screenshots = measured.reduce(0) { $0 + ($1.screenshots ?? 0) }
-        let trees = measured.reduce(0) { $0 + ($1.treeBytes ?? 0) }
-        let served = measured.reduce(0) { $0 + ($1.answerBytes ?? 0) }
+        // One ledger over the lines in log order: a screenshot is priced by the first call that weighed it, however many later calls stood in for the same pixels.
+        let ledger = UsageSummary(entries).ledger
+        let saved = ledger.saved
+        let screenshots = ledger.screenshots
+        let served = ledger.servedBytes
         let headline = "\(TokenEstimate.short(saved)) saved"
         var lines = [
             "",
-            "measured savings — \(headline) (\(screenshots) screenshot\(screenshots == 1 ? "" : "s") and \(TokenEstimate.basis(bytes: trees, of: "accessibility trees")), "
+            "measured savings — \(headline) (\(screenshots) screenshot\(screenshots == 1 ? "" : "s"), each counted once, "
                 + "against \(ByteSize.short(served)) served): measured over \(measured.count) of \(entries.count) call\(entries.count == 1 ? "" : "s")",
         ]
         // The calls a measuring tool made that recorded nothing. Named rather than left to shrink the

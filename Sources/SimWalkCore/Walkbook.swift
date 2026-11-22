@@ -547,7 +547,30 @@ public extension Walkbook.RouteStep {
     }
 
     /// The name each case is written under — the only key its JSON object carries (`{"tab":{"label":"Progress"}}`).
-    internal static let caseNames = ["tab", "tap", "type", "longPress", "swipe", "scrollTo", "tapPoint", "drag", "systemTap", "openURL", "back"]
+    internal static var caseNames: [String] {
+        kinds.map(\.name)
+    }
+
+    /// Each step kind and the keys its payload takes, the one table the decoder and the MCP `session` schema share (SimWalk#293).
+    ///
+    /// The two cannot drift. `tapUnchanged` is not a kind: it is `tap` with `unchanged: true`.
+    static let kinds: [(name: String, keys: [String])] = [
+        ("tab", ["label"]),
+        ("tap", ["label", "unchanged"]),
+        ("type", ["label", "text", "replace"]),
+        ("longPress", ["label", "seconds"]),
+        ("swipe", ["label", "direction"]),
+        ("scrollTo", ["label", "position"]),
+        ("tapPoint", ["label", "at"]),
+        ("drag", ["label", "from", "to", "hold", "seconds"]),
+        ("systemTap", ["label", "atLaunch", "owner"]),
+        ("openURL", ["url"]),
+        ("back", []),
+    ]
+
+    private static func keys(ofKind name: String) -> [String] {
+        kinds.first { $0.name == name }?.keys ?? []
+    }
 
     /// Decodes strictly rather than relying on synthesis, so a step naming a key its case does not take (SimWalk#10's sibling hole, one vocabulary over) is a decode failure instead of a silently ignored field.
     ///
@@ -589,35 +612,35 @@ public extension Walkbook.RouteStep {
         let payload = try outer.nestedContainer(keyedBy: AnyCodingKey.self, forKey: selected)
         switch selected.stringValue {
         case "tab":
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label"], decoder: decoder)
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: Self.keys(ofKind: "tab"), decoder: decoder)
             self = try .tab(label: Self.label(in: payload, decoder: decoder))
         case "tap":
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "unchanged"], decoder: decoder)
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: Self.keys(ofKind: "tap"), decoder: decoder)
             let label = try Self.label(in: payload, decoder: decoder)
             let unchanged = try payload.decodeIfPresent(Bool.self, forKey: AnyCodingKey("unchanged")) ?? false
             self = unchanged ? .tapUnchanged(label: label) : .tap(label: label)
         case "type":
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "text", "replace"], decoder: decoder)
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: Self.keys(ofKind: "type"), decoder: decoder)
             self = try .type(
                 label: Self.label(in: payload, decoder: decoder),
                 text: StrictKeyDecoding.required(String.self, forKey: AnyCodingKey("text"), in: payload, decoder: decoder, placeholder: ""),
                 replace: payload.decodeIfPresent(Bool.self, forKey: AnyCodingKey("replace")) ?? false
             )
         case "longPress":
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "seconds"], decoder: decoder)
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: Self.keys(ofKind: "longPress"), decoder: decoder)
             self = try .longPress(
                 label: Self.label(in: payload, decoder: decoder),
                 seconds: payload.decodeIfPresent(Double.self, forKey: AnyCodingKey("seconds")) ?? Self.defaultLongPressSeconds
             )
         case "swipe":
             // `label` absent is the app element, as for `tapPoint`; written `null` is refused by name, not read as absent.
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "direction"], decoder: decoder)
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: Self.keys(ofKind: "swipe"), decoder: decoder)
             self = try .swipe(
                 label: Self.optionalLabel(named: "swipe", in: payload),
                 direction: StrictKeyDecoding.required(String.self, forKey: AnyCodingKey("direction"), in: payload, decoder: decoder, placeholder: "")
             )
         case "scrollTo":
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "position"], decoder: decoder)
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: Self.keys(ofKind: "scrollTo"), decoder: decoder)
             self = try .scrollTo(
                 label: Self.label(in: payload, decoder: decoder),
                 position: payload.decodeIfPresent(String.self, forKey: AnyCodingKey("position"))
@@ -627,13 +650,13 @@ public extension Walkbook.RouteStep {
             // element rather than one on the screen. `at` stays a plain array so a walkbook built or decoded
             // anywhere is held to one arity rule, in `WalkbookLoader`, rather than one that only the file
             // format enforces.
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "at"], decoder: decoder)
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: Self.keys(ofKind: "tapPoint"), decoder: decoder)
             self = try .tapPoint(
                 label: Self.tapPointLabel(in: payload, decoder: decoder),
                 point: StrictKeyDecoding.required([Double].self, forKey: AnyCodingKey("at"), in: payload, decoder: decoder, placeholder: [])
             )
         case "drag":
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "from", "to", "hold", "seconds"], decoder: decoder)
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: Self.keys(ofKind: "drag"), decoder: decoder)
             self = try .drag(
                 label: Self.optionalLabel(named: "drag", in: payload),
                 from: StrictKeyDecoding.required([Double].self, forKey: AnyCodingKey("from"), in: payload, decoder: decoder, placeholder: []),
@@ -642,17 +665,17 @@ public extension Walkbook.RouteStep {
                 seconds: payload.decodeIfPresent(Double.self, forKey: AnyCodingKey("seconds")) ?? Self.defaultDragSeconds
             )
         case "systemTap":
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["label", "atLaunch", "owner"], decoder: decoder)
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: Self.keys(ofKind: "systemTap"), decoder: decoder)
             self = try .systemTap(
                 label: Self.label(in: payload, decoder: decoder),
                 atLaunch: payload.decodeIfPresent(Bool.self, forKey: AnyCodingKey("atLaunch")) ?? false,
                 owner: payload.decodeIfPresent(SystemSheetOwner.self, forKey: AnyCodingKey("owner"))
             )
         case "openURL":
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: ["url"], decoder: decoder)
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: Self.keys(ofKind: "openURL"), decoder: decoder)
             self = try .openURL(url: StrictKeyDecoding.required(String.self, forKey: AnyCodingKey("url"), in: payload, decoder: decoder, placeholder: ""))
         default:
-            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: [], decoder: decoder)
+            try StrictKeyDecoding.checkUnknownKeys(in: payload, allowing: Self.keys(ofKind: "back"), decoder: decoder)
             self = .back
         }
     }
@@ -768,10 +791,15 @@ public extension Walkbook.Location {
 }
 
 public extension Walkbook.CaptureState {
+    /// The keys a state takes, the one list the decoder and the MCP `session` schema share (SimWalk#293).
+    ///
+    /// `theme` is the only one required.
+    static let keys = ["theme", "dynamicTypeSize", "locale", "arguments", "environment", "layoutDirection", "location", "resetPermissions", "orientation"]
+
     /// Decodes strictly rather than relying on synthesis (SimWalk#10): a misspelled `textSize` beside a correctly spelled `theme` decoded today, captured the device's default size, and filed it under a slug asserting the size — with `walk` reporting `0 state-not-applied`, since nothing had asked the runner to apply an axis it never saw.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: AnyCodingKey.self)
-        try StrictKeyDecoding.checkUnknownKeys(in: container, allowing: ["theme", "dynamicTypeSize", "locale", "arguments", "environment", "layoutDirection", "location", "resetPermissions", "orientation"], decoder: decoder)
+        try StrictKeyDecoding.checkUnknownKeys(in: container, allowing: Self.keys, decoder: decoder)
         theme = try StrictKeyDecoding.required(Walkbook.Theme.self, forKey: AnyCodingKey("theme"), in: container, decoder: decoder, placeholder: .light)
         dynamicTypeSize = try container.decodeIfPresent(String.self, forKey: AnyCodingKey("dynamicTypeSize"))
         locale = try container.decodeIfPresent(String.self, forKey: AnyCodingKey("locale"))

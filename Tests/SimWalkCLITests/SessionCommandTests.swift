@@ -325,6 +325,33 @@ struct SessionCommandTests {
         #expect(fixture.store.layout(id: "s1").requestNumbers().isEmpty)
     }
 
+    /// SimWalk#293: an unknown step kind is the caller's argument refused, so it logs as `input-refused`, in the problem's own words with no `DecodingError` wrapper.
+    @Test(arguments: [
+        #"{"hold":{"label":"For grown-ups","seconds":3.5}}"#,
+        #"{"longPress":{"label":"Row","seconds":600}}"#,
+    ])
+    func aRefusedStepLogsAsInputRefused(json: String) throws {
+        let fixture = try Fixture()
+        try fixture.session("s1", pid: 77)
+        fixture.processes.runner(77)
+        let directory = try TemporaryDirectory()
+        let log = UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 0) })
+        let command = try SessionStepCommand.parse(["s1", json])
+
+        #expect(throws: (any Error).self) {
+            try command.run(
+                log: log,
+                emit: { _ in },
+                perform: { try command.perform(store: fixture.store, processes: fixture.processes, pause: fixture.pause, now: fixture.now) }
+            )
+        }
+
+        let entry = try #require(try Self.entries(of: log).first)
+        #expect(entry.kind == .inputRefused)
+        #expect(entry.error?.contains("DecodingError") == false)
+        #expect(entry.error?.contains("Debug description") == false)
+    }
+
     /// A step `validate` would refuse is refused by name before anything is sent, so a session cannot save a walkbook `validate` rejects (SimWalk#198).
     @Test(arguments: [
         (#"{"longPress":{"label":"Row","seconds":600}}"#, "long-presses for 600 s"),

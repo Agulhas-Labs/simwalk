@@ -6,7 +6,9 @@ import Foundation
 
 /// Whose Claude Code session a command-line call belongs to, carried from the hook that saw the call to the process that makes it (SimWalk#14).
 ///
-/// **The process cannot know this on its own, and that is the whole difficulty.** A `simwalk walk` run from an agent's shell has no session id in its environment, so its usage line went unattributed — and every line that carries a saving came from exactly that face, while the MCP face that does know its session carried none. A status line pricing its own session's calls therefore priced nothing, for a session that used the documented command line.
+/// **Claude Code's Bash tool now sets `CLAUDE_CODE_SESSION_ID` in every shell call's environment, so the process usually knows its session and tags itself; `take` returns it without touching a slip. Everything below is the fallback for a Claude Code that does not set it, and that fallback still misses a call with an inline environment variable or one inside a loop.**
+///
+/// **Without that variable the process cannot know its session, and that is the whole difficulty.** A `simwalk walk` run from an agent's shell had no session id in its environment, so its usage line went unattributed — and every line that carries a saving came from exactly that face, while the MCP face that does know its session carried none. A status line pricing its own session's calls therefore priced nothing, for a session that used the documented command line.
 ///
 /// Claude Code's `PreToolUse` hook *does* know: its payload names the session, the tool and the command, and it fires immediately before the shell runs. So the hook leaves a slip under `callers/<session>/`, naming the arguments the binary is about to be handed, and the process claims the slip whose arguments are its own. The pattern is sift's `CallAttribution`, turned round: there the server knew its session and wanted the agent; here the process knows only its own arguments, so it looks across every session's slips for them.
 ///
@@ -79,9 +81,14 @@ public struct CallAttribution: Sendable {
 
     /// The session behind a call made with `arguments` from `workingDirectory`, consuming the slip that named it — `nil` when no slip of that shape is claimable.
     ///
+    /// The session id in `CLAUDE_CODE_SESSION_ID` wins when it is a plain name; otherwise the slip is claimed.
+    ///
     /// Claims only when the process runs under Claude Code (`CLAUDECODE` in ``environment``, the variable its Bash tool sets): a `PreToolUse` hook fires before the permission prompt, so a call denied there and then run by hand in the user's own terminal — or a first call whose exit leads a shell to run a second, unrelated one — would otherwise claim a slip it never earned. Outside Claude Code the slip is left for its rightful claimant.
     public func take(arguments: [String], workingDirectory: String) -> String? {
         guard environment["CLAUDECODE"] == "1" else { return nil }
+        if let own = environment["CLAUDE_CODE_SESSION_ID"], Self.isSessionName(own) {
+            return own
+        }
         let moment = now().timeIntervalSince1970
         let here = Self.canonical(workingDirectory)
         var candidates: [Slip] = []

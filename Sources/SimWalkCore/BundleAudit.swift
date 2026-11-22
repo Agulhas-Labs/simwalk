@@ -31,7 +31,7 @@ public struct BundleAudit {
             labelResults[name] = name.labelRule(recognizer: recognizer)?.evaluate(captures)
         }
         var notApplicable: [AuditRuleName: String] = [:]
-        for (name, result) in labelResults where result.examined == 0 && result.findings.isEmpty {
+        for (name, result) in labelResults where result.examined == 0 && (result.drawnLinesOutside ?? 0) == 0 && result.findings.isEmpty {
             notApplicable[name] = name.labelRule(recognizer: recognizer)?.notApplicableReason(over: captures, result: result)
         }
         let motionBudgets = budgets.filter(\.value.hasMotionBudget)

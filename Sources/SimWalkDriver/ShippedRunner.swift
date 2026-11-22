@@ -8,7 +8,7 @@ import SimWalkCore
 
 /// The walk runner's source tree as a packaged release ships it, beside the binary — so a `simwalk` installed by Homebrew or a release tarball, with no git checkout anywhere, still has a runner to build.
 ///
-/// **The layout is `<prefix>/bin/simwalk` and `<prefix>/share/simwalk/`**, the tree being the public source at the release commit plus three stamps: `RUNNER_COMMIT`, the commit it is, `RUNNER_FILES`, the `shasum -a 256` of every other file in the tree, and `BINARY_SHA256`, the hash of the binary it was shipped with. This file is the one place that spells those names; everything else asks it.
+/// **The layout is `<prefix>/bin/simwalk` and `<prefix>/share/simwalk/`**, the tree being the package the runner builds from (with its tests, which its manifest names), the guide, the docs and the fixtures at the release commit (make-dist's allowlist, never the contributor files) plus three stamps: `RUNNER_COMMIT`, the commit it is, `RUNNER_FILES`, the `shasum -a 256` of every other file in the tree, and `BINARY_SHA256`, the hash of the binary it was shipped with. This file is the one place that spells those names; everything else asks it.
 ///
 /// **Symlinks in the executable's path are resolved first.** Homebrew links `/opt/homebrew/bin/simwalk` to `../Cellar/simwalk/<version>/bin/simwalk`, and the tree sits beside the real file, not beside the link.
 ///

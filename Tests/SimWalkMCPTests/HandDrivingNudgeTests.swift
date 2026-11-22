@@ -23,6 +23,16 @@ struct HandDrivingNudgeTests {
         #expect(reason.contains("2 screens / 3 states in one command, vs one turn per tap"))
     }
 
+    /// A walkbook kept in a root `Walkbooks/` is a walkbook: the second distinct screenshot by hand is refused naming it.
+    @Test
+    func aWalkbookInARootWalkbooksFolderRefusesTheSecondScreenshot() throws {
+        let repo = try Repo(walkbook: true, folder: "Walkbooks")
+
+        let output = try #require(repo.hook("xcrun simctl io booted screenshot a.png"))
+
+        #expect(try Self.reason(in: output).contains("simwalk walk Walkbooks/x.json"))
+    }
+
     /// The refusal keeps the re-run for a one-off capture and sends AX probing to `simwalk inspect`, as the guide does — never to the re-run of a screenshot, as SimWalk#49 left the guide.
     @Test
     func theRefusalSendsAXProbingToInspect() throws {
@@ -213,7 +223,7 @@ private extension HandDrivingNudgeTests {
         let scratch: TemporaryDirectory
 
         /// `seen` makes the context's first hand-driving call already, since a first call is let through (SimWalk#110) and most tests are about the refusal after it.
-        init(walkbook: Bool, seen: Bool = true) throws {
+        init(walkbook: Bool, seen: Bool = true, folder walkbookFolder: String = "Docs/Walkbooks") throws {
             scratch = try TemporaryDirectory()
             try FileManager.default.createDirectory(at: root.appendingPathComponent(".git"), withIntermediateDirectories: true)
             guard walkbook else { return }
@@ -222,7 +232,7 @@ private extension HandDrivingNudgeTests {
                     _ = hook("xcrun simctl io booted screenshot first-call.png")
                 }
             }
-            let folder = root.appendingPathComponent("Docs/Walkbooks", isDirectory: true)
+            let folder = root.appendingPathComponent(walkbookFolder, isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try Data(Self.walkbook.utf8).write(to: folder.appendingPathComponent("x.json"))
         }

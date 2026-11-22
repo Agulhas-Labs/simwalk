@@ -22,7 +22,8 @@ struct SessionAttributionTests {
         let log = scratch.url.appendingPathComponent("moved/usage.jsonl")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         // `CLAUDECODE` stated, not inherited: the claim is made only under Claude Code, and this must pass from a plain shell too.
-        let environment = ["CFFIXED_USER_HOME": home.path, UsageLog.overrideVariable: log.path, "CLAUDECODE": "1"]
+        // `CLAUDE_CODE_SESSION_ID` blanked, not inherited: run from Claude Code's shell the real session would tag the call before any slip is read, and this holds the slip route an older Claude Code takes.
+        let environment = ["CFFIXED_USER_HOME": home.path, UsageLog.overrideVariable: log.path, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": ""]
         let binary = try UsageLogOverrideTests.binary()
         let bundle = try CaptureBundleFixture.write(
             in: scratch,
@@ -51,5 +52,29 @@ struct SessionAttributionTests {
         // A slip is consumed by the call that claims it: the same command run again, with no hook before it, is not the session's.
         #expect(again.status == 0)
         #expect(entries.map(\.session) == [session, nil])
+    }
+
+    /// SimWalk#293 F2: with `CLAUDE_CODE_SESSION_ID` in its environment, as Claude Code's shell sets it, a call is its session's with no hook before it — every time, so an inline `SIMWALK_USAGE_LOG=…` or a loop's calls are tagged too.
+    @Test
+    func aShellCallTakesItsSessionFromTheEnvironmentWithNoHook() throws {
+        let scratch = try TemporaryDirectory()
+        let home = scratch.url.appendingPathComponent("home", isDirectory: true)
+        let log = scratch.url.appendingPathComponent("moved/usage.jsonl")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let session = "session-\(UUID().uuidString)"
+        let environment = ["CFFIXED_USER_HOME": home.path, UsageLog.overrideVariable: log.path, "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": session]
+        let binary = try UsageLogOverrideTests.binary()
+        let bundle = try CaptureBundleFixture.write(
+            in: scratch,
+            captures: [CaptureBundleFixture.Capture(screenID: "progress", state: Walkbook.CaptureState(theme: .light), tree: CaptureBundleFixture.plainScreen())]
+        )
+
+        let first = try Shell().run(binary.path, ["bundle", "inspect", bundle.url.path], environment: environment)
+        let second = try Shell().run(binary.path, ["bundle", "inspect", bundle.url.path], environment: environment)
+        let entries = try UsageReport.entries(at: log).entries
+
+        #expect(first.status == 0)
+        #expect(second.status == 0)
+        #expect(entries.map(\.session) == [session, session])
     }
 }

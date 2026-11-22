@@ -9,18 +9,27 @@ import SimWalkCore
 ///
 /// The transcript scan counts calls and cannot price them: a transcript records that an answer was served, never what looking at the material instead would have cost. That is measured at call time and written to the usage log — but the log is shared by every session on the machine, so a time window over it would hand one session another's saving whenever two ran at once, which is the one direction a saving must never round. The MCP face records `CLAUDE_CODE_SESSION_ID` on the line it writes, so the sum is exact rather than apportioned.
 ///
-/// **A shell call is absent from this by construction, and the segment must not claim for it.** The CLI records no session, so it contributes no saving here, no failure and no refusal — it is counted, and nothing more is said about it.
+/// Both faces write the session: the MCP face and the command line each record `CLAUDE_CODE_SESSION_ID` on the line they write, so a shell call is counted, priced and judged here like any other. A session with no tagged line at all — an older Claude Code whose shell calls go untagged — is the one the status line counts from the transcript instead.
 ///
 /// Read incrementally, as the transcript scan is and for the same reason: this runs on every status-line render, and the log is the largest file the tool keeps.
 public struct SessionUsage: Codable, Equatable, Sendable {
-    /// The tokens the session's measured calls saved.
-    public var tokensSaved = 0
+    /// The figures over the session's tagged lines — calls, walks, failures, refusals and the saving — from the one function `simwalk usage --session` reads, with the screenshots already priced carried so a later call over the same pixels is not counted again, in this render or a later one.
+    public private(set) var summary = UsageSummary()
 
-    /// How many of the session's calls failed — ``UsageLog/Entry/isFailure``, the tool not answering for any reason but a caller's own argument, which is what `simwalk usage` counts as a failure.
-    public var failures = 0
+    /// The tokens the session's calls saved: the screenshots priced, less every byte served.
+    public var tokensSaved: Int {
+        summary.tokensSaved
+    }
 
-    /// How many of the session's calls were refused — ``UsageLog/Entry/isRefusal``, a caller's own argument turned away (`input-refused`), which `simwalk usage` leaves out of its failures.
-    public var refusals = 0
+    /// How many of the session's calls failed.
+    public var failures: Int {
+        summary.failures
+    }
+
+    /// How many of the session's calls were refused.
+    public var refusals: Int {
+        summary.refusals
+    }
 
     /// Where the last read of the shared log stopped.
     public var offset: UInt64 = 0
@@ -54,12 +63,9 @@ public struct SessionUsage: Codable, Equatable, Sendable {
             else {
                 continue
             }
-            scanned.tokensSaved += entry.tokensSaved ?? 0
-            // "Failed" and "refused" mean the same here as in `simwalk usage`, because both read the one
-            // pair of predicates on `Entry`. Counting every failed call as a refusal folded the two into one
-            // word; counting only refusals left a session whose every walk fell over reading as clean.
-            scanned.failures += entry.isFailure ? 1 : 0
-            scanned.refusals += entry.isRefusal ? 1 : 0
+            // "Failed" and "refused" mean the same here as in `simwalk usage` because both come out of one
+            // ``UsageSummary``.
+            scanned.summary.add(entry)
         }
         scanned.offset = carried.offset + UInt64(complete.count)
         return scanned

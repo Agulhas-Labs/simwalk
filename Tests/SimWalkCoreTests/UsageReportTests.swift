@@ -69,6 +69,37 @@ struct UsageReportTests {
         #expect(AnswerVerdict.refused(thrown.description).exitCode == AnswerVerdict.refusedExitCode)
     }
 
+    /// A walk, then an audit and a screen query over the same bundle, price the same screenshots once: the later calls add no tokens, but their served bytes are charged against the total (SimWalk#293 F2).
+    @Test
+    func laterCallsOverTheSameCapturesAddNothingToTheTotal() throws {
+        let directory = try TemporaryDirectory()
+        let log = UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 1_786_867_200) })
+        let weighed = ContextSaving(screenshotTokens: [4070, 4070], screenshotIdentities: ["aaaaaaaaaaaa", "bbbbbbbbbbbb"], treeBytes: 40000, servedBytes: 700)
+        log.record(tool: "walk", target: "a.json", milliseconds: 4, succeeded: true, saving: weighed)
+        log.record(tool: "bundle audit", target: "a.simwalk", milliseconds: 4, succeeded: true, saving: weighed)
+        log.record(tool: "bundle screen", target: "a.simwalk", milliseconds: 4, succeeded: true, saving: ContextSaving(screenshotTokens: [4070], screenshotIdentities: ["aaaaaaaaaaaa"], treeBytes: 0, servedBytes: 300))
+
+        let text = try UsageReport.render(fileURL: log.fileURL).text
+
+        #expect(weighed.savedTokens == 8140 - 175)
+        #expect(text.contains("measured savings — ~7.7k tokens saved (2 screenshots, each counted once, against 1.7 kB served)"))
+        #expect(text.contains("measured over 3 of 3 calls"))
+    }
+
+    /// A line written before the identities existed, or a live screen with none, is counted whole, as it always was — less the trees, which are not priced.
+    @Test
+    func aLineWithNoIdentitiesIsCountedWhole() throws {
+        let directory = try TemporaryDirectory()
+        let log = UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 1_786_867_200) })
+        let live = ContextSaving(screenshotTokens: [4000], treeBytes: 0, servedBytes: 0)
+        log.record(tool: "mirror observe", target: nil, milliseconds: 4, succeeded: true, saving: live)
+        log.record(tool: "mirror observe", target: nil, milliseconds: 4, succeeded: true, saving: live)
+
+        let text = try UsageReport.render(fileURL: log.fileURL).text
+
+        #expect(text.contains("measured savings — ~8.0k tokens saved (2 screenshots, each counted once, against"))
+    }
+
     /// The report's own shape: the log in the header, failures before the count of calls in the verdict, then latencies, then the saving and everything that keeps it from being read as a total.
     @Test
     func thereportLeadsWithFailuresAndStatesTheSavingAsAfloor() throws {
@@ -88,10 +119,10 @@ struct UsageReportTests {
         #expect(text.contains("qualified — 1 failure across 3 calls"))
         #expect(text.contains("bundle inspect      2   p50 4ms   p90 9ms   1 failed"))
         #expect(text.contains("validate            1   p50 1ms   p90 1ms"))
-        #expect(text.contains("measured savings — ~17k tokens saved (2 screenshots and 40 kB of accessibility trees at 4 bytes a token, against 700 B served): measured over 1 of 3 calls"))
+        #expect(text.contains("measured savings — ~8.0k tokens saved (2 screenshots, each counted once, against 700 B served): measured over 1 of 3 calls"))
         #expect(text.contains("1  bundle inspect call recorded no measurement — 1 of them failed and so stood in for nothing"))
         #expect(text.contains("1  validate call recorded no measurement anywhere in this window — no saving is claimed for them"))
-        #expect(text.contains("~17k tokens saved is a floor, not a total: only the 1 call above was weighed."))
+        #expect(text.contains("~8.0k tokens saved is a floor, not a total: only the 1 call above was weighed."))
     }
 
     /// "Failed" means the same thing here as everywhere else `simwalk usage` uses it — it excludes `input-refused`.
