@@ -183,7 +183,7 @@ struct MCPClientModeTests {
         #expect(Array(tools.dropFirst().prefix(7)).map { $0["name"] as? String } == Array(blocking.dropFirst()).map { $0["name"] as? String })
 
         let status = try #require(tools.last)
-        #expect(status["description"] as? String == "Poll a walk that 'walk' answered with a handle: waits up to the budget, then returns the walk's answer if it has ended, else one running line with its progress.")
+        #expect(status["description"] as? String == "Poll a walk 'walk' answered with a handle: waits up to the budget, then returns its answer if it ended, else one progress line.")
         let schema = try #require(status["inputSchema"] as? [String: Any])
         let properties = try #require(schema["properties"] as? [String: Any])
         let handle = try #require(properties["handle"] as? [String: Any])

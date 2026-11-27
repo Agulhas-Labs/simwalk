@@ -68,9 +68,15 @@ struct WalkCommand: ParsableCommand {
 
     @Flag(
         name: .long,
-        help: "Boot a device SimWalk created with every launchd service on. Without it, a device a `simwalk lease acquire --clone-from` lease created boots with the services the app at --app-path does not need switched off."
+        help: "Boot the device with every launchd service on, putting back exactly what a slim boot switched off (--slim, or a `simwalk lease acquire --clone-from` lease with --app-path); with nothing to put back, nothing is touched. A booted device is rebooted only when the walk may reboot it (named by UDID, leased, or one it created), and the walk refuses otherwise. Without it, a device such a lease created boots with the services the app at --app-path does not need switched off."
     )
     var stock = false
+
+    @Flag(
+        name: .long,
+        help: "Boot the device you name with the services the app at --app-path does not need switched off, though SimWalk did not create it. A booted device is shut down and booted slim only when named by UDID or leased; the walk refuses one found booted otherwise. It stays slim across walks until a walk with --stock puts it back exactly. Needs --app-path; not with --stock."
+    )
+    var slim = false
 
     @Option(name: .long, help: "Physical device only: the Apple signing team ID the runner is built under. Required with a physical --device or a lease on one; refused on a simulator walk.")
     var team: String?
@@ -102,6 +108,12 @@ struct WalkCommand: ParsableCommand {
     ///
     /// `--settle 0` and `--settle -1` both fell through the runner's `milliseconds > 0` guard to the 250ms default: the walk ran, the bundle was written, and nothing anywhere said the flag had been ignored. Same class as the state axes a walkbook now refuses — an input that is neither honoured nor rejected is the silent-discard failure this tool exists to not have.
     func validate() throws {
+        if slim, stock {
+            throw ValidationError("--slim and --stock ask for opposite boots — drop one of them")
+        }
+        if slim, appPath == nil {
+            throw ValidationError("--slim switches off the services the app does not need, so it needs --app-path to read what the app declares")
+        }
         if device != nil, lease != nil {
             throw ValidationError("pass --device or --lease, not both — a lease already names its device")
         }
@@ -261,6 +273,7 @@ struct WalkCommand: ParsableCommand {
         handbackBound: TimeInterval = HandbackGate.interruptionBound,
         interruptionNote: @escaping @Sendable (String) -> Void = StandardStreams.emitError,
         crashReports: XCTestCrashEvidence = XCTestCrashEvidence(),
+        measuringMemory measureMemory: (String) throws -> SlimMemory.Reading? = SlimMemory.measure(udid:),
         note: (String) -> Void = { _ in }
     ) throws -> Outcome {
         try WalkTelemetry.recording(on: telemetry) {
@@ -292,6 +305,8 @@ struct WalkCommand: ParsableCommand {
             }
             // What `prepare` runs — the boot, the build and the serial walk's runner — the stop above ends, as it ends a shard's; the pool and the walk's handback stay on `shell`, so a stop never refuses what gives a device back.
             let stoppable = shell.stopped(by: childStop)
+            // The decision a walk took and the memory its device held when the walk threw, which the failure carries to the usage log; `nil` for a throw before a decision or a walk that succeeded.
+            var failedSlim: SlimUsage?
             // A throw anywhere from here names what the pool could not give back; a shard's refusal or a merge's failure already does.
             do {
                 var plan: ShardPlan?
@@ -302,8 +317,8 @@ struct WalkCommand: ParsableCommand {
                     let narrowed = screens.isEmpty ? book : try WalkbookSubset.narrow(book, to: screens)
                     let made = ShardPlan(narrowed, devices: parallel)
                     (plan, narrowedBook) = (made, narrowed)
-                    // Before shard 0 boots: a clone is made only from a shut-down device. A setup that changes the device is made only on one the walk owns, so no extra is one it would not.
-                    extras = try pool.acquire(made.shards.count - 1, beside: simulator, ownedOnly: book.setup?.changesDevice == true, now: now())
+                    // Before shard 0 boots: a clone is made only from a shut-down device. A setup that changes the device is made only on one the walk owns, so no extra is one it would not; `--stock` takes only owned extras too, since it refuses a booted one it may not reboot, which would come only after shard 0 rebooted.
+                    extras = try pool.acquire(made.shards.count - 1, beside: simulator, ownedOnly: book.setup?.changesDevice == true || stock, now: now())
                 }, taken: { held in
                     // An interruption ends the process before the walk's `defer` runs, so it gives the walk's own device back too, registered as the device is taken, since the build inside `prepare` takes long enough for a signal to land in it. It runs after the pool's handler (SimWalk#182), which stops the runner first, serial or shard (SimWalk#187), so none is still driving the device when the lease goes.
                     // Each release removes only this walk's own claim file and a lease still carrying its token, so the `defer` running them again, on a walk a cancel lets carry on, takes nothing of anyone else's.
@@ -313,19 +328,33 @@ struct WalkCommand: ParsableCommand {
                 // Released once the device is handed back, whichever way the walk went; a `--lease` lease is left to its holder. One release for both sites below, so they cannot drift apart.
                 let held = HeldDevice(simulator: prepared.simulator, lease: prepared.lease, claim: prepared.claim)
                 defer { held.release() }
+                // What the device held, read after the run and before `held.release()` can delete a device the walk made; best effort, so a failed read leaves the figures off and never changes the answer.
+                func slimUsage() -> SlimUsage? {
+                    prepared.slimVerdict.map { verdict in
+                        let usage = SlimUsage(verdict: verdict)
+                        guard let reading = try? measureMemory(prepared.simulator.udid) else { return usage }
+                        return usage.measured(processes: reading.processes, footprintMB: reading.footprintMB)
+                    }
+                }
                 let owned = DeviceSettle.mayReboot(prepared.simulator, requested: device, leased: lease != nil)
                 let deviceRun = DeviceRun(book: prepared.book, outputURL: prepared.outputURL, source: prepared.source, simulator: prepared.simulator, buildHash: prepared.buildHash, executedPath: prepared.executedPath, runner: prepared.runner, lease: prepared.lease, animationsOffLibrary: prepared.animationsOffLibrary, owned: owned, interruptionStop: interruptionStop, handbackGate: handbacks)
                 var outcome: Outcome
-                if let plan, let narrowedBook, plan.shards.count > 1 {
-                    let parallelRun = ParallelRun(prepared: prepared, narrowedBook: narrowedBook, plan: plan, extras: extras, pool: pool, stop: childStop, interruptionStop: interruptionStop, handbackGate: handbacks, builds: builds, owned: owned, interrupted: { interruption?.isCancelled == true }, interruption: interruption, interruptionMark: interruptionMark)
-                    outcome = try walkShards(parallelRun, shell: shell, pause: pause, now: now, nonce: nonce, logFileURL: logFileURL, leases: leases, telemetry: telemetry, provisioning: provisioning, crashReports: crashReports)
-                } else {
-                    outcome = try walkDevice(deviceRun, shell: shell, pause: pause, now: now, nonce: nonce, logFileURL: logFileURL, leases: leases, telemetry: telemetry, crashReports: crashReports)
-                    // One shard runs the serial walk; a clamp to it is said.
-                    if let plan, plan.clamped, let narrowedBook {
-                        outcome.parallelLines = [Self.clampNote(plan, screens: narrowedBook.screens.count)]
+                do {
+                    if let plan, let narrowedBook, plan.shards.count > 1 {
+                        let parallelRun = ParallelRun(prepared: prepared, narrowedBook: narrowedBook, plan: plan, extras: extras, pool: pool, stop: childStop, interruptionStop: interruptionStop, handbackGate: handbacks, builds: builds, owned: owned, interrupted: { interruption?.isCancelled == true }, interruption: interruption, interruptionMark: interruptionMark)
+                        outcome = try walkShards(parallelRun, shell: shell, pause: pause, now: now, nonce: nonce, logFileURL: logFileURL, leases: leases, telemetry: telemetry, provisioning: provisioning, crashReports: crashReports)
+                    } else {
+                        outcome = try walkDevice(deviceRun, shell: shell, pause: pause, now: now, nonce: nonce, logFileURL: logFileURL, leases: leases, telemetry: telemetry, crashReports: crashReports)
+                        // One shard runs the serial walk; a clamp to it is said.
+                        if let plan, plan.clamped, let narrowedBook {
+                            outcome.parallelLines = [Self.clampNote(plan, screens: narrowedBook.screens.count)]
+                        }
                     }
+                } catch {
+                    failedSlim = slimUsage()
+                    throw error
                 }
+                outcome.slimUsage = slimUsage()
                 // A simulator walk measures nothing (SimWalk#67, M4); said on the answer so the absence of figures is not read as none.
                 if let measureNote = MeasureOptIn.walkNote(for: prepared.book, screens: screens) {
                     outcome.measureNote = measureNote
@@ -340,12 +369,12 @@ struct WalkCommand: ParsableCommand {
                 outcome.resultPath = telemetry?.writer.current.resultPath
                 return outcome
             } catch let error as ParallelWalkRefusal {
-                throw error
+                throw SlimmedWalkFailure.carrying(failedSlim, error)
             } catch let error as ParallelWalkFailure {
-                throw error
+                throw SlimmedWalkFailure.carrying(failedSlim, error)
             } catch {
                 let left = pool.release()
-                throw left.isEmpty ? error : ParallelWalkFailure(underlying: error, notes: [], unreleased: left)
+                throw SlimmedWalkFailure.carrying(failedSlim, left.isEmpty ? error : ParallelWalkFailure(underlying: error, notes: [], unreleased: left))
             }
         }
     }
@@ -695,9 +724,11 @@ struct WalkCommand: ParsableCommand {
         // Everything after the acquisition releases a lease the walk took, and its claim, if it refuses: the caller only gets a
         // `Prepared` to release them from once this returns.
         do {
+            let mayReboot = DeviceSettle.mayReboot(simulator, requested: device, leased: lease != nil)
             // A setup changes device-wide state — a grant, the status bar, an accessibility setting — so it is made only on a
             // device this walk owns, the rule a settle's reboot follows; refused here, before the boot, so nothing is touched.
-            if book.setup?.changesDevice == true, !DeviceSettle.mayReboot(simulator, requested: device, leased: lease != nil) {
+            // A slim or stock boot that must reboot a booted device follows the same rule (`SlimWalkProvisioning`).
+            if book.setup?.changesDevice == true, !mayReboot {
                 throw DeviceSetupError.notOwned(udid: simulator.udid)
             }
             // SimWalk#219: a `--app-path` bundle's families are readable before anything is booted or installed, so an iPhone-only app on an iPad is refused while that is free.
@@ -705,7 +736,7 @@ struct WalkCommand: ParsableCommand {
                 try AppDeviceFamilies.require(bundleID: book.appBundleID, appAt: appPath, on: simulator)
             }
             try beforeBoot(book, simulator)
-            let deviceNote = try provisioning(shell).boot(simulator, createdByWalk: held.lease.createdDevice, stockRequested: stock, appPath: appPath) { device in
+            let booted = try provisioning(shell).bootNoting(simulator, createdByWalk: held.lease.createdDevice, slimRequested: slim, stockRequested: stock, mayReboot: mayReboot, appPath: appPath) { device in
                 try WalkTelemetry.segment(telemetry, .booting, \.bootMs) { try device.boot(shell: shell) }
             }
             if let appPath {
@@ -745,7 +776,8 @@ struct WalkCommand: ParsableCommand {
                 runner: runner,
                 lease: held.lease,
                 claim: held.claim,
-                deviceNote: deviceNote,
+                deviceNote: booted?.line,
+                slimVerdict: booted?.verdict,
                 animations: animations?.decision,
                 animationsOffLibrary: animations?.path
             )
@@ -897,6 +929,8 @@ extension WalkCommand {
         var animationsNote: String?
         /// Whether SimWalk slimmed the device it booted, and how that was read back; `nil` when it decided nothing.
         var deviceNote: String?
+        /// The slim or stock decision the usage log records, with the memory the device held after the run; `nil` when the walk decided nothing.
+        var slimUsage: SlimUsage?
         /// What the walk did about a timed-out Apple audit's `testmanagerd` on this device (SimWalk#173); `nil` when no audit timed out there.
         var testManagerNote: String?
         /// That a second runner wrote this bundle because the first timed out launching the app (SimWalk#266); `nil` when one runner ran.
@@ -983,13 +1017,15 @@ extension WalkCommand {
         /// ``answer()`` as a face serves it: the result file, when the run wrote one, named on one trailing residue line (`Docs/SIMWALK-PROGRESS.md` §4).
         func servedAnswer(junit: JUnitOutput? = nil) -> Answer {
             junit?.report = JUnitWalkCases.report(of: bundle)
-            return Self.naming(result: resultPath, in: answer())
+            var served = Self.naming(result: resultPath, in: answer())
+            served.slim = slimUsage
+            return served
         }
 
         /// `answer` with `result: <path>` as its last residue line when there is a `path`, and nothing else changed — after the notes, which ``CaptureBundleSummary/answer(appending:)`` would put the line ahead of.
         static func naming(result path: String?, in answer: Answer) -> Answer {
             if let path {
-                return Answer(header: answer.header, verdict: answer.verdict, residue: answer.residue + ["result: \(path)"], weighing: answer.weighing)
+                return Answer(header: answer.header, verdict: answer.verdict, residue: answer.residue + ["result: \(path)"], weighing: answer.weighing, slim: answer.slim)
             }
             return answer
         }
@@ -1083,6 +1119,8 @@ extension WalkCommand {
         let claim: WalkClaim
         /// The line the answer carries about how the device was booted; `nil` when nothing was decided.
         let deviceNote: String?
+        /// The verdict that line states, for the usage log; `nil` when nothing was decided.
+        let slimVerdict: SlimUsage.Verdict?
         /// What the walk decided about UIKit animations (SimWalk#154); `nil` when no library was offered, which launches the app untouched.
         let animations: AnimationsOptIn.Decision?
         /// The library to insert into the app's launch, when the decision is `.off`.

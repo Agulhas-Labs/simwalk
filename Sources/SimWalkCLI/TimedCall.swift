@@ -52,7 +52,7 @@ struct TimedCall {
             let reason = String(describing: error)
             let unwritten = junit?.finish(refusal: reason)
             emitError(([AnswerVerdict.refused(reason).line] + [closing, unwritten].compactMap(\.self)).joined(separator: "\n"))
-            record(log, of: call, err: reason, saving: nil, kind: .of(error) ?? defaultFailureKind, step: step)
+            record(log, of: call, err: reason, saving: nil, kind: .of(error) ?? defaultFailureKind, step: step, slim: (error as? SlimUsageCarrying)?.slimUsage)
             // Lost focus is the one refusal a caller should retry, so it alone has an exit of its own.
             let exitCode = error is MirrorFocusRefusal ? AnswerVerdict.notFrontmostExitCode : AnswerVerdict.refusedExitCode
             warnIfPiped(exitCode: exitCode, isStdoutPiped: isStdoutPiped, emitError: emitError)
@@ -62,7 +62,7 @@ struct TimedCall {
             answer = junit.finish(answer)
         }
         emit(answer.text)
-        record(log, of: call, err: nil, saving: answer.saving, step: step, verdict: step == nil ? nil : answer.verdict.line.components(separatedBy: "\n").first)
+        record(log, of: call, err: nil, saving: answer.saving, step: step, verdict: step == nil ? nil : answer.verdict.line.components(separatedBy: "\n").first, slim: answer.slim)
         // Thrown after the answer is printed and logged, so the report a human reads is unchanged and only
         // the exit code differs. A walk that refused a screen is not a failed *call* — the bundle is
         // written, honest and readable — which is why a qualification has its own code: a caller can tell
@@ -90,12 +90,13 @@ struct TimedCall {
         saving: ContextSaving?,
         kind: UsageFailureKind? = nil,
         step: String? = nil,
-        verdict: String? = nil
+        verdict: String? = nil,
+        slim: SlimUsage? = nil
     ) {
         guard let log else { return }
         let elapsed = ContinuousClock.now - call.started
         let milliseconds = Int(elapsed / .milliseconds(1))
-        log.record(tool: call.tool, target: call.target, milliseconds: milliseconds, succeeded: err == nil, err: err, saving: saving, session: call.session, kind: kind, step: step, verdict: verdict)
+        log.record(tool: call.tool, target: call.target, milliseconds: milliseconds, succeeded: err == nil, err: err, saving: saving, session: call.session, kind: kind, step: step, verdict: verdict, slim: slim)
     }
 }
 

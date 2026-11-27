@@ -166,8 +166,10 @@ public extension ShardDevicePool {
         }
 
         /// Boots the device as `provisioning` boots shard 0, and returns the line the answer carries: slim when the walk made the device, otherwise as a serial walk boots a device it did not make.
+        ///
+        /// The walk's `--slim` names shard 0's device alone, so an extra is never asked to slim: one the walk did not make keeps its services.
         public func boot(with provisioning: SlimWalkProvisioning, stockRequested: Bool, appPath: String?, boot: (Simulator) throws -> Void) throws -> String? {
-            try provisioning.boot(simulator, createdByWalk: createdByWalk, stockRequested: stockRequested, appPath: appPath, boot: boot)
+            try provisioning.boot(simulator, createdByWalk: createdByWalk, slimRequested: false, stockRequested: stockRequested, mayReboot: mayReboot, appPath: appPath, boot: boot)
         }
     }
 

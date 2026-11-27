@@ -352,6 +352,34 @@ struct MCPServerTests {
         #expect(entry.kind == .runnerFailed)
     }
 
+    /// A walk's line carries the slim decision its answer holds, and a refusal that carries one records it too — over the plain and the bounded route alike.
+    @Test
+    func aWalkRecordsItsSlimDecisionOnSuccessAndOnRefusal() async throws {
+        struct Refused: Error, CustomStringConvertible, SlimUsageCarrying {
+            var description: String {
+                "refused"
+            }
+
+            var slimUsage: SlimUsage? {
+                SlimUsage(verdict: .refused)
+            }
+        }
+        let directory = try TemporaryDirectory()
+        let log = UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 1_786_867_200) })
+        let decided = SlimUsage(verdict: .slim, processes: 40, footprintMB: 800)
+        var answer = MCPExchange.answer
+        answer.slim = decided
+        let served = answer
+        let calls = ["walkbook": "book.json", "output": "x.simwalk"]
+
+        _ = try await MCPExchange.send([MCPExchange.call(id: 1, tool: "walk", arguments: calls)], usage: log, session: "s", answering: { _, _, _, _ in served })
+        _ = try await MCPExchange.send([MCPExchange.call(id: 1, tool: "walk", arguments: calls)], usage: log, session: "s", answering: { _, _, _, _ in throw Refused() })
+
+        let entries = try Self.entries(in: directory)
+
+        #expect(entries.map(\.slim) == [decided, SlimUsage(verdict: .refused)])
+    }
+
     /// `validate`, `inspect` and `audit` run nothing but this tool's own code over an argument `MCPToolInvocation` already checked, so an error nothing classified is `tool-error` — never recorded with no kind at all, which `simwalk usage` would read as `unclassified`.
     @Test
     func averbOtherThanWalkRecordsAnUnmappedFailureAsToolError() async throws {

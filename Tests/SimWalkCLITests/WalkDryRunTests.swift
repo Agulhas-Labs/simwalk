@@ -223,6 +223,8 @@ struct WalkDryRunTests {
         let overrideRoot = directory.url.appendingPathComponent("override-root", isDirectory: true)
         let udid = "11111111-2222-3333-4444-0000000000A1"
         let lease = try leases.acquire(udid: udid, ttl: 60, holderPID: 41, now: Date(timeIntervalSince1970: 0), createdDevice: true, clonedFrom: "SOURCE-1")
+        // Slimmed by an earlier walk, so `--stock` has something to put back.
+        try DisabledServicesOverride(root: overrideRoot).write(["gizmo.a"], for: udid)
         let staged = directory.url.appendingPathComponent("staged-report.json")
         let output = directory.url.appendingPathComponent("probe.json")
         let appPath = try Self.fakeApp(in: directory)

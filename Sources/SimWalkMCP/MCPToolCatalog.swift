@@ -40,7 +40,7 @@ struct MCPToolCatalog {
     private static var walkStatus: [String: Any] {
         [
             "name": SimWalkTool.walkStatus.rawValue,
-            "description": "Poll a walk that 'walk' answered with a handle: waits up to the budget, then returns the walk's answer if it has ended, else one running line with its progress.",
+            "description": "Poll a walk 'walk' answered with a handle: waits up to the budget, then returns its answer if it ended, else one progress line.",
             "inputSchema": [
                 "type": "object",
                 "properties": [
@@ -110,7 +110,8 @@ struct MCPToolCatalog {
                         "animations": ["type": "boolean", "description": "Keep UIKit animations on (a simulator walk switches them off by default)."],
                         "motion": ["type": "boolean", "description": "Record when each capture's tree last changed (ms), with the read cadence and count."],
                         "appleAudit": ["type": "boolean", "description": "Record Apple's accessibility audit per state (apple-audit.json); about 2 s a state."],
-                        "stock": ["type": "boolean", "description": "Boot a SimWalk-created device (`lease acquire` with `cloneFrom`) with every launchd service on."],
+                        "stock": ["type": "boolean", "description": "Undoes 'slim' exactly."],
+                        "slim": ["type": "boolean", "description": "Slim for 'appPath' until 'stock'; reboots only a named or leased device."],
                         "dryRun": ["type": "boolean", "description": "Follow each screen's route against the booted app and report steps that no longer land; captures nothing."],
                         "verbose": ["type": "boolean", "description": "Write the full result file: every state and route."],
                     ],

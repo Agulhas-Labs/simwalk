@@ -32,7 +32,9 @@ public struct LaunchTimeoutRetry {
             return Run(failure: firstFailure, resultBundlePath: resultBundlePath)
         }
         let firstDiagnosis = diagnose(resultBundlePath)
-        guard firstDiagnosis.isLaunchTimeout else {
+        // A runner killed before it connected never started the test, so it is run again as a launch timeout is (SimWalk#298).
+        let killed = firstDiagnosis.isKilledBeforeConnecting
+        guard firstDiagnosis.isLaunchTimeout || killed else {
             return Run(failure: firstFailure, resultBundlePath: resultBundlePath, diagnosis: firstDiagnosis)
         }
         guard holdsNothing(output) else {
@@ -41,9 +43,9 @@ public struct LaunchTimeoutRetry {
         let secondPath = nextResultBundlePath()
         do {
             try attempt(secondPath)
-            return Run(failure: nil, resultBundlePath: secondPath, firstResultBundlePath: resultBundlePath)
+            return Run(failure: nil, resultBundlePath: secondPath, firstResultBundlePath: resultBundlePath, firstRunnerWasKilled: killed)
         } catch {
-            return Run(failure: error, resultBundlePath: secondPath, diagnosis: diagnose(secondPath), firstResultBundlePath: resultBundlePath)
+            return Run(failure: error, resultBundlePath: secondPath, diagnosis: diagnose(secondPath), firstResultBundlePath: resultBundlePath, firstRunnerWasKilled: killed)
         }
     }
 
@@ -52,8 +54,8 @@ public struct LaunchTimeoutRetry {
     /// `checkingLaunch` is asked at most once, and only after the diagnosis has been read as a launch timeout.
     public static func diagnosisLines(diagnosis: RunnerFailureDiagnosis?, retry: Run?, checkingLaunch: (RunnerFailureDiagnosis) -> String?) -> [String] {
         var lines: [String] = []
-        if let first = retry?.firstResultBundlePath {
-            lines.append("the first runner timed out launching the app (result bundle: \(first)); what follows is the second runner's")
+        if let retry, let first = retry.firstResultBundlePath {
+            lines.append("the first runner \(retry.firstStop) (result bundle: \(first)); what follows is the second runner's")
         }
         guard let diagnosis else {
             return lines
@@ -91,13 +93,28 @@ public extension LaunchTimeoutRetry {
         public let firstResultBundlePath: String?
         /// The first runner timed out launching, but the output held something, so it was not run again.
         public let notRetriedForOutput: Bool
+        /// The first runner was killed before it connected to XCTest, rather than timing out launching the app (SimWalk#298); read only when a second runner ran.
+        public let firstRunnerWasKilled: Bool
 
-        public init(failure: (any Error)?, resultBundlePath: String, diagnosis: RunnerFailureDiagnosis? = nil, firstResultBundlePath: String? = nil, notRetriedForOutput: Bool = false) {
+        public init(
+            failure: (any Error)?,
+            resultBundlePath: String,
+            diagnosis: RunnerFailureDiagnosis? = nil,
+            firstResultBundlePath: String? = nil,
+            notRetriedForOutput: Bool = false,
+            firstRunnerWasKilled: Bool = false
+        ) {
             self.failure = failure
             self.resultBundlePath = resultBundlePath
             self.diagnosis = diagnosis
             self.firstResultBundlePath = firstResultBundlePath
             self.notRetriedForOutput = notRetriedForOutput
+            self.firstRunnerWasKilled = firstRunnerWasKilled
+        }
+
+        /// How the first runner stopped, as the words that follow "the first runner".
+        var firstStop: String {
+            firstRunnerWasKilled ? "was killed before it connected to XCTest" : "timed out launching the app"
         }
 
         /// How many runners ran: two when the first one's result bundle is recorded, else one.
@@ -112,7 +129,8 @@ public extension LaunchTimeoutRetry {
             guard let firstResultBundlePath else {
                 return nil
             }
-            return "the first runner timed out launching the app before it captured anything; a second runner wrote this \(product) (first runner's result bundle: \(firstResultBundlePath))"
+            let captured = firstRunnerWasKilled ? ", so it captured nothing" : " before it captured anything"
+            return "the first runner \(firstStop)\(captured); a second runner wrote this \(product) (first runner's result bundle: \(firstResultBundlePath))"
         }
 
         public static func == (lhs: Run, rhs: Run) -> Bool {
@@ -121,6 +139,7 @@ public extension LaunchTimeoutRetry {
                 && lhs.diagnosis == rhs.diagnosis
                 && lhs.firstResultBundlePath == rhs.firstResultBundlePath
                 && lhs.notRetriedForOutput == rhs.notRetriedForOutput
+                && lhs.firstRunnerWasKilled == rhs.firstRunnerWasKilled
         }
     }
 }

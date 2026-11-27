@@ -746,6 +746,49 @@ struct WalkCommandTests {
         #expect(script.calls.contains { $0.arguments.starts(with: ["simctl", "boot"]) })
     }
 
+    /// A walk that took a stock decision logs it with the device's memory, read once after the run; a read that throws leaves the figures off and changes nothing else; a walk that decided nothing logs no `slim` and never reads.
+    @Test
+    func aWalkWithADecisionLogsItsVerdictAndMemoryAndBestEffort() throws {
+        struct Unreadable: Error {}
+        var reads: [String] = []
+        let measured = try Self.slimLine(arguments: ["--stock"]) { udid in
+            reads.append(udid)
+            return SlimMemory.Reading(processes: 41, footprintMB: 812.6)
+        }
+        let unmeasured = try Self.slimLine(arguments: ["--stock"]) { _ in throw Unreadable() }
+        let undecided = try Self.slimLine(arguments: []) { udid in
+            reads.append(udid)
+            return nil
+        }
+
+        #expect(measured.slim == SlimUsage(verdict: .stock, processes: 41, footprintMB: 813))
+        #expect(reads == [Self.slimUDID])
+        #expect(unmeasured.slim == SlimUsage(verdict: .stock))
+        #expect(undecided.slim == nil)
+    }
+
+    /// A walk that took a decision and then threw logs the failure with the verdict and the memory, and prints the same refusal as ever.
+    @Test
+    func aWalkWithADecisionThatThrowsLogsItsVerdictAndMemory() throws {
+        let line = try Self.slimLine(arguments: ["--stock"], runnerFails: true) { _ in
+            SlimMemory.Reading(processes: 41, footprintMB: 812.6)
+        }
+
+        #expect(!line.succeeded)
+        #expect(line.slim == SlimUsage(verdict: .stock, processes: 41, footprintMB: 813))
+        #expect(line.kind == .runnerFailed)
+    }
+
+    /// The memory is read while the walk still holds its device — its lease and claim are not yet released — and the failure path reads it there too.
+    @Test(arguments: [false, true])
+    func theMemoryIsMeasuredBeforeTheWalkReleasesItsDevice(_ fails: Bool) throws {
+        var held: [Int] = []
+        _ = try Self.slimLine(arguments: ["--stock"], runnerFails: fails, leasesAtMeasure: { held.append($0) }, measure: { _ in nil })
+
+        #expect(held.count == 1)
+        #expect(held.allSatisfy { $0 > 0 })
+    }
+
     /// A device handed back as it was found is printed under the summary and qualifies nothing: it is a fact about the machine, and a bundle is not less trustworthy for it (SimWalk#5).
     @Test
     func whatTheWalkLeftTheDeviceInIsReportedWithoutQualifyingTheBundle() throws {
@@ -2686,6 +2729,44 @@ struct WalkCommandTests {
 
     private static func command() throws -> WalkCommand {
         try WalkCommand.parse(["book.json", "--output", "example.simwalk"])
+    }
+
+    /// A device named like a UUID, which the override directory keys on.
+    private static var slimUDID: String {
+        "11111111-2222-3333-4444-555555555555"
+    }
+
+    /// The usage line of one simulator walk on `slimUDID` with `arguments` added, its memory read through `measure`.
+    ///
+    /// `runnerFails` has the runner exit non-zero and write no bundle, so the walk throws after its decision; `leasesAtMeasure` is told how many files the lease store held each time `measure` ran, and the walk's own scratch is returned beside the line so a test can see what was left.
+    private static func slimLine(arguments: [String], runnerFails: Bool = false, leasesAtMeasure: ((Int) -> Void)? = nil, measure: (String) throws -> SlimMemory.Reading?, sourceLocation: SourceLocation = #_sourceLocation) throws -> UsageLog.Entry {
+        let directory = try TemporaryDirectory()
+        let overrideRoot = directory.url.appendingPathComponent("override-root", isDirectory: true)
+        try FileManager.default.createDirectory(at: overrideRoot, withIntermediateDirectories: true)
+        let writes = try runnerWrites(in: directory)
+        let script = try runnerFails
+            ? WalkScript(appPath: fakeApp(in: directory), runnerStatus: 1, booted: false, udid: slimUDID)
+            : WalkScript(appPath: fakeApp(in: directory), runnerStatus: 0, writes: writes, booted: false, udid: slimUDID)
+        let command = try WalkCommand.parse([walkbook(in: directory), "--output", writes.to.path, "--device", slimUDID, "--app-path", fakeApp(in: directory)] + arguments)
+        let log = Self.log(in: directory)
+        let recorder = StreamRecorder()
+
+        // The fixture bundle is qualified, which exits non-zero after the line is written; the line is what is read.
+        do {
+            try command.run(log: log, emit: recorder.emit, emitError: recorder.emitError) {
+                try command.performWalk(
+                    shell: Shell(script: script.run), pause: { _ in }, now: script.now, runner: { runner }, builds: builds(in: directory), leases: leases(in: directory),
+                    provisioning: { SlimWalkProvisioning(shell: $0, overrides: DisabledServicesOverride(root: overrideRoot)) },
+                    measuringMemory: { udid in
+                        // The store's own `.lock` and temporaries are hidden; a lease is a visible file.
+                        let held = ((try? FileManager.default.contentsOfDirectory(atPath: directory.url.appendingPathComponent("leases", isDirectory: true).path)) ?? []).filter { !$0.hasPrefix(".") }.count
+                        leasesAtMeasure?(held)
+                        return try measure(udid)
+                    }
+                )
+            }
+        } catch is ExitCode {}
+        return try #require(UsageReport.entries(at: log.fileURL).entries.first, sourceLocation: sourceLocation)
     }
 
     private static func log(in directory: TemporaryDirectory) -> UsageLog {

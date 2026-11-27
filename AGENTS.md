@@ -15,6 +15,6 @@ The index to working in this repo.
 - Lint: `swiftlint lint --strict --config .swiftlint.yml`; format: `swiftformat --config .swiftformat Sources Tests Runner`
   (the commit hook runs both).
 - Runner build (`swift test` never compiles `Runner/`):
-  `xcodebuild build-for-testing -project Runner/SimWalkRunner.xcodeproj -scheme SimWalkRunner -destination 'generic/platform=iOS Simulator' -quiet`
+  `xcodebuild build-for-testing -project Runner/SimWalkRunner.xcodeproj -scheme SimWalkRunner -destination 'generic/platform=iOS Simulator' -derivedDataPath .build/runner-dd -quiet`
 - First-time setup on a fresh checkout: `sh setup.sh` (installs the tools and activates the git hooks in
   `githooks/`, which run the checks above on commit and push).

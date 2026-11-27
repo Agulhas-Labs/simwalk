@@ -174,7 +174,7 @@ struct ShardDevicePoolTests {
         #expect(fixture.store.all().map(\.udid) == ["LEASED-SHUT"])
     }
 
-    /// A device the walk made boots as one SimWalk created (its override settled: here `--stock` removes it and says so), and an existing device boots as a serial walk boots one it did not make, with nothing decided.
+    /// A device the walk made boots as one SimWalk created (its override settled: here `--stock` removes it and says so), and an existing device boots as a serial walk boots one it did not make (here with nothing to put back).
     @Test
     func aDeviceTheWalkMadeBootsAsCreatedAndAnExistingOneAsASerialWalkBootsIt() throws {
         let fixture = try Fixture()
@@ -185,6 +185,7 @@ struct ShardDevicePoolTests {
             ShardDevicePool.Shard(simulator: Simulator(udid: made, name: "iPhone 17", osVersion: "26.5", isBooted: false), origin: .created),
             ShardDevicePool.Shard(simulator: Simulator(udid: existing, name: "iPhone 17", osVersion: "26.5", isBooted: false), origin: .existing),
         ]
+        try fixture.overrides.write(["gizmo.a"], for: made)
         var booted: [String] = []
 
         let lines = try shards.map { shard in
@@ -192,7 +193,7 @@ struct ShardDevicePoolTests {
         }
 
         #expect(booted == [made, existing])
-        #expect(lines.map { $0 != nil } == [true, false])
+        #expect(lines == ["device: stock: --stock", "device: stock: nothing to put back"])
     }
 
     /// An extra the pool holds has a lease on its token that the pool alone releases; a device it does not hold has none.

@@ -8,9 +8,12 @@ import SimulatorServices
 public struct SlimWalkBoot: Sendable, Equatable {
     public let profile: ServiceProfile
     public let plan: SlimPlan
+    /// Where the profile came from: shipped with the library, or measured on this machine.
+    public let source: ProfileSource
 
-    public init(profile: ServiceProfile, plan: SlimPlan) {
+    public init(profile: ServiceProfile, plan: SlimPlan, source: ProfileSource = .bundled) {
         self.profile = profile
         self.plan = plan
+        self.source = source
     }
 }

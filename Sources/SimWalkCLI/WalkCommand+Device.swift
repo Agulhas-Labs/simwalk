@@ -38,6 +38,9 @@ extension WalkCommand {
         guard !stock else {
             throw DeviceWalkRefusal.stockOnDevice
         }
+        guard !slim else {
+            throw DeviceWalkRefusal.slimOnDevice
+        }
         guard parallel == nil else {
             throw DeviceWalkRefusal.parallelOnDevice
         }
@@ -70,11 +73,12 @@ extension WalkCommand {
         animationsLibrary: AnimationsLibrary? = nil,
         interruption: Cancellation? = nil,
         provisioning: (Shell) -> SlimWalkProvisioning = { SlimWalkProvisioning(shell: $0) },
+        measuringMemory measureMemory: (String) throws -> SlimMemory.Reading? = SlimMemory.measure(udid:),
         note: (String) -> Void = { _ in }
     ) throws -> Answer {
         let target = try target(shell: shell, leases: leases, firstLaunch: firstLaunch)
         guard case let .device(walk) = target else {
-            return try performWalk(shell: shell, now: now, runner: resolveRunner, logFileURL: logFileURL, builds: builds, leases: leases, telemetry: telemetry, firstLaunch: firstLaunch, provisioning: provisioning, animationsLibrary: animationsLibrary, interruption: interruption, note: note).servedAnswer(junit: junit)
+            return try performWalk(shell: shell, now: now, runner: resolveRunner, logFileURL: logFileURL, builds: builds, leases: leases, telemetry: telemetry, firstLaunch: firstLaunch, provisioning: provisioning, animationsLibrary: animationsLibrary, interruption: interruption, measuringMemory: measureMemory, note: note).servedAnswer(junit: junit)
         }
         var reporting = walk
         reporting.junit = junit

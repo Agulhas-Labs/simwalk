@@ -6,7 +6,7 @@ import Foundation
 import SimWalkCore
 
 /// Why `device walk` declined before touching the device.
-enum DeviceWalkRefusal: Error, CustomStringConvertible, UsageFailureClassifiable {
+enum DeviceWalkRefusal: Error, CustomStringConvertible, UsageFailureClassifiable, SlimUsageCarrying {
     /// The walkbook asks for something only `simctl` can do; one line per offender.
     case unsupported([String])
     /// The runner failed and no bundle of this walk came back; carries both reasons.
@@ -31,6 +31,8 @@ enum DeviceWalkRefusal: Error, CustomStringConvertible, UsageFailureClassifiable
     case verboseOnDevice
     /// `walk --stock` on a physical device, whose launchd services SimWalk never switches off.
     case stockOnDevice
+    /// `walk --slim` on a physical device, whose launchd services SimWalk never switches off.
+    case slimOnDevice
     /// `walk --parallel` on a physical device, which walks one device at a time.
     case parallelOnDevice
     /// `--device` is no simulator `simctl` lists and no physical device `devicectl` lists, though `devicectl` lists others.
@@ -60,8 +62,10 @@ enum DeviceWalkRefusal: Error, CustomStringConvertible, UsageFailureClassifiable
             "--verbose shapes a simulator walk's result file, and a device walk writes none — drop it, or walk a simulator"
         case .parallelOnDevice:
             "--parallel shards a walk across simulators, and a physical device walks alone — drop it, or walk a simulator"
+        case .slimOnDevice:
+            "--slim switches off a simulator's launchd services, and a physical device has none to switch off — drop it, or walk a simulator"
         case .stockOnDevice:
-            "--stock boots a simulator SimWalk created with every service on, and a physical device has none switched off — drop it, or walk a simulator"
+            "--stock switches a simulator's launchd services back on where a slim walk switched them off, and a physical device has none switched off — drop it, or walk a simulator"
         case let .unknownDevice(requested, simulators, physical):
             "no simulator or physical device '\(requested)' — simulators: \(simulators.prefix(8).joined(separator: ", "))\(simulators.count > 8 ? ", …" : ""); physical devices present: \(physical.joined(separator: ", "))"
         }
@@ -70,11 +74,19 @@ enum DeviceWalkRefusal: Error, CustomStringConvertible, UsageFailureClassifiable
     /// The caller's walkbook is what is wrong for an unsupported feature; a wrapped failure keeps its own kind.
     var usageFailureKind: UsageFailureKind {
         switch self {
-        case .unsupported, .unusableApp, .deviceOnly, .dryRunOnDevice, .verboseOnDevice, .stockOnDevice, .parallelOnDevice, .unknownDevice: .inputRefused
+        case .unsupported, .unusableApp, .deviceOnly, .dryRunOnDevice, .verboseOnDevice, .stockOnDevice, .slimOnDevice, .parallelOnDevice, .unknownDevice: .inputRefused
         case .noBundleAfterRunnerFailure, .appChangedBeforeInstall, .bundleNotThisWalks: .runnerFailed
         // The runner never started: a setup step did not take, as a simulator's `DeviceSetupError` is classed.
         case .contrastNotSet: .setupFailed
         case let .failed(_, _, kind, _): kind
+        }
+    }
+
+    /// What the usage log records for a refusal over `--slim` or `--stock`, which touched no device; `nil` for any other.
+    var slimUsage: SlimUsage? {
+        switch self {
+        case .slimOnDevice, .stockOnDevice: SlimUsage(verdict: .refused)
+        default: nil
         }
     }
 

@@ -43,6 +43,29 @@ public enum RunnerFailureDiagnosis: Equatable, Sendable {
         text.contains("Failed to launch") && text.contains("Timed out attempting to launch app")
     }
 
+    /// Whether the runner process was killed before it reached XCTest: `Test crashed with signal kill before establishing connection.` (SimWalk#298)
+    ///
+    /// The test never started, so nothing was captured and nothing about the app or its routes was tried; seen on a loaded Mac straight after a cold runner build, where the same walk run again passed. A runner killed later (`Test crashed with signal kill.`) had started, and is not this.
+    public var isKilledBeforeConnecting: Bool {
+        switch self {
+        case let .digested(_, digest, _):
+            Self.isKilledBeforeConnecting(digest.failure)
+        case let .failedBeforeTest(_, failures):
+            failures.contains { Self.isKilledBeforeConnecting($0.failureText) }
+        case .nothingToShow, .unreadable:
+            false
+        }
+    }
+
+    private static func isKilledBeforeConnecting(_ text: String) -> Bool {
+        text.contains("crashed with signal kill before establishing connection")
+    }
+
+    /// What a kill before connecting means, said under the failure: no step ran, so it is not the app's or the route's.
+    private static var killedBeforeConnectingLine: String {
+        "the runner was killed before it connected to XCTest, so no step ran: the Mac or the device, not the app or the route — walk again"
+    }
+
     /// Whether the runner stopped because XCTest timed out synthesizing a gesture (``SynthesisTimeout``): a runner without the retry, or a gesture outside a route, still records it (SimWalk#274).
     public var isSynthesisTimeout: Bool {
         switch self {
@@ -124,7 +147,8 @@ public enum RunnerFailureDiagnosis: Equatable, Sendable {
         case let .failedBeforeTest(path, failures):
             let failureLines = failures.map { "failure: \($0.failureText) (\($0.testName))" }
             let prompt = failures.contains { $0.failureText.contains("enabling automation mode") } ? [Self.automationPromptLine] : []
-            return ["result bundle: \(path)"] + failureLines + prompt
+            let killed = isKilledBeforeConnecting ? [Self.killedBeforeConnectingLine] : []
+            return ["result bundle: \(path)"] + failureLines + prompt + killed
         case let .unreadable(path, reason):
             return ["the runner's result bundle could not be read — \(reason): \(path)"]
         }

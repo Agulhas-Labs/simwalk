@@ -30,4 +30,17 @@ struct MCPWalkOptionParityTests {
         #expect(parsed.stock)
         #expect(parsed.appleAudit)
     }
+
+    /// `slim` reaches `WalkCommand` as `--slim`; without `appPath`, or with `stock`, the command refuses it as a usage error.
+    @Test
+    func theSlimOptionParsesAndItsMisuseIsRefused() throws {
+        let base: [String: Any] = ["walkbook": "example.json", "output": "out.simwalk", "device": "iPhone 17 Pro"]
+        let slim = try MCPToolInvocation(tool: "walk", arguments: base.merging(["appPath": "/build/App.app", "slim": true]) { $1 })
+        #expect(try WalkCommand.parse(slim.argumentVector).slim)
+
+        for extra: [String: Any] in [["slim": true], ["slim": true, "appPath": "/build/App.app", "stock": true]] {
+            let invocation = try MCPToolInvocation(tool: "walk", arguments: base.merging(extra) { $1 })
+            #expect(throws: (any Error).self) { try WalkCommand.parse(invocation.argumentVector) }
+        }
+    }
 }

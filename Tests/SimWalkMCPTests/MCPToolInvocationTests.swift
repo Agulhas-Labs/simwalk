@@ -31,6 +31,7 @@ struct MCPToolInvocationTests {
             "motion": true,
             "animations": true,
             "stock": true,
+            "slim": true,
             "screenIDs": ["today", "steps-detail"],
             "verbose": true,
         ])
@@ -45,6 +46,7 @@ struct MCPToolInvocationTests {
             "--motion",
             "--animations",
             "--stock",
+            "--slim",
             "--screens=today", "--screens=steps-detail",
             "--verbose",
             "--", "example.json",

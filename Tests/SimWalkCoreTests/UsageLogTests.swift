@@ -206,6 +206,42 @@ struct UsageLogTests {
         #expect(decoded == original)
     }
 
+    /// The slim decision is one object on the line, the footprint a whole number, and absent on a call that took none.
+    @Test
+    func aSlimDecisionIsRecordedAsOneObjectAndAbsentOtherwise() throws {
+        let directory = try TemporaryDirectory()
+        let log = UsageLog(directory: directory.url, now: { Date(timeIntervalSince1970: 0) })
+        let usage = SlimUsage(verdict: .slimUnverified).measured(processes: 212, footprintMB: 1203.6)
+
+        log.record(tool: "walk", target: "a.json", milliseconds: 1, succeeded: true, slim: usage)
+        log.record(tool: "walk", target: "a.json", milliseconds: 1, succeeded: true, slim: SlimUsage(verdict: .refused))
+        log.record(tool: "walk", target: "a.json", milliseconds: 1, succeeded: true)
+
+        let lines = try Self.lines(of: log)
+        let object = try #require(lines[0]["slim"] as? [String: Any])
+
+        #expect(object["verdict"] as? String == "slimUnverified")
+        #expect(object["processes"] as? Int == 212)
+        #expect(object["footprintMB"] as? Int == 1204)
+        #expect((lines[1]["slim"] as? [String: Any])?.keys.sorted() == ["verdict"])
+        #expect(lines[2]["slim"] == nil)
+    }
+
+    /// The field survives a round trip as a value, and every verdict has its own wire word.
+    @Test
+    func aSlimUsageSurvivesARoundTripInEveryVerdict() throws {
+        let verdicts: [SlimUsage.Verdict] = [.slim, .slimUnverified, .notSlim, .stock, .refused]
+
+        #expect(verdicts.map(\.rawValue) == ["slim", "slimUnverified", "notSlim", "stock", "refused"])
+        for verdict in verdicts {
+            let original = UsageLog.Entry(timestamp: "2026-08-16T08:00:00.000Z", tool: "walk", target: nil, milliseconds: 9, succeeded: true, error: nil, slim: SlimUsage(verdict: verdict, processes: 3, footprintMB: 700))
+
+            let decoded = try JSONDecoder().decode(UsageLog.Entry.self, from: JSONEncoder().encode(original))
+
+            #expect(decoded == original)
+        }
+    }
+
     /// The log on a machine that has been running this tool since August is mostly lines written before the newest field existed, and a reader that refused them would report the tool as unused.
     @Test
     func alineWrittenBeforeTheNewestFieldsExistedStillDecodes() throws {
@@ -217,6 +253,7 @@ struct UsageLogTests {
         #expect(entry.session == nil)
         #expect(entry.tokensSaved == nil)
         #expect(entry.kind == nil)
+        #expect(entry.slim == nil)
         #expect(entry.succeeded)
     }
 

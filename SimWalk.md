@@ -110,7 +110,8 @@ nothing — read again. **Save before
 ## If the tools aren't there
 
 The CLI answers identically: `simwalk validate <walkbook.json>`,
-`simwalk walk <walkbook.json> --output <dir.simwalk> [--dry-run] [--lease <token>]`,
+`simwalk walk <walkbook.json> --output <dir.simwalk> [--lease <token>]` (a dry run writes a file, not a
+bundle: `--dry-run --output <probe.json>`),
 `simwalk bundle inspect|screen|audit|diff|oracle|coverage` (full listing in Docs/Reference.md, above).
 If the binary is missing too, that is not a problem to report or fix mid-task. Run `simwalk uninstall-hook`
 before deleting the binary.

@@ -4,113 +4,184 @@
 
 import Foundation
 import SimulatorServices
+import SimWalkCore
 
-/// What a walk does to a device's launchd services around its boot: the override written or removed before, and the read-back after.
+/// What a walk does to a device's launchd services around its boot: the override written, put back or removed before, and the read-back after.
 ///
-/// **Only a device SimWalk created is ever touched.** The override file is keyed by UDID and outlives `simctl erase`, so a device somebody else made would keep a slim set nobody told its owner about. `createdByWalk` is the lease's own record that the device is a clone made for a lease.
+/// **A device SimWalk did not create is slimmed only on request** (`slimRequested`, the walk's `--slim`). The override file is keyed by UDID and outlives `simctl erase`, so a device somebody else made would keep a slim set nobody told its owner about unless its owner asked. `createdByWalk` is the lease's own record that the device is a clone made for a lease. `launchd_sim` reads the override only at boot, so a booted device is shut down for a change only when the walk may reboot it (`mayReboot`, ``DeviceSettle/mayReboot(_:requested:leased:)``), and the walk refuses otherwise.
+///
+/// Undoing is exact on a device SimWalk did not create: `--stock` puts back what the walk's writes switched off (``DisabledServicesOverride/restore(for:)``), so an entry someone else put there stays. A device SimWalk created has its override directory removed (``DisabledServicesOverride/remove(for:)``), since everything in it is SimWalk's.
 public struct SlimWalkProvisioning {
     private let shell: Shell
     /// Where this provisioning writes and removes each device's override: the machine's own, or a test's scratch root.
     public let overrides: DisabledServicesOverride
-    private let profileLookup: (String) -> ServiceProfile?
+    private let resolve: (String) -> ProfileResolution
 
     public init(
         shell: Shell,
         overrides: DisabledServicesOverride = DisabledServicesOverride(),
-        profileLookup: @escaping (String) -> ServiceProfile? = ServiceProfiles.profile(forRuntime:)
+        resolve: @escaping (String) -> ProfileResolution = { ServiceProfiles.resolve(forRuntime: $0) }
     ) {
         self.shell = shell
         self.overrides = overrides
-        self.profileLookup = profileLookup
+        self.resolve = resolve
     }
 
     /// Settles the override, boots the device through `boot`, and returns the line the answer carries (``afterBoot(_:)``).
     ///
     /// The override is in place before `boot` runs because `launchd_sim` reads it only as the device starts; `boot` is handed the device shut down when this had to shut it down.
-    public func boot(_ simulator: Simulator, createdByWalk: Bool, stockRequested: Bool, appPath: String?, boot: (Simulator) throws -> Void) throws -> String? {
-        let provisioned = try beforeBoot(simulator, createdByWalk: createdByWalk, stockRequested: stockRequested, appPath: appPath)
+    public func boot(
+        _ simulator: Simulator,
+        createdByWalk: Bool,
+        slimRequested: Bool = false,
+        stockRequested: Bool,
+        mayReboot: Bool,
+        appPath: String?,
+        boot: (Simulator) throws -> Void
+    ) throws -> String? {
+        try bootNoting(simulator, createdByWalk: createdByWalk, slimRequested: slimRequested, stockRequested: stockRequested, mayReboot: mayReboot, appPath: appPath, boot: boot)?.line
+    }
+
+    /// ``boot(_:createdByWalk:slimRequested:stockRequested:mayReboot:appPath:boot:)`` returning the verdict beside the line.
+    public func bootNoting(
+        _ simulator: Simulator,
+        createdByWalk: Bool,
+        slimRequested: Bool = false,
+        stockRequested: Bool,
+        mayReboot: Bool,
+        appPath: String?,
+        boot: (Simulator) throws -> Void
+    ) throws -> DeviceNote? {
+        let provisioned = try beforeBoot(simulator, createdByWalk: createdByWalk, slimRequested: slimRequested, stockRequested: stockRequested, mayReboot: mayReboot, appPath: appPath)
         try boot(provisioned.simulator)
-        return afterBoot(provisioned)
+        return deviceNote(after: provisioned)
     }
 
     /// Settles the device's override before the walk boots it.
     ///
-    /// - A shut-down device of the walk's: with `appPath`, slim or stock as ``WalkBootMode/decide(stockRequested:runtimeIdentifier:osVersion:profileLookup:declarations:)`` says, the override rewritten from nothing so an earlier app's kept services do not linger; with `--stock` alone, the override removed; otherwise left as it is.
-    /// - A booted device of the walk's under `--stock` that has an override: shut down, the override removed, and returned shut down so the boot that follows boots it.
-    /// - Any other device: nothing is changed, and `--stock` on one that has an override is refused.
-    public func beforeBoot(_ simulator: Simulator, createdByWalk: Bool, stockRequested: Bool, appPath: String?) throws -> Provisioned {
-        guard createdByWalk else {
-            guard stockRequested else { return Provisioned(simulator: simulator, decision: nil) }
-            let off = try disabledLabels(for: simulator.udid, createdByWalk: false).count
-            if off > 0 {
-                throw SlimWalkError.stockOnForeignDevice(udid: simulator.udid, off: off)
-            }
+    /// - `--stock`: with labels a slim walk switched off (on a device SimWalk created, any label in its override; on another, ``DisabledServicesOverride/ownedLabels(for:)``), they are put back, a booted device shut down first and returned shut down so the boot that follows boots it, or ``SlimWalkError/bootedInUse(udid:switchingOff:)`` when `mayReboot` is false. With none, nothing is touched and the decision is ``WalkStockReason/nothingToPutBack``.
+    /// - A shut-down device SimWalk created or was asked to slim, with `appPath`: slim or stock as ``WalkBootMode/decide(stockRequested:runtimeIdentifier:osVersion:resolve:declarations:)`` says, the override rewritten from what it held before the walk's earlier writes so an earlier app's kept services do not linger.
+    /// - A booted device under `--slim` with `appPath`: shut down and then as a shut-down one when the decision is slim, or when it is stock and the walk's earlier writes switched labels off there (counted as `--stock` counts them), which are put back so the boot that follows boots it stock; refused with ``SlimWalkError/bootedInUse(udid:switchingOff:)`` instead of either when not `mayReboot`. A stock decision with nothing to put back is said and nothing is touched.
+    /// - Every refusal comes before every side effect: a booted device's override is read, as far as settling it will read it, before the device is shut down, so an override that cannot be read (``SlimWalkError/overrideUnreadable(path:reason:createdByWalk:)``) leaves the device booted and its files as they were.
+    /// - Any other device, including a booted one SimWalk created without `--slim`: nothing is changed and nothing decided.
+    public func beforeBoot(_ simulator: Simulator, createdByWalk: Bool, slimRequested: Bool = false, stockRequested: Bool, mayReboot: Bool, appPath: String?) throws -> Provisioned {
+        if stockRequested {
+            return try stock(simulator, createdByWalk: createdByWalk, mayReboot: mayReboot)
+        }
+        guard createdByWalk || slimRequested, let appPath, !simulator.isBooted || slimRequested else {
             return Provisioned(simulator: simulator, decision: nil)
         }
-        if simulator.isBooted {
-            guard stockRequested, try !disabledLabels(for: simulator.udid, createdByWalk: true).isEmpty else { return Provisioned(simulator: simulator, decision: nil) }
-            try shutDown(simulator.udid)
-            try overrides.remove(for: simulator.udid)
-            let down = Simulator(udid: simulator.udid, name: simulator.name, osVersion: simulator.osVersion, isBooted: false, runtimeIdentifier: simulator.runtimeIdentifier)
-            return Provisioned(simulator: down, decision: .stock(.requested))
-        }
-        guard let appPath else {
-            guard stockRequested else { return Provisioned(simulator: simulator, decision: nil) }
-            try overrides.remove(for: simulator.udid)
-            return Provisioned(simulator: simulator, decision: .stock(.requested))
-        }
         let decision = WalkBootMode.decide(
-            stockRequested: stockRequested,
+            stockRequested: false,
             runtimeIdentifier: simulator.runtimeIdentifier ?? "",
             osVersion: simulator.osVersion,
-            profileLookup: profileLookup,
+            resolve: resolve,
             declarations: { AppDeclarations.read(appPath: appPath) }
         )
-        try overrides.remove(for: simulator.udid)
-        if case let .slim(boot) = decision {
-            try overrides.write(boot.plan.disabled, for: simulator.udid)
+        var device = simulator
+        if simulator.isBooted {
+            if case .slim = decision {
+                try checkReadable(simulator.udid, createdByWalk: createdByWalk)
+                device = try shutDown(simulator, mayReboot: mayReboot, switchingOff: true)
+            } else {
+                // A stock decision on a device an earlier walk slimmed is a change too: left alone, the earlier switch-off would stay live under a line that says stock.
+                guard try !earlierWrites(simulator.udid, createdByWalk: createdByWalk).isEmpty else {
+                    return Provisioned(simulator: simulator, decision: decision)
+                }
+                try checkReadable(simulator.udid, createdByWalk: createdByWalk)
+                device = try shutDown(simulator, mayReboot: mayReboot, switchingOff: false)
+            }
         }
-        return Provisioned(simulator: simulator, decision: decision)
+        try settle(simulator.udid, createdByWalk: createdByWalk) {
+            try clear(simulator.udid, createdByWalk: createdByWalk)
+            if case let .slim(boot) = decision {
+                try overrides.write(boot.plan.disabled, for: simulator.udid)
+            }
+        }
+        return Provisioned(simulator: device, decision: decision)
     }
 
     /// The line the walk's answer carries about the device, after the boot; `nil` when nothing was decided.
     ///
     /// A slim decision is read back from the booted device. A problem reading it back never fails the walk: it is said in the line.
     public func afterBoot(_ provisioned: Provisioned) -> String? {
+        deviceNote(after: provisioned)?.line
+    }
+
+    /// ``afterBoot(_:)`` with the verdict its line states, for the usage log: the same branches choose both.
+    public func deviceNote(after provisioned: Provisioned) -> DeviceNote? {
         guard let decision = provisioned.decision else { return nil }
-        guard case let .slim(boot) = decision else { return "device: \(decision.text)" }
+        guard case let .slim(boot) = decision else { return DeviceNote(line: "device: \(decision.text)", verdict: .stock) }
         let planned = Set(boot.plan.disabled)
         let read: Shell.Result
         do {
             read = try shell.run("/usr/bin/xcrun", ["simctl", "spawn", provisioned.simulator.udid, "launchctl", "print-disabled", "system"], timeout: 20)
         } catch ShellError.timedOut {
-            return "device: slim, unverified: the read-back timed out"
+            return DeviceNote(line: "device: slim, unverified: the read-back timed out", verdict: .slimUnverified)
         } catch {
-            return "device: slim, unverified: the read-back failed: \(error)"
+            return DeviceNote(line: "device: slim, unverified: the read-back failed: \(error)", verdict: .slimUnverified)
         }
-        guard read.succeeded else { return "device: slim, unverified: the read-back failed: \(read.failureLine)" }
+        guard read.succeeded else { return DeviceNote(line: "device: slim, unverified: the read-back failed: \(read.failureLine)", verdict: .slimUnverified) }
         let applied = planned.intersection(DisabledServicesOverride.disabledLabels(fromPrintDisabled: read.standardOutput))
         guard applied.count == planned.count else {
-            return "device: not slim: the runtime did not apply the override (\(applied.count) of \(planned.count) read back)"
+            return DeviceNote(line: "device: not slim: the runtime did not apply the override (\(applied.count) of \(planned.count) read back)", verdict: .notSlim)
         }
-        return "device: \(decision.text)"
+        return DeviceNote(line: "device: \(decision.text)", verdict: .slim)
     }
 
-    /// The labels the device's override switches off; a file that is there and cannot be read is ``SlimWalkError/overrideUnreadable(path:reason:createdByWalk:)``, a missing one is none.
-    private func disabledLabels(for udid: String, createdByWalk: Bool) throws -> Set<String> {
-        let path = try overrides.directory(for: udid).appendingPathComponent("disabled.plist").path
+    /// `--stock`: what a slim walk switched off is put back, or nothing is touched when it switched nothing off.
+    private func stock(_ simulator: Simulator, createdByWalk: Bool, mayReboot: Bool) throws -> Provisioned {
+        guard try !earlierWrites(simulator.udid, createdByWalk: createdByWalk).isEmpty else {
+            return Provisioned(simulator: simulator, decision: .stock(.nothingToPutBack))
+        }
+        try checkReadable(simulator.udid, createdByWalk: createdByWalk)
+        let device = simulator.isBooted ? try shutDown(simulator, mayReboot: mayReboot, switchingOff: false) : simulator
+        try settle(simulator.udid, createdByWalk: createdByWalk) { try clear(simulator.udid, createdByWalk: createdByWalk) }
+        return Provisioned(simulator: device, decision: .stock(.requested))
+    }
+
+    /// The labels the walk's earlier writes switched off: on a device SimWalk created, any label in its override; on another, ``DisabledServicesOverride/ownedLabels(for:)``.
+    private func earlierWrites(_ udid: String, createdByWalk: Bool) throws -> Set<String> {
+        try settle(udid, createdByWalk: createdByWalk) {
+            try createdByWalk ? overrides.labels(for: udid) : overrides.ownedLabels(for: udid)
+        }
+    }
+
+    /// Makes now every read that ``clear(_:createdByWalk:)`` and the write after it will make, so an override that cannot be read is refused before the device is shut down: putting the walk's labels back on a device SimWalk did not create reads both the override file and the walk's record of it, and removing a created device's directory reads nothing.
+    private func checkReadable(_ udid: String, createdByWalk: Bool) throws {
+        guard !createdByWalk else { return }
+        try settle(udid, createdByWalk: createdByWalk) {
+            _ = try overrides.labels(for: udid)
+            _ = try overrides.ownedLabels(for: udid)
+        }
+    }
+
+    /// Takes back the walk's earlier writes: a device SimWalk created loses its override directory, which is all SimWalk's; another has only the walk's own labels put back.
+    private func clear(_ udid: String, createdByWalk: Bool) throws {
+        if createdByWalk {
+            try overrides.remove(for: udid)
+        } else {
+            try overrides.restore(for: udid)
+        }
+    }
+
+    /// Runs `body` on the device's override, turning a file that is there and cannot be read into ``SlimWalkError/overrideUnreadable(path:reason:createdByWalk:)``.
+    private func settle<T>(_: String, createdByWalk: Bool, _ body: () throws -> T) throws -> T {
         do {
-            return try overrides.labels(for: udid)
-        } catch {
-            throw SlimWalkError.overrideUnreadable(path: path, reason: error.localizedDescription, createdByWalk: createdByWalk)
+            return try body()
+        } catch let SimulatorServicesError.unreadableOverride(path, reason) {
+            throw SlimWalkError.overrideUnreadable(path: path, reason: reason, createdByWalk: createdByWalk)
         }
     }
 
-    private func shutDown(_ udid: String) throws {
-        let result = try shell.run("/usr/bin/xcrun", ["simctl", "shutdown", udid])
+    /// Shuts a booted device down so the override takes effect at the boot that follows, and returns it as shut down; refuses a device the walk may not reboot.
+    private func shutDown(_ simulator: Simulator, mayReboot: Bool, switchingOff: Bool) throws -> Simulator {
+        guard mayReboot else { throw SlimWalkError.bootedInUse(udid: simulator.udid, switchingOff: switchingOff) }
+        let result = try shell.run("/usr/bin/xcrun", ["simctl", "shutdown", simulator.udid])
         guard result.succeeded || result.failureLine.contains("current state: Shutdown") else {
             throw SimulatorError.simctlFailed(command: "shutdown", reason: result.failureLine)
         }
+        return Simulator(udid: simulator.udid, name: simulator.name, osVersion: simulator.osVersion, isBooted: false, runtimeIdentifier: simulator.runtimeIdentifier)
     }
 }
 
@@ -119,5 +190,18 @@ public extension SlimWalkProvisioning {
     struct Provisioned: Equatable {
         public let simulator: Simulator
         public let decision: WalkBootMode?
+    }
+}
+
+public extension SlimWalkProvisioning {
+    /// What the walk says about the device after its boot: the answer's `device:` line, and the verdict that line states.
+    struct DeviceNote: Equatable, Sendable {
+        public let line: String
+        public let verdict: SlimUsage.Verdict
+
+        public init(line: String, verdict: SlimUsage.Verdict) {
+            self.line = line
+            self.verdict = verdict
+        }
     }
 }

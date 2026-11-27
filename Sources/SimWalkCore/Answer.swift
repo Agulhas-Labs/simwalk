@@ -22,16 +22,20 @@ public struct Answer: Equatable, Sendable {
     /// What this answer stands in for, unpriced — `nil` when it stands in for nothing.
     public let weighing: ContextSaving?
 
-    public init(header: String, verdict: AnswerVerdict, residue: [String] = [], weighing: ContextSaving? = nil) {
+    /// The slim or stock decision the usage log records for this answer; never rendered, and `nil` for an answer of a call that took none.
+    public var slim: SlimUsage?
+
+    public init(header: String, verdict: AnswerVerdict, residue: [String] = [], weighing: ContextSaving? = nil, slim: SlimUsage? = nil) {
         self.header = header
         self.verdict = verdict
         self.residue = residue
         self.weighing = weighing
+        self.slim = slim
     }
 
     /// This answer with one more qualification on its verdict, everything else as it was.
     public func qualified(by qualification: String) -> Answer {
-        Answer(header: header, verdict: verdict.adding(qualification: qualification), residue: residue, weighing: weighing)
+        Answer(header: header, verdict: verdict.adding(qualification: qualification), residue: residue, weighing: weighing, slim: slim)
     }
 
     /// The whole answer, as a face prints it.

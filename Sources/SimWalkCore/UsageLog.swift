@@ -76,7 +76,9 @@ public struct UsageLog: Sendable {
     /// `kind` says why a failed call failed — `nil` for a call that succeeded, where a kind means nothing, and for a failure whose site has not been mapped to one (``UsageFailureKind``). Read off the thrown error at the call site (``UsageFailureKind/of(_:)``) or stated directly, never inferred here: this type only ever writes what it is told.
     ///
     /// `step` and `verdict` are a live session step's own record (SimWalk#253): the route step as sent, and the first line of the answer the caller saw. An answer lost to a pipe could not be reconstructed from a line that held neither. Both are bounded and flattened to one line exactly as `err` is, and a call that is not a session step passes neither, so its line is unchanged. `verdict` is only for a call that produced an answer; a refusal's first line is already `err`.
-    public func record(tool: String, target: String?, milliseconds: Int, succeeded: Bool, err: String? = nil, saving: ContextSaving? = nil, session: String? = nil, kind: UsageFailureKind? = nil, parallel: ParallelTimings? = nil, step: String? = nil, verdict: String? = nil) {
+    ///
+    /// `slim` is the slim or stock decision a walk took and the memory its device held (``SlimUsage``); absent on a call that took none.
+    public func record(tool: String, target: String?, milliseconds: Int, succeeded: Bool, err: String? = nil, saving: ContextSaving? = nil, session: String? = nil, kind: UsageFailureKind? = nil, parallel: ParallelTimings? = nil, step: String? = nil, verdict: String? = nil, slim: SlimUsage? = nil) {
         let entry = Entry(
             timestamp: Timestamp.string(from: now()),
             tool: tool,
@@ -93,7 +95,8 @@ public struct UsageLog: Sendable {
             kind: kind,
             parallel: parallel,
             step: step.map(Self.oneLine),
-            verdict: verdict.map(Self.oneLine)
+            verdict: verdict.map(Self.oneLine),
+            slim: slim
         )
         let encoder = JSONEncoder()
         // Paths are most of what a log line carries, and an escaped one is unreadable when triaging.
@@ -203,6 +206,9 @@ public extension UsageLog {
         /// The first line of the answer a session step produced, `ok — …` or `qualified — …`, bounded; absent where no answer was produced (the refusal's reason is `error`) and on every other call (SimWalk#253).
         public var verdict: String?
 
+        /// The slim or stock decision a walk took and the memory its device held; absent where the walk took none.
+        public var slim: SlimUsage?
+
         public init(
             timestamp: String,
             tool: String,
@@ -219,7 +225,8 @@ public extension UsageLog {
             kind: UsageFailureKind? = nil,
             parallel: ParallelTimings? = nil,
             step: String? = nil,
-            verdict: String? = nil
+            verdict: String? = nil,
+            slim: SlimUsage? = nil
         ) {
             self.timestamp = timestamp
             self.tool = tool
@@ -237,6 +244,7 @@ public extension UsageLog {
             self.parallel = parallel
             self.step = step
             self.verdict = verdict
+            self.slim = slim
         }
 
         /// Decodes leniently over `kind`: a value this build's `UsageFailureKind` has no case for must not fail the whole line.
@@ -261,6 +269,7 @@ public extension UsageLog {
             parallel = try container.decodeIfPresent(ParallelTimings.self, forKey: .parallel)
             step = try container.decodeIfPresent(String.self, forKey: .step)
             verdict = try container.decodeIfPresent(String.self, forKey: .verdict)
+            slim = try container.decodeIfPresent(SlimUsage.self, forKey: .slim)
             if container.contains(.kind), try !container.decodeNil(forKey: .kind) {
                 let stringKind = try? container.decode(String.self, forKey: .kind)
                 let rawKind = stringKind ?? Self.nonStringKindText(in: container)
@@ -319,5 +328,6 @@ extension UsageLog.Entry {
         case parallel
         case step
         case verdict
+        case slim
     }
 }

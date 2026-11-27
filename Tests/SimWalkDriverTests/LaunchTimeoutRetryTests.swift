@@ -116,6 +116,52 @@ struct LaunchTimeoutRetryTests {
         #expect(recorder.diagnosed.isEmpty)
         #expect(result.diagnosis == nil)
     }
+
+    /// SimWalk#298: a runner killed before it connected never started the test, so it is run once more and the answer says so.
+    @Test
+    func aRunnerKilledBeforeConnectingRunsASecondRunnerAndSaysSo() throws {
+        let (directory, output) = try missingOutput()
+        _ = directory
+        let recorder = Recorder()
+        let result = run(output: output, failures: ["first"], diagnosis: { Self.killed($0) }, recorder: recorder)
+
+        #expect(result.failure == nil)
+        #expect(recorder.attempts == ["first", "second"])
+        #expect(result.firstRunnerWasKilled)
+        #expect(result.note(writing: "bundle") == "the first runner was killed before it connected to XCTest, so it captured nothing; a second runner wrote this bundle (first runner's result bundle: first)")
+    }
+
+    @Test
+    func aSecondKillIsTheFailureAndSaysNoStepRan() throws {
+        let (directory, output) = try missingOutput()
+        _ = directory
+        let recorder = Recorder()
+        let result = run(output: output, failures: ["first", "second"], diagnosis: { Self.killed($0) }, recorder: recorder)
+
+        #expect(result.failure != nil)
+        #expect(recorder.attempts == ["first", "second"])
+        let lines = LaunchTimeoutRetry.diagnosisLines(diagnosis: result.diagnosis, retry: result, checkingLaunch: { _ in "never asked" })
+        #expect(lines == [
+            "the first runner was killed before it connected to XCTest (result bundle: first); what follows is the second runner's",
+            "result bundle: second",
+            "failure: Test crashed with signal kill before establishing connection. (SimWalkRunner-Runner encountered an error)",
+            "the runner was killed before it connected to XCTest, so no step ran: the Mac or the device, not the app or the route — walk again",
+        ])
+    }
+
+    @Test
+    func aRunnerKilledAfterItConnectedIsNotRetried() throws {
+        let (directory, output) = try missingOutput()
+        _ = directory
+        let recorder = Recorder()
+        let later = RunnerFailureDiagnosis.failedBeforeTest(resultBundlePath: "first", failures: [RunnerFailureDiagnosis.StartFailure(testName: "testWalk()", failureText: "Test crashed with signal kill.")])
+        let result = run(output: output, failures: ["first"], diagnosis: { _ in later }, recorder: recorder)
+
+        #expect(!later.isKilledBeforeConnecting)
+        #expect(recorder.attempts == ["first"])
+        #expect(!later.lines.contains { $0.contains("no step ran") })
+        #expect(result.firstResultBundlePath == nil)
+    }
 }
 
 extension LaunchTimeoutRetryTests {
@@ -127,6 +173,13 @@ extension LaunchTimeoutRetryTests {
 
     private static func timeout(_ path: String) -> RunnerFailureDiagnosis {
         .failedBeforeTest(resultBundlePath: path, failures: [RunnerFailureDiagnosis.StartFailure(testName: "t", failureText: timeoutText)])
+    }
+
+    private static func killed(_ path: String) -> RunnerFailureDiagnosis {
+        .failedBeforeTest(
+            resultBundlePath: path,
+            failures: [RunnerFailureDiagnosis.StartFailure(testName: "SimWalkRunner-Runner encountered an error", failureText: "Test crashed with signal kill before establishing connection.")]
+        )
     }
 
     private static func digest(_ failure: String, path: String = "a") -> RunnerFailureDiagnosis {

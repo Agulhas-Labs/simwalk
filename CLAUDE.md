@@ -9,7 +9,8 @@ coding rules). Read the files it links before starting a task.
   violation in an untouched file waits for the next person to edit it, SimWalk#82), SwiftFormat leaves no
   diff (`swiftformat --config .swiftformat Sources Tests Runner`), the runner still builds
   (`xcodebuild build-for-testing -project Runner/SimWalkRunner.xcodeproj -scheme SimWalkRunner
-  -destination 'generic/platform=iOS Simulator' -quiet` — `swift test` never compiles `Runner/`), and every
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath .build/runner-dd -quiet` — `swift test` never
+  compiles `Runner/`; the path keeps its build in the worktree's `.build/`, removed with it), and every
   changed file conforms to [.agents/CodingGuidelines.md](.agents/CodingGuidelines.md). The git hooks
   (`githooks/`, set up by `sh setup.sh`) run the same checks on commit and push; they are the backstop,
   so don't rely on them.

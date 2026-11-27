@@ -2,6 +2,7 @@
 // Copyright © Agulhas Labs
 //
 
+import Foundation
 import SimulatorServices
 @testable import SimWalkDriver
 import Testing
@@ -33,11 +34,12 @@ struct WalkBootModeTests {
     private static func decide(
         stock: Bool = false,
         profile: ServiceProfile? = profile,
+        source: ProfileSource = .bundled,
         _ declarations: Result<ProjectDeclarations, UnreadableAppDeclarations>
     ) -> WalkBootMode {
         WalkBootMode.decide(
             stockRequested: stock, runtimeIdentifier: runtime, osVersion: "27.0",
-            profileLookup: { $0 == runtime ? profile : nil }, declarations: { declarations }
+            resolve: { $0 == runtime ? profile.map { .found($0, source) } ?? .none : .none }, declarations: { declarations }
         )
     }
 
@@ -52,7 +54,7 @@ struct WalkBootModeTests {
         guard case let .slim(boot) = mode else { return }
         #expect(boot.plan.disabled == ["gizmo.a", "gizmo.b", "gizmo.push"])
         #expect(boot.plan.kept == [.healthKit: ["gizmo.health"]])
-        #expect(mode.text == "slim: 3 of 6 services off (iOS 27.0, profile v3), kept for the app: healthKit 1")
+        #expect(mode.text == "slim: 3 of 6 services off (iOS 27.0, profile v3, bundled), kept for the app: healthKit 1")
     }
 
     /// An app that declares nothing the profile serves keeps nothing.
@@ -60,7 +62,7 @@ struct WalkBootModeTests {
     func slimTextSaysNothingWhenNothingIsKept() {
         let mode = Self.decide(.success(ProjectDeclarations()))
 
-        #expect(mode.text == "slim: 4 of 6 services off (iOS 27.0, profile v3), kept for the app: nothing")
+        #expect(mode.text == "slim: 4 of 6 services off (iOS 27.0, profile v3, bundled), kept for the app: nothing")
     }
 
     /// Kept capabilities are listed in name order.
@@ -68,7 +70,7 @@ struct WalkBootModeTests {
     func slimTextListsKeptCapabilitiesInNameOrder() {
         let declared = ProjectDeclarations(entitlements: ["aps-environment", "com.apple.developer.healthkit"])
 
-        #expect(Self.decide(.success(declared)).text == "slim: 2 of 6 services off (iOS 27.0, profile v3), kept for the app: healthKit 1, pushNotifications 1")
+        #expect(Self.decide(.success(declared)).text == "slim: 2 of 6 services off (iOS 27.0, profile v3, bundled), kept for the app: healthKit 1, pushNotifications 1")
     }
 
     /// `--stock` is stock without the declarations being read.
@@ -77,7 +79,7 @@ struct WalkBootModeTests {
         var reads = 0
         let mode = WalkBootMode.decide(
             stockRequested: true, runtimeIdentifier: Self.runtime, osVersion: "27.0",
-            profileLookup: { _ in Self.profile }, declarations: { reads += 1
+            resolve: { _ in .found(Self.profile, .bundled) }, declarations: { reads += 1
                 return .success(ProjectDeclarations())
             }
         )
@@ -93,13 +95,37 @@ struct WalkBootModeTests {
         var reads = 0
         let mode = WalkBootMode.decide(
             stockRequested: false, runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-4", osVersion: "26.4",
-            profileLookup: { _ in nil }, declarations: { reads += 1
+            resolve: { _ in .none }, declarations: { reads += 1
                 return .success(ProjectDeclarations())
             }
         )
 
         #expect(mode == .stock(.noProfile(osVersion: "26.4")))
         #expect(mode.text == "stock: no service profile for iOS 26.4")
+        #expect(reads == 0)
+    }
+
+    /// The line names where the profile came from: bundled, or the local file's path.
+    @Test
+    func theLineNamesTheProfilesSource() {
+        let local = URL(fileURLWithPath: "/tmp/profiles/runtime.json")
+
+        #expect(Self.decide(source: .local(local), .success(ProjectDeclarations())).text == "slim: 4 of 6 services off (iOS 27.0, profile v3, local /tmp/profiles/runtime.json), kept for the app: nothing")
+    }
+
+    /// A local profile that was refused is stock, with the file and the reason, before the declarations are read.
+    @Test
+    func aRefusedLocalProfileIsStockWithTheReason() {
+        var reads = 0
+        let mode = WalkBootMode.decide(
+            stockRequested: false, runtimeIdentifier: Self.runtime, osVersion: "27.0",
+            resolve: { _ in .unreadable(URL(fileURLWithPath: "/tmp/profiles/runtime.json"), "its runtime is other, not this") },
+            declarations: { reads += 1
+                return .success(ProjectDeclarations())
+            }
+        )
+
+        #expect(mode.text == "stock: the local profile /tmp/profiles/runtime.json was refused: its runtime is other, not this")
         #expect(reads == 0)
     }
 

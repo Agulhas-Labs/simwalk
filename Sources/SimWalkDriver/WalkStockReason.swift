@@ -8,17 +8,23 @@ public enum WalkStockReason: Sendable, Equatable {
     case requested
     /// No measured profile covers the runtime.
     case noProfile(osVersion: String)
+    /// A locally measured profile for the runtime was refused, so it is not used.
+    case profileRefused(path: String, reason: String)
     /// The app's declarations could not be read; the reason names the file.
     case unreadable(String)
     /// The app declares keys no rule maps to a capability, so what it needs is unknown.
     case unmapped([String])
+    /// `--stock` found nothing a slim walk switched off on the device, so nothing was changed.
+    case nothingToPutBack
 
     public var text: String {
         switch self {
         case .requested: "--stock"
         case let .noProfile(osVersion): "no service profile for iOS \(osVersion)"
+        case let .profileRefused(path, reason): "the local profile \(path) was refused: \(reason)"
         case let .unreadable(reason): "the app's declarations could not be read (\(reason))"
         case let .unmapped(keys): "the app declares what no rule maps (\(keys.joined(separator: ", ")))"
+        case .nothingToPutBack: "nothing to put back"
         }
     }
 }

@@ -191,12 +191,12 @@ private extension SimWalkMCPServer {
             resolvedTool = invocation.tool
             sessionStep = invocation.sessionStep
             let answer = try answering(invocation.tool, invocation.argumentVector, cancellation) { _, _ in }
-            record(tool: tool, target: target, since: started, err: nil, saving: answer.saving, step: sessionStep, verdict: sessionStep == nil ? nil : answer.verdict.line.components(separatedBy: "\n").first)
+            record(tool: tool, target: target, since: started, err: nil, saving: answer.saving, step: sessionStep, verdict: sessionStep == nil ? nil : answer.verdict.line.components(separatedBy: "\n").first, slim: answer.slim)
             guard !cancellation.isCancelled else { return }
             emit(resultID: id, text: answer.text, isError: false)
         } catch {
             let reason = String(describing: error)
-            record(tool: tool, target: target, since: started, err: reason, saving: nil, kind: .of(error) ?? Self.defaultFailureKind(for: resolvedTool), step: sessionStep)
+            record(tool: tool, target: target, since: started, err: reason, saving: nil, kind: .of(error) ?? Self.defaultFailureKind(for: resolvedTool), step: sessionStep, slim: (error as? SlimUsageCarrying)?.slimUsage)
             guard !cancellation.isCancelled else { return }
             emit(resultID: id, text: AnswerVerdict.refused(reason).line, isError: true)
         }
@@ -266,11 +266,11 @@ private extension SimWalkMCPServer {
         let thread = Thread { [self] in
             do {
                 let answer = try answering(invocation.tool, invocation.argumentVector, cancellation) { walk.started(stem: $0, progress: $1) }
-                record(tool: invocation.logName, target: target, since: started, err: nil, saving: answer.saving)
+                record(tool: invocation.logName, target: target, since: started, err: nil, saving: answer.saving, slim: answer.slim)
                 walk.end(BoundedWalk.Ended(text: answer.text, isError: false))
             } catch {
                 let reason = String(describing: error)
-                record(tool: invocation.logName, target: target, since: started, err: reason, saving: nil, kind: .of(error) ?? Self.defaultFailureKind(for: .walk))
+                record(tool: invocation.logName, target: target, since: started, err: reason, saving: nil, kind: .of(error) ?? Self.defaultFailureKind(for: .walk), slim: (error as? SlimUsageCarrying)?.slimUsage)
                 walk.end(BoundedWalk.Ended(text: AnswerVerdict.refused(reason).line, isError: true))
             }
         }
@@ -318,7 +318,7 @@ private extension SimWalkMCPServer {
     /// One log line per call, written before the response is emitted.
     ///
     /// The ordering matters one way only: a slow or failing log write can delay a response but can never corrupt one, and what is recorded is what happened rather than what was about to.
-    nonisolated func record(tool: String, target: String?, since started: ContinuousClock.Instant, err: String?, saving: ContextSaving?, kind: UsageFailureKind? = nil, step: String? = nil, verdict: String? = nil) {
+    nonisolated func record(tool: String, target: String?, since started: ContinuousClock.Instant, err: String?, saving: ContextSaving?, kind: UsageFailureKind? = nil, step: String? = nil, verdict: String? = nil, slim: SlimUsage? = nil) {
         guard let usage else { return }
         let elapsed = ContinuousClock.now - started
         usage.record(
@@ -331,7 +331,8 @@ private extension SimWalkMCPServer {
             session: session,
             kind: kind,
             step: step,
-            verdict: verdict
+            verdict: verdict,
+            slim: slim
         )
     }
 

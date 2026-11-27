@@ -56,6 +56,7 @@ public struct MCPToolInvocation: Equatable, Sendable {
                 + Self.flag("--apple-audit", "appleAudit", arguments["appleAudit"], of: tool)
                 + Self.flag("--animations", "animations", arguments["animations"], of: tool)
                 + Self.flag("--stock", "stock", arguments["stock"], of: tool)
+                + Self.flag("--slim", "slim", arguments["slim"], of: tool)
                 + Self.screenIDs(arguments["screenIDs"], of: tool)
                 + dryRun
                 + Self.flag("--verbose", "verbose", arguments["verbose"], of: tool)
